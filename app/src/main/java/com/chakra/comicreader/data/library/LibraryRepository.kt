@@ -59,6 +59,7 @@ class LibraryRepository(
     /** Copies, validates, and indexes a picked comic. Returns the new row id, or an error. */
     suspend fun importComic(
         uri: Uri,
+        isActive: () -> Boolean = { true },
         onProgress: (Float) -> Unit = {},
     ): Result<Long> = withContext(Dispatchers.IO) {
         val token = UUID.randomUUID().toString()
@@ -78,6 +79,9 @@ class LibraryRepository(
                     var copied = 0L
                     var read: Int
                     while (input.read(buf).also { read = it } >= 0) {
+                        if (!isActive()) {
+                            throw java.util.concurrent.CancellationException("Import cancelled")
+                        }
                         output.write(buf, 0, read)
                         copied += read
                         if (totalBytes > 0L) {
@@ -88,6 +92,10 @@ class LibraryRepository(
             } ?: return@withContext Result.failure(
                 UnsupportedComicException("Could not open the selected file."),
             )
+            if (!isActive()) {
+                dest.delete()
+                return@withContext Result.failure(java.util.concurrent.CancellationException("Import cancelled"))
+            }
             indexCopiedFile(dest, coversDir, token, title)
         } catch (t: Throwable) {
             Log.e(TAG, "Import failed", t)
@@ -103,6 +111,7 @@ class LibraryRepository(
 
     suspend fun importSmbComic(
         entry: SmbEntry,
+        isActive: () -> Boolean = { true },
         onProgress: (Float) -> Unit = {},
     ): Result<Long> = withContext(Dispatchers.IO) {
         val token = UUID.randomUUID().toString()
@@ -113,7 +122,11 @@ class LibraryRepository(
         val dest = File(comicsDir, "$token.$ext")
 
         try {
-            SmbClient.downloadToFile(settings, entry, dest, onProgress)
+            SmbClient.downloadToFile(settings, entry, dest, isActive, onProgress)
+            if (!isActive()) {
+                dest.delete()
+                return@withContext Result.failure(java.util.concurrent.CancellationException("Download cancelled"))
+            }
             indexCopiedFile(dest, coversDir, token, title)
         } catch (t: Throwable) {
             Log.e(TAG, "SMB import failed", t)

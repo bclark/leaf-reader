@@ -102,7 +102,6 @@ import com.chakra.comicreader.data.smb.SmbEntry
 import com.chakra.comicreader.ui.brand.ChikaWordmark
 import com.chakra.comicreader.ui.brand.LeafShape
 import com.chakra.comicreader.ui.brand.OchreBadge
-import com.chakra.comicreader.ui.brand.StarburstShape
 import com.chakra.comicreader.ui.brand.comicShadow
 import com.chakra.comicreader.ui.brand.halftone
 import com.chakra.comicreader.ui.theme.Anton
@@ -124,6 +123,16 @@ import com.chakra.comicreader.ui.theme.PaperWhiteMuted
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
+
+private fun formatBytes(bytes: Long): String {
+    return when {
+        bytes < 1024L -> "$bytes B"
+        bytes < 1024L * 1024L -> String.format(Locale.US, "%.1f KB", bytes / 1024.0)
+        bytes < 1024L * 1024L * 1024L -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
+        else -> String.format(Locale.US, "%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0))
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -141,8 +150,12 @@ fun LibraryScreen(
     val message by viewModel.message.collectAsStateWithLifecycle()
     val defaultRtl by viewModel.defaultRightToLeft.collectAsStateWithLifecycle()
     val libraryColumns by viewModel.libraryColumns.collectAsStateWithLifecycle()
+    val isEditMode by viewModel.isEditMode.collectAsStateWithLifecycle()
+    val selectedComicIds by viewModel.selectedComicIds.collectAsStateWithLifecycle()
+
     val snackbarHostState = remember { SnackbarHostState() }
     var pendingDelete by remember { mutableStateOf<ComicEntity?>(null) }
+    var showBatchDeleteDialog by remember { mutableStateOf(false) }
     var showSourceDialog by remember { mutableStateOf(false) }
 
     var isSearchOpen by rememberSaveable { mutableStateOf(false) }
@@ -150,7 +163,11 @@ fun LibraryScreen(
     val focusManager = LocalFocusManager.current
     var isSearchFocused by remember { mutableStateOf(false) }
 
-    BackHandler(enabled = isSearchOpen) {
+    BackHandler(enabled = isEditMode) {
+        viewModel.setEditMode(false)
+    }
+
+    BackHandler(enabled = isSearchOpen && !isEditMode) {
         isSearchOpen = false
         viewModel.clearSearch()
         focusManager.clearFocus()
@@ -349,265 +366,425 @@ fun LibraryScreen(
                 horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
                 verticalArrangement = Arrangement.spacedBy(verticalSpacing),
             ) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                Row(
-                    Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (searchQuery.isNotBlank()) {
-                        OchreBadge("FOUND ${comics.size} ${if (comics.size == 1) "COMIC" else "COMICS"}")
-                    } else {
-                        OchreBadge("YOUR LIBRARY")
-                    }
+                item(span = { GridItemSpan(maxLineSpan) }) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // Columns / Density toggle
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                "COLUMNS",
-                                fontFamily = Archivo,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 7.sp,
-                                color = CreamMuted,
-                            )
-                            Row(
-                                modifier = Modifier
-                                    .padding(top = 1.dp)
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(InkSoft)
-                                    .border(1.dp, Ink, RoundedCornerShape(3.dp)),
-                                horizontalArrangement = Arrangement.spacedBy(1.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                availableColumns.forEach { count ->
-                                    val isSelected = actualColumns == count
-                                    Box(
+                        if (isEditMode) {
+                            OchreBadge("${selectedComicIds.size} SELECTED")
+                        } else if (searchQuery.isNotBlank()) {
+                            OchreBadge("FOUND ${comics.size} ${if (comics.size == 1) "COMIC" else "COMICS"}")
+                        } else {
+                            OchreBadge("YOUR LIBRARY")
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (!isEditMode && comics.isNotEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(InkSoft)
+                                        .border(1.dp, Ink, RoundedCornerShape(3.dp))
+                                        .clickable { viewModel.setEditMode(true) }
+                                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        "EDIT",
+                                        fontFamily = Anton,
+                                        fontSize = 11.sp,
+                                        color = Cream,
+                                    )
+                                }
+                            } else if (isEditMode) {
+                                val allSelected = comics.isNotEmpty() && selectedComicIds.size == comics.size
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(if (allSelected) Ochre else InkSoft)
+                                        .border(1.dp, Ink, RoundedCornerShape(3.dp))
+                                        .clickable {
+                                            if (allSelected) viewModel.clearComicSelection()
+                                            else viewModel.selectAllComics(comics.map { it.id })
+                                        }
+                                        .padding(horizontal = 9.dp, vertical = 5.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        if (allSelected) "DESELECT ALL" else "SELECT ALL",
+                                        fontFamily = Anton,
+                                        fontSize = 11.sp,
+                                        color = if (allSelected) Ink else Cream,
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(Ochre)
+                                        .clickable { viewModel.setEditMode(false) }
+                                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        "DONE",
+                                        fontFamily = Anton,
+                                        fontSize = 11.sp,
+                                        color = Ink,
+                                    )
+                                }
+                            }
+
+                            if (!isEditMode) {
+                                // Columns / Density toggle
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        "COLUMNS",
+                                        fontFamily = Archivo,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 7.sp,
+                                        color = CreamMuted,
+                                    )
+                                    Row(
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(2.dp))
-                                            .background(if (isSelected) Ochre else Color.Transparent)
-                                            .clickable { viewModel.setLibraryColumns(count) }
-                                            .padding(horizontal = 7.dp, vertical = 3.5.dp),
-                                        contentAlignment = Alignment.Center,
+                                            .padding(top = 1.dp)
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(InkSoft)
+                                            .border(1.dp, Ink, RoundedCornerShape(3.dp)),
+                                        horizontalArrangement = Arrangement.spacedBy(1.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        Text(
-                                            "$count",
-                                            fontFamily = Archivo,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.5.sp,
-                                            color = if (isSelected) Ink else CreamMuted,
-                                        )
+                                        availableColumns.forEach { count ->
+                                            val isSelected = actualColumns == count
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(2.dp))
+                                                    .background(if (isSelected) Ochre else Color.Transparent)
+                                                    .clickable { viewModel.setLibraryColumns(count) }
+                                                    .padding(horizontal = 7.dp, vertical = 3.5.dp),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                Text(
+                                                    "$count",
+                                                    fontFamily = Archivo,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 11.5.sp,
+                                                    color = if (isSelected) Ink else CreamMuted,
+                                                )
+                                            }
+                                        }
                                     }
+                                }
+
+                                // Global default direction for new comics
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        "NEW COMICS OPEN",
+                                        fontFamily = Archivo,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 7.sp,
+                                        color = CreamMuted,
+                                    )
+                                    Text(
+                                        if (defaultRtl) "RTL" else "LTR",
+                                        fontFamily = Archivo,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = Ink,
+                                        modifier = Modifier
+                                            .padding(top = 1.dp)
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(Ochre)
+                                            .clickable { viewModel.toggleDefaultDirection() }
+                                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                                    )
                                 }
                             }
                         }
-
-                        // Global default direction for new comics; each comic remembers its own once opened.
-                        Column(horizontalAlignment = Alignment.End) {
+                    }
+                }
+                if (comics.isEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        if (searchQuery.isNotBlank()) {
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 36.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Text(
+                                    "NO MATCHES",
+                                    fontFamily = Anton,
+                                    fontSize = 22.sp,
+                                    color = Cream,
+                                )
+                                Text(
+                                    "No comics found matching \"$searchQuery\"",
+                                    fontFamily = Archivo,
+                                    fontSize = 13.sp,
+                                    color = CreamMuted,
+                                )
+                                Box(
+                                    Modifier
+                                        .padding(top = 6.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Ochre)
+                                        .clickable { viewModel.clearSearch() }
+                                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                                ) {
+                                    Text(
+                                        "CLEAR SEARCH",
+                                        fontFamily = Anton,
+                                        fontSize = 12.sp,
+                                        color = Ink,
+                                    )
+                                }
+                            }
+                        } else {
                             Text(
-                                "NEW COMICS OPEN",
+                                "No comics yet. Tap LOAD COMIC to add a CBZ, CBR, or PDF.",
                                 fontFamily = Archivo,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 7.sp,
+                                fontSize = 13.sp,
                                 color = CreamMuted,
-                            )
-                            Text(
-                                if (defaultRtl) "RTL" else "LTR",
-                                fontFamily = Archivo,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = Ink,
-                                modifier = Modifier
-                                    .padding(top = 1.dp)
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(Ochre)
-                                    .clickable { viewModel.toggleDefaultDirection() }
-                                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.padding(vertical = 12.dp),
                             )
                         }
                     }
                 }
-            }
-            if (comics.isEmpty()) {
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    if (searchQuery.isNotBlank()) {
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 36.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Text(
-                                "NO MATCHES",
-                                fontFamily = Anton,
-                                fontSize = 22.sp,
-                                color = Cream,
-                            )
-                            Text(
-                                "No comics found matching \"$searchQuery\"",
-                                fontFamily = Archivo,
-                                fontSize = 13.sp,
-                                color = CreamMuted,
-                            )
-                            Box(
-                                Modifier
-                                    .padding(top = 6.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Ochre)
-                                    .clickable { viewModel.clearSearch() }
-                                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                            ) {
-                                Text(
-                                    "CLEAR SEARCH",
-                                    fontFamily = Anton,
-                                    fontSize = 12.sp,
-                                    color = Ink,
-                                )
+                items(comics, key = { it.id }) { comic ->
+                    ComicCard(
+                        comic = comic,
+                        columns = actualColumns,
+                        isEditMode = isEditMode,
+                        isSelected = comic.id in selectedComicIds,
+                        onClick = {
+                            if (isEditMode) {
+                                viewModel.toggleComicSelection(comic.id)
+                            } else {
+                                onOpenComic(comic.id)
                             }
-                        }
-                    } else {
-                        Text(
-                            "No comics yet. Tap LOAD COMIC to add a CBZ, CBR, or PDF.",
-                            fontFamily = Archivo,
-                            fontSize = 13.sp,
-                            color = CreamMuted,
-                            modifier = Modifier.padding(vertical = 12.dp),
+                        },
+                        onLongClick = {
+                            if (!isEditMode) {
+                                viewModel.setEditMode(true)
+                                viewModel.toggleComicSelection(comic.id)
+                            } else {
+                                pendingDelete = comic
+                            }
+                        },
+                    )
+                }
+                if (searchQuery.isBlank() && !isEditMode) {
+                    item {
+                        AddTile(
+                            importing = importing,
+                            progress = importProgress,
+                            status = importStatus,
+                            columns = actualColumns,
+                            onClick = { if (!importing) showSourceDialog = true },
+                            onCancel = { viewModel.cancelImport() },
                         )
                     }
                 }
             }
-            items(comics, key = { it.id }) { comic ->
-                ComicCard(
-                    comic = comic,
-                    columns = actualColumns,
-                    onClick = { onOpenComic(comic.id) },
-                    onLongClick = { pendingDelete = comic },
+
+            if (!isEditMode) {
+                ExtendedFloatingActionButton(
+                    onClick = { if (!importing) showSourceDialog = true },
+                    containerColor = LeafAccent,
+                    contentColor = DeepInk,
+                    elevation = FloatingActionButtonDefaults.elevation(6.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .padding(20.dp),
+                    icon = {
+                        Icon(Icons.Default.Add, contentDescription = "Add comic", tint = DeepInk)
+                    },
+                    text = {
+                        Text(
+                            "ADD COMIC",
+                            fontFamily = Anton,
+                            fontSize = 14.sp,
+                            color = DeepInk,
+                            letterSpacing = 0.6.sp,
+                        )
+                    },
                 )
             }
-            if (searchQuery.isBlank()) {
-                item {
-                    AddTile(
-                        importing = importing,
-                        progress = importProgress,
-                        status = importStatus,
-                        columns = actualColumns,
-                        onClick = { if (!importing) showSourceDialog = true },
-                    )
-                }
-            }
-        }
 
-        ExtendedFloatingActionButton(
-            onClick = { if (!importing) showSourceDialog = true },
-            containerColor = LeafAccent,
-            contentColor = DeepInk,
-            elevation = FloatingActionButtonDefaults.elevation(6.dp),
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .navigationBarsPadding()
-                .padding(20.dp),
-            icon = {
-                Icon(Icons.Default.Add, contentDescription = "Add comic", tint = DeepInk)
-            },
-            text = {
-                Text(
-                    "ADD COMIC",
-                    fontFamily = Anton,
-                    fontSize = 14.sp,
-                    color = DeepInk,
-                    letterSpacing = 0.6.sp,
-                )
-            },
-        )
-
-        SnackbarHost(
-            snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
-        )
-    }
-}
-
-if (showSourceDialog) {
-    AlertDialog(
-        onDismissRequest = { showSourceDialog = false },
-        title = { Text("Load comic", fontFamily = Anton, color = PaperWhite) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(LeafPrimary)
-                        .clickable {
-                            showSourceDialog = false
-                            picker.launch(arrayOf("*/*"))
-                        }
-                        .padding(vertical = 12.dp, horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Text("FROM DEVICE (FILES)", fontFamily = Anton, fontSize = 14.sp, color = PaperWhite)
-                }
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(DeepInkSurface)
-                        .border(1.5.dp, LeafSecondary, RoundedCornerShape(4.dp))
-                        .clickable {
-                            showSourceDialog = false
-                            folderPicker.launch(null)
-                        }
-                        .padding(vertical = 12.dp, horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Text("FROM DEVICE (FOLDER)", fontFamily = Anton, fontSize = 14.sp, color = PaperWhite)
-                }
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(LeafAccent)
-                        .clickable {
-                            showSourceDialog = false
-                            if (viewModel.hasSmbConfig) {
-                                onOpenDrive()
-                            } else {
-                                viewModel.showMessage("Configure your SMB drive in Menu first.")
-                                onOpenMenu()
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(20.dp)
+                    .fillMaxWidth(),
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    AnimatedVisibility(
+                        visible = isEditMode && selectedComicIds.isNotEmpty(),
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically(),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .comicShadow(offset = 3.dp, color = Color(0xB3000000))
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(DeepInkSurface)
+                                .border(2.dp, ComicRose, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "${selectedComicIds.size} ${if (selectedComicIds.size == 1) "COMIC" else "COMICS"} SELECTED",
+                                        fontFamily = Anton,
+                                        fontSize = 15.sp,
+                                        color = PaperWhite,
+                                    )
+                                    Text(
+                                        text = "Tap delete to remove selected copies",
+                                        fontFamily = Archivo,
+                                        fontSize = 11.sp,
+                                        color = PaperWhiteMuted,
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(ComicRose)
+                                        .clickable { showBatchDeleteDialog = true }
+                                        .padding(horizontal = 16.dp, vertical = 9.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = "DELETE (${selectedComicIds.size})",
+                                        fontFamily = Anton,
+                                        fontSize = 13.sp,
+                                        color = PaperWhite,
+                                    )
+                                }
                             }
                         }
-                        .padding(vertical = 12.dp, horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Text("FROM SMB DRIVE", fontFamily = Anton, fontSize = 14.sp, color = DeepInk)
+                    }
                 }
             }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = { showSourceDialog = false }) { Text("CANCEL", color = PaperWhiteMuted) }
-        },
-        containerColor = DeepInkSurface,
-    )
-}
 
-pendingDelete?.let { comic ->
-    AlertDialog(
-        onDismissRequest = { pendingDelete = null },
-        title = { Text("Remove comic?", fontFamily = Anton, color = PaperWhite) },
-        text = { Text("This removes the imported copy. The original file is untouched.", color = PaperWhiteMuted) },
-        confirmButton = {
-            TextButton(onClick = { viewModel.deleteComic(comic.id); pendingDelete = null }) {
-                Text("DELETE", color = ComicRose, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("CANCEL", color = PaperWhiteMuted) } },
-        containerColor = DeepInkSurface,
-    )
-}
+            SnackbarHost(
+                snackbarHostState,
+                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
+            )
+        }
+    }
+
+    if (showSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { showSourceDialog = false },
+            title = { Text("Load comic", fontFamily = Anton, color = PaperWhite) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(LeafPrimary)
+                            .clickable {
+                                showSourceDialog = false
+                                picker.launch(arrayOf("*/*"))
+                            }
+                            .padding(vertical = 12.dp, horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Text("FROM DEVICE (FILES)", fontFamily = Anton, fontSize = 14.sp, color = PaperWhite)
+                    }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(DeepInkSurface)
+                            .border(1.5.dp, LeafSecondary, RoundedCornerShape(4.dp))
+                            .clickable {
+                                showSourceDialog = false
+                                folderPicker.launch(null)
+                            }
+                            .padding(vertical = 12.dp, horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Text("FROM DEVICE (FOLDER)", fontFamily = Anton, fontSize = 14.sp, color = PaperWhite)
+                    }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(LeafAccent)
+                            .clickable {
+                                showSourceDialog = false
+                                if (viewModel.hasSmbConfig) {
+                                    onOpenDrive()
+                                } else {
+                                    viewModel.showMessage("Configure your SMB drive in Menu first.")
+                                    onOpenMenu()
+                                }
+                            }
+                            .padding(vertical = 12.dp, horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Text("FROM SMB DRIVE", fontFamily = Anton, fontSize = 14.sp, color = DeepInk)
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showSourceDialog = false }) { Text("CANCEL", color = PaperWhiteMuted) }
+            },
+            containerColor = DeepInkSurface,
+        )
+    }
+
+    if (showBatchDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showBatchDeleteDialog = false },
+            title = { Text("Delete selected comics?", fontFamily = Anton, color = PaperWhite) },
+            text = { Text("This removes ${selectedComicIds.size} imported comic copies. Original files are untouched.", color = PaperWhiteMuted) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteSelectedComics()
+                    showBatchDeleteDialog = false
+                }) {
+                    Text("DELETE", color = ComicRose, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBatchDeleteDialog = false }) { Text("CANCEL", color = PaperWhiteMuted) }
+            },
+            containerColor = DeepInkSurface,
+        )
+    }
+
+    pendingDelete?.let { comic ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Remove comic?", fontFamily = Anton, color = PaperWhite) },
+            text = { Text("This removes the imported copy. The original file is untouched.", color = PaperWhiteMuted) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.deleteComic(comic.id); pendingDelete = null }) {
+                    Text("DELETE", color = ComicRose, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("CANCEL", color = PaperWhiteMuted) } },
+            containerColor = DeepInkSurface,
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -615,6 +792,8 @@ pendingDelete?.let { comic ->
 private fun ComicCard(
     comic: ComicEntity,
     columns: Int = 2,
+    isEditMode: Boolean = false,
+    isSelected: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
@@ -632,7 +811,11 @@ private fun ComicCard(
                 .comicShadow(offset = shadowOffset, color = Color(0xB3000000))
                 .clip(RoundedCornerShape(4.dp))
                 .background(InkSoft)
-                .border(borderWidth, Ink, RoundedCornerShape(4.dp)),
+                .border(
+                    width = if (isSelected) 3.dp else borderWidth,
+                    color = if (isSelected) Ochre else Ink,
+                    shape = RoundedCornerShape(4.dp),
+                ),
         ) {
             val cover = rememberCover(comic.coverPath)
             if (cover != null) {
@@ -640,8 +823,30 @@ private fun ComicCard(
             } else {
                 GeneratedCover(comic.title, columns = columns)
             }
-            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(progressHeight).background(Ink)) {
-                Box(Modifier.fillMaxWidth(pct).fillMaxHeight().background(Ochre))
+            if (isEditMode) {
+                Box(
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .size(24.dp)
+                        .align(Alignment.TopEnd)
+                        .clip(CircleShape)
+                        .background(if (isSelected) Ochre else DeepInk.copy(alpha = 0.8f))
+                        .border(1.5.dp, if (isSelected) Ink else PaperWhite, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isSelected) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = "Selected",
+                            tint = Ink,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            } else {
+                Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(progressHeight).background(Ink)) {
+                    Box(Modifier.fillMaxWidth(pct).fillMaxHeight().background(Ochre))
+                }
             }
         }
         Text(
@@ -700,6 +905,9 @@ fun SmbDriveScreen(
     val selectedCount = selectedPaths.size
     val totalFiles = fileEntries.size
     val allSelected = totalFiles > 0 && selectedCount == totalFiles
+    val totalSelectedBytes = remember(selectedPaths, fileEntries) {
+        fileEntries.filter { it.path in selectedPaths }.sumOf { it.sizeBytes }
+    }
 
     BackHandler(enabled = selectedCount > 0 && !importing) {
         selectedPaths = emptySet()
@@ -784,7 +992,7 @@ fun SmbDriveScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = if (selectedCount > 0) "$selectedCount OF $totalFiles SELECTED" else "$totalFiles ${if (totalFiles == 1) "COMIC" else "COMICS"}",
+                            text = if (selectedCount > 0) "$selectedCount SELECTED (${formatBytes(totalSelectedBytes)})" else "$totalFiles ${if (totalFiles == 1) "COMIC" else "COMICS"}",
                             fontFamily = Archivo,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.5.sp,
@@ -850,24 +1058,47 @@ fun SmbDriveScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Row(
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            CircularProgressIndicator(
-                                color = LeafAccent,
-                                strokeWidth = 2.5.dp,
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Text(
-                                text = importStatus?.uppercase()
-                                    ?: if (importProgress > 0f) "LOADING COMIC… ${(importProgress * 100).toInt()}%"
-                                    else "LOADING COMIC…",
-                                fontFamily = Anton,
-                                fontSize = 13.sp,
-                                color = PaperWhite,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                CircularProgressIndicator(
+                                    color = LeafAccent,
+                                    strokeWidth = 2.5.dp,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                                Text(
+                                    text = importStatus?.uppercase()
+                                        ?: if (importProgress > 0f) "DOWNLOADING… ${(importProgress * 100).toInt()}%"
+                                        else "DOWNLOADING…",
+                                    fontFamily = Anton,
+                                    fontSize = 13.sp,
+                                    color = PaperWhite,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(ComicRose.copy(alpha = 0.2f))
+                                    .border(1.dp, ComicRose, RoundedCornerShape(4.dp))
+                                    .clickable { viewModel.cancelImport() }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "CANCEL",
+                                    fontFamily = Anton,
+                                    fontSize = 11.sp,
+                                    color = ComicRose,
+                                )
+                            }
                         }
                         LinearProgressIndicator(
                             progress = { if (importProgress > 0f) importProgress else 0.05f },
@@ -896,6 +1127,7 @@ fun SmbDriveScreen(
                                     SmbRow(
                                         name = ".. (Up)",
                                         isDirectory = true,
+                                        sizeBytes = 0L,
                                         onClick = {
                                             selectedPaths = emptySet()
                                             viewModel.loadSmbDirectory(parent)
@@ -919,6 +1151,7 @@ fun SmbDriveScreen(
                                 SmbRow(
                                     name = entry.name,
                                     isDirectory = entry.isDirectory,
+                                    sizeBytes = entry.sizeBytes,
                                     isSelected = isSelected,
                                     onClick = {
                                         if (entry.isDirectory) {
@@ -966,7 +1199,7 @@ fun SmbDriveScreen(
                                     color = PaperWhite,
                                 )
                                 Text(
-                                    text = "Ready to download into your library",
+                                    text = "Total size: ${formatBytes(totalSelectedBytes)}",
                                     fontFamily = Archivo,
                                     fontSize = 11.sp,
                                     color = PaperWhiteMuted,
@@ -1013,6 +1246,7 @@ private fun AddTile(
     status: String? = null,
     columns: Int = 2,
     onClick: () -> Unit,
+    onCancel: () -> Unit,
 ) {
     val starburstSize = if (columns >= 5) 42.dp else if (columns >= 4) 50.dp else 64.dp
     val iconSize = if (columns >= 5) 18.dp else if (columns >= 4) 22.dp else 26.dp
@@ -1026,7 +1260,7 @@ private fun AddTile(
             .fillMaxWidth()
             .aspectRatio(0.7f)
             .clip(RoundedCornerShape(4.dp))
-            .combinedClickable(onClick = onClick, onLongClick = {})
+            .combinedClickable(onClick = { if (!importing) onClick() }, onLongClick = {})
             .drawBehind {
                 drawRoundRect(
                     color = PaperWhiteMuted.copy(alpha = 0.5f),
@@ -1078,6 +1312,23 @@ private fun AddTile(
                         modifier = Modifier.fillMaxWidth().height(if (columns >= 4) 4.dp else 6.dp).clip(RoundedCornerShape(3.dp)),
                     )
                 }
+                Box(
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(ComicRose.copy(alpha = 0.25f))
+                        .border(1.dp, ComicRose, RoundedCornerShape(3.dp))
+                        .clickable(onClick = onCancel)
+                        .padding(horizontal = 10.dp, vertical = 3.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "CANCEL",
+                        fontFamily = Anton,
+                        fontSize = 10.sp,
+                        color = ComicRose,
+                    )
+                }
             }
         }
     }
@@ -1087,6 +1338,7 @@ private fun AddTile(
 private fun SmbRow(
     name: String,
     isDirectory: Boolean,
+    sizeBytes: Long = 0L,
     isSelected: Boolean = false,
     onClick: () -> Unit,
 ) {
@@ -1114,16 +1366,28 @@ private fun SmbRow(
             tint = if (isDirectory) LeafAccent else if (isSelected) LeafAccent else PaperWhite,
             modifier = Modifier.size(18.dp),
         )
-        Text(
-            name,
-            fontFamily = Archivo,
-            fontWeight = if (isDirectory || isSelected) FontWeight.Bold else FontWeight.Medium,
-            fontSize = 13.sp,
-            color = PaperWhite,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        Column(
             modifier = Modifier.weight(1f),
-        )
+            verticalArrangement = Arrangement.spacedBy(1.dp),
+        ) {
+            Text(
+                name,
+                fontFamily = Archivo,
+                fontWeight = if (isDirectory || isSelected) FontWeight.Bold else FontWeight.Medium,
+                fontSize = 13.sp,
+                color = PaperWhite,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!isDirectory && sizeBytes > 0L) {
+                Text(
+                    formatBytes(sizeBytes),
+                    fontFamily = Archivo,
+                    fontSize = 11.sp,
+                    color = PaperWhiteMuted,
+                )
+            }
+        }
         if (isDirectory) {
             Icon(
                 Icons.AutoMirrored.Filled.ArrowBack,

@@ -9,18 +9,25 @@ import com.chakra.comicreader.data.db.ComicEntity
 import com.chakra.comicreader.data.library.LibraryRepository
 import com.chakra.comicreader.data.settings.AppSettings
 import com.chakra.comicreader.data.smb.SmbEntry
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class LibraryViewModel(
     private val repository: LibraryRepository,
     private val settings: AppSettings,
 ) : ViewModel() {
+
+    private var importJob: Job? = null
 
     /** Search query for filtering comics in the library. */
     private val _searchQuery = MutableStateFlow("")
@@ -64,38 +71,65 @@ class LibraryViewModel(
     private val _smbLoading = MutableStateFlow(false)
     val smbLoading: StateFlow<Boolean> = _smbLoading.asStateFlow()
 
+    private val _isEditMode = MutableStateFlow(false)
+    val isEditMode: StateFlow<Boolean> = _isEditMode.asStateFlow()
+
+    private val _selectedComicIds = MutableStateFlow(emptySet<Long>())
+    val selectedComicIds: StateFlow<Set<Long>> = _selectedComicIds.asStateFlow()
+
     val hasSmbConfig: Boolean get() = settings.hasSmbConfig
 
     fun importComic(uri: Uri) = importComics(listOf(uri))
 
     fun importComics(uris: List<Uri>) {
         if (uris.isEmpty()) return
-        viewModelScope.launch {
+        importJob?.cancel()
+        importJob = viewModelScope.launch {
+            val scope = this
             _importing.value = true
             _importProgress.value = 0f
             var importedCount = 0
             var failedCount = 0
             val total = uris.size
-            uris.forEachIndexed { index, uri ->
-                _importStatus.value = if (total > 1) "Importing ${index + 1} of $total…" else "Importing comic…"
-                val result = repository.importComic(uri) { fileProgress ->
-                    _importProgress.value = (index + fileProgress) / total
+            try {
+                uris.forEachIndexed { index, uri ->
+                    currentCoroutineContext().ensureActive()
+                    _importStatus.value = if (total > 1) "Importing ${index + 1} of $total…" else "Importing comic…"
+                    val result = repository.importComic(uri, isActive = { scope.isActive }) { fileProgress ->
+                        _importProgress.value = (index + fileProgress) / total
+                    }
+                    if (result.isSuccess) {
+                        importedCount++
+                    } else {
+                        val ex = result.exceptionOrNull()
+                        if (ex is CancellationException) throw ex
+                        failedCount++
+                    }
                 }
-                if (result.isSuccess) {
-                    importedCount++
+                _importing.value = false
+                _importProgress.value = 0f
+                _importStatus.value = null
+                if (failedCount == 0) {
+                    _message.value = if (total == 1) "Imported 1 comic." else "Imported $importedCount comics."
                 } else {
-                    failedCount++
+                    _message.value = "Imported $importedCount of $total comics ($failedCount failed)."
                 }
-            }
-            _importing.value = false
-            _importProgress.value = 0f
-            _importStatus.value = null
-            if (failedCount == 0) {
-                _message.value = if (total == 1) "Imported 1 comic." else "Imported $importedCount comics."
-            } else {
-                _message.value = "Imported $importedCount of $total comics ($failedCount failed)."
+            } catch (e: CancellationException) {
+                _importing.value = false
+                _importProgress.value = 0f
+                _importStatus.value = null
+                _message.value = "Download cancelled."
             }
         }
+    }
+
+    fun cancelImport() {
+        importJob?.cancel()
+        importJob = null
+        _importing.value = false
+        _importProgress.value = 0f
+        _importStatus.value = null
+        _message.value = "Download cancelled."
     }
 
     fun importFolder(treeUri: Uri) {
@@ -123,32 +157,45 @@ class LibraryViewModel(
 
     fun importSmbComics(entries: List<SmbEntry>, onFinished: () -> Unit = {}) {
         if (entries.isEmpty()) return
-        viewModelScope.launch {
+        importJob?.cancel()
+        importJob = viewModelScope.launch {
+            val scope = this
             _importing.value = true
             _importProgress.value = 0f
             var importedCount = 0
             var failedCount = 0
             val total = entries.size
-            entries.forEachIndexed { index, entry ->
-                _importStatus.value = if (total > 1) "Importing ${index + 1} of $total: ${entry.name}" else "Importing ${entry.name}…"
-                val result = repository.importSmbComic(entry) { fileProgress ->
-                    _importProgress.value = (index + fileProgress) / total
+            try {
+                entries.forEachIndexed { index, entry ->
+                    currentCoroutineContext().ensureActive()
+                    _importStatus.value = if (total > 1) "Importing ${index + 1} of $total: ${entry.name}" else "Importing ${entry.name}…"
+                    val result = repository.importSmbComic(entry, isActive = { scope.isActive }) { fileProgress ->
+                        _importProgress.value = (index + fileProgress) / total
+                    }
+                    if (result.isSuccess) {
+                        importedCount++
+                    } else {
+                        val ex = result.exceptionOrNull()
+                        if (ex is CancellationException) throw ex
+                        failedCount++
+                    }
                 }
-                if (result.isSuccess) {
-                    importedCount++
+                _importing.value = false
+                _importProgress.value = 0f
+                _importStatus.value = null
+                if (failedCount == 0) {
+                    _message.value = if (total == 1) "Imported 1 comic." else "Imported $importedCount comics."
                 } else {
-                    failedCount++
+                    _message.value = "Imported $importedCount of $total comics ($failedCount failed)."
                 }
+                onFinished()
+            } catch (e: CancellationException) {
+                _importing.value = false
+                _importProgress.value = 0f
+                _importStatus.value = null
+                _message.value = "Download cancelled."
+                onFinished()
             }
-            _importing.value = false
-            _importProgress.value = 0f
-            _importStatus.value = null
-            if (failedCount == 0) {
-                _message.value = if (total == 1) "Imported 1 comic." else "Imported $importedCount comics."
-            } else {
-                _message.value = "Imported $importedCount of $total comics ($failedCount failed)."
-            }
-            onFinished()
         }
     }
 
@@ -158,6 +205,39 @@ class LibraryViewModel(
 
     fun deleteComic(id: Long) {
         viewModelScope.launch { repository.deleteComic(id) }
+    }
+
+    fun setEditMode(enabled: Boolean) {
+        _isEditMode.value = enabled
+        if (!enabled) {
+            _selectedComicIds.value = emptySet()
+        }
+    }
+
+    fun toggleComicSelection(id: Long) {
+        val current = _selectedComicIds.value
+        _selectedComicIds.value = if (id in current) current - id else current + id
+    }
+
+    fun selectAllComics(ids: List<Long>) {
+        _selectedComicIds.value = ids.toSet()
+    }
+
+    fun clearComicSelection() {
+        _selectedComicIds.value = emptySet()
+    }
+
+    fun deleteSelectedComics() {
+        val ids = _selectedComicIds.value.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            ids.forEach { id ->
+                repository.deleteComic(id)
+            }
+            _selectedComicIds.value = emptySet()
+            _isEditMode.value = false
+            _message.value = "Deleted ${ids.size} comics."
+        }
     }
 
     /** Flips the global default reading direction for comics imported from now on. */

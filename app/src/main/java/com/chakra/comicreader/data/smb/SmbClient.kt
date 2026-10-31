@@ -64,6 +64,7 @@ object SmbClient {
         settings: AppSettings,
         entry: SmbEntry,
         dest: File,
+        isActive: () -> Boolean = { true },
         onProgress: (Float) -> Unit = {},
     ) {
         withShare(settings) { share, basePath ->
@@ -84,6 +85,9 @@ object SmbClient {
                         var copied = 0L
                         var read: Int
                         while (input.read(buf).also { read = it } >= 0) {
+                            if (!isActive()) {
+                                throw java.util.concurrent.CancellationException("Download cancelled")
+                            }
                             output.write(buf, 0, read)
                             copied += read
                             if (total > 0L) {
