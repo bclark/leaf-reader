@@ -2,8 +2,8 @@ import SwiftUI
 import UIKit
 import CoreText
 
-/// Leaf / Chika brand palette — kept in sync with the Android theme (Color.kt).
-enum Chika {
+/// Leaf brand palette — kept in sync with the Android theme (Color.kt).
+enum Leaf {
     // Leaf Brand Primary & Secondary
     static let leafPrimary = Color(hex: 0x1C3A27)      // Forest Primary
     static let leafPrimaryDark = Color(hex: 0x122519)  // Deep Forest
@@ -66,8 +66,8 @@ extension Color {
 struct KickerText: View {
     let text: String
     var size: CGFloat = 11
-    var color: Color = Chika.creamMuted
-    init(_ text: String, size: CGFloat = 11, color: Color = Chika.creamMuted) {
+    var color: Color = Leaf.creamMuted
+    init(_ text: String, size: CGFloat = 11, color: Color = Leaf.creamMuted) {
         self.text = text; self.size = size; self.color = color
     }
     var body: some View {

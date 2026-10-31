@@ -1,8 +1,8 @@
-# XcodeGen spec for the Chika iOS app. The Xcode project is generated, not committed:
+# XcodeGen spec for the Leaf iOS app. The Xcode project is generated, not committed:
 #   xcodegen generate --spec iosApp/project.yml --project iosApp
 # The Kotlin :shared framework is built by a pre-build script phase (and explicitly in CI), so
 # opening the generated project in Xcode "just works" as long as a JDK is on PATH.
-name: Chika
+name: Leaf
 options:
   bundleIdPrefix: com.chakra
   deploymentTarget:
@@ -33,7 +33,7 @@ packages:
     exactVersion: "1.0.0"
 
 targets:
-  Chika:
+  Leaf:
     type: application
     platform: iOS
     sources:
@@ -110,7 +110,7 @@ targets:
         OTHER_LDFLAGS:
           - "$(inherited)"
           - "-framework"
-          - "ChikaShared"
+          - "LeafShared"
     preBuildScripts:
       - name: Build Kotlin shared framework
         script: |
@@ -123,10 +123,10 @@ targets:
         basedOnDependencyAnalysis: false
 
 schemes:
-  Chika:
+  Leaf:
     build:
       targets:
-        Chika: all
+        Leaf: all
     run:
       config: Debug
     archive:

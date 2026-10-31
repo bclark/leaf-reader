@@ -6,11 +6,11 @@ private struct OpenComic: Identifiable {
     var id: String { url.absoluteString }
 }
 
-/// The Chika library — pulp-comic identity matching the Android design: ink ground with a halftone
+/// The Leaf library — pulp-comic identity matching the Android design: ink ground with a halftone
 /// wash, the three-panel mark + CHI·KA wordmark, an ochre "YOUR LIBRARY" badge, and a configurable
 /// grid of comic cards with issue tags and Anton titles.
 struct LibraryView: View {
-    @EnvironmentObject private var settings: ChikaSettings
+    @EnvironmentObject private var settings: LeafSettings
     @StateObject private var library = LibraryStore()
     @State private var showPicker = false
     @State private var showMenu = false
@@ -58,9 +58,9 @@ struct LibraryView: View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 settings.ground.ignoresSafeArea()
-                Halftone(color: Chika.crimson, alpha: 0.05).ignoresSafeArea()
+                Halftone(color: Leaf.crimson, alpha: 0.05).ignoresSafeArea()
                 // Decorative action-burst behind the header (Android LibraryScreen).
-                StarburstShape().fill(Chika.crimson.opacity(0.14))
+                StarburstShape().fill(Leaf.crimson.opacity(0.14))
                     .frame(width: 180, height: 180)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     .padding(.top, 10)
@@ -133,10 +133,10 @@ struct LibraryView: View {
         }
     }
 
-    /// QA hook: when launched with the CHIKA_DEBUG_OPEN env var, auto-open that comic.
+    /// QA hook: when launched with the LEAF_DEBUG_OPEN env var, auto-open that comic.
     private func autoOpenIfDebug() {
         guard openComic == nil,
-              let target = ChikaDebug.env("CHIKA_DEBUG_OPEN"),
+              let target = LeafDebug.env("LEAF_DEBUG_OPEN"),
               !library.comics.isEmpty else { return }
         let match = Int(target).flatMap { library.comics.indices.contains($0) ? library.comics[$0] : nil }
             ?? library.comics.first { $0.lastPathComponent.localizedCaseInsensitiveContains(target) }
@@ -154,7 +154,7 @@ struct LibraryView: View {
     private var appBar: some View {
         VStack(spacing: 10) {
             HStack(alignment: .center) {
-                ChikaWordmark()
+                LeafWordmark()
                 Spacer()
                 HStack(spacing: 8) {
                     Button {
@@ -167,9 +167,9 @@ struct LibraryView: View {
                     } label: {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(isSearchOpen ? Chika.ink : Chika.paperWhite)
+                            .foregroundColor(isSearchOpen ? Leaf.ink : Leaf.paperWhite)
                             .frame(width: 36, height: 36)
-                            .background(isSearchOpen ? Chika.ochre : Chika.paperWhite.opacity(0.14))
+                            .background(isSearchOpen ? Leaf.ochre : Leaf.paperWhite.opacity(0.14))
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
@@ -177,9 +177,9 @@ struct LibraryView: View {
                     Button { showMenu = true } label: {
                         Image(systemName: "line.3.horizontal")
                             .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(Chika.paperWhite)
+                            .foregroundColor(Leaf.paperWhite)
                             .frame(width: 36, height: 36)
-                            .background(Chika.paperWhite.opacity(0.14))
+                            .background(Leaf.paperWhite.opacity(0.14))
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
@@ -190,29 +190,29 @@ struct LibraryView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(searchQuery.isEmpty ? Chika.creamMuted : Chika.ochre)
+                        .foregroundColor(searchQuery.isEmpty ? Leaf.creamMuted : Leaf.ochre)
                     TextField("SEARCH COMICS BY TITLE…", text: $searchQuery)
                         .font(.archivo(13, weight: 600))
-                        .foregroundColor(Chika.paperWhite)
-                        .tint(Chika.ochre)
+                        .foregroundColor(Leaf.paperWhite)
+                        .tint(Leaf.ochre)
                         .textInputAutocapitalization(.characters)
                         .disableAutocorrection(true)
                     if !searchQuery.isEmpty {
                         Button { searchQuery = "" } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 16))
-                                .foregroundColor(Chika.paperWhite.opacity(0.6))
+                                .foregroundColor(Leaf.paperWhite.opacity(0.6))
                         }
                         .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
-                .background(Chika.deepInkSurface)
+                .background(Leaf.deepInkSurface)
                 .clipShape(RoundedCornerShape(cornerRadius: 6))
                 .overlay(
                     RoundedCornerShape(cornerRadius: 6)
-                        .stroke(!searchQuery.isEmpty ? Chika.ochre : Chika.deepInk, lineWidth: 2)
+                        .stroke(!searchQuery.isEmpty ? Leaf.ochre : Leaf.deepInk, lineWidth: 2)
                 )
                 .comicShadow(offset: 3, color: .black.opacity(0.70), corner: 6)
                 .transition(.move(edge: .top).combined(with: .opacity))
@@ -245,12 +245,12 @@ struct LibraryView: View {
                     } label: {
                         Text("EDIT")
                             .font(.anton(11))
-                            .foregroundColor(Chika.cream)
+                            .foregroundColor(Leaf.cream)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(Chika.inkSoft)
+                            .background(Leaf.inkSoft)
                             .clipShape(RoundedCornerShape(cornerRadius: 3))
-                            .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Chika.ink, lineWidth: 1))
+                            .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.ink, lineWidth: 1))
                     }
                     .buttonStyle(.plain)
                 } else if isEditMode {
@@ -266,12 +266,12 @@ struct LibraryView: View {
                     } label: {
                         Text(allSelected ? "DESELECT ALL" : "SELECT ALL")
                             .font(.anton(11))
-                            .foregroundColor(allSelected ? Chika.ink : Chika.cream)
+                            .foregroundColor(allSelected ? Leaf.ink : Leaf.cream)
                             .padding(.horizontal, 9)
                             .padding(.vertical, 5)
-                            .background(allSelected ? Chika.ochre : Chika.inkSoft)
+                            .background(allSelected ? Leaf.ochre : Leaf.inkSoft)
                             .clipShape(RoundedCornerShape(cornerRadius: 3))
-                            .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Chika.ink, lineWidth: 1))
+                            .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.ink, lineWidth: 1))
                     }
                     .buttonStyle(.plain)
 
@@ -283,10 +283,10 @@ struct LibraryView: View {
                     } label: {
                         Text("DONE")
                             .font(.anton(11))
-                            .foregroundColor(Chika.ink)
+                            .foregroundColor(Leaf.ink)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(Chika.ochre)
+                            .background(Leaf.ochre)
                             .clipShape(RoundedCornerShape(cornerRadius: 3))
                     }
                     .buttonStyle(.plain)
@@ -297,7 +297,7 @@ struct LibraryView: View {
                     VStack(alignment: .trailing, spacing: 1) {
                         Text("COLUMNS")
                             .font(.archivo(7, weight: 600))
-                            .foregroundColor(Chika.creamMuted)
+                            .foregroundColor(Leaf.creamMuted)
                         HStack(spacing: 1) {
                             ForEach(availableColumns(for: width), id: \.self) { count in
                                 let isSelected = actualColumns(for: width) == count
@@ -308,19 +308,19 @@ struct LibraryView: View {
                                 } label: {
                                     Text("\(count)")
                                         .font(.archivo(11.5, weight: 700))
-                                        .foregroundColor(isSelected ? Chika.ink : Chika.creamMuted)
+                                        .foregroundColor(isSelected ? Leaf.ink : Leaf.creamMuted)
                                         .padding(.horizontal, 7)
                                         .padding(.vertical, 3.5)
-                                        .background(isSelected ? Chika.ochre : Color.clear)
+                                        .background(isSelected ? Leaf.ochre : Color.clear)
                                         .clipShape(RoundedCornerShape(cornerRadius: 2))
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
                         .padding(1)
-                        .background(Chika.inkSoft)
+                        .background(Leaf.inkSoft)
                         .clipShape(RoundedCornerShape(cornerRadius: 3))
-                        .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Chika.ink, lineWidth: 1))
+                        .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.ink, lineWidth: 1))
                     }
 
                     // Global default direction for new comics
@@ -331,13 +331,13 @@ struct LibraryView: View {
                         VStack(alignment: .trailing, spacing: 1) {
                             Text("NEW COMICS OPEN")
                                 .font(.archivo(7, weight: 600))
-                                .foregroundColor(Chika.creamMuted)
+                                .foregroundColor(Leaf.creamMuted)
                             Text(defaultRTL ? "RTL" : "LTR")
                                 .font(.archivo(12, weight: 700))
-                                .foregroundColor(Chika.ink)
+                                .foregroundColor(Leaf.ink)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 4)
-                                .background(Chika.ochre)
+                                .background(Leaf.ochre)
                                 .clipShape(RoundedCornerShape(cornerRadius: 3))
                         }
                     }
@@ -364,17 +364,17 @@ struct LibraryView: View {
                     VStack(spacing: 12) {
                         Text("No comics matching “\(searchQuery)”")
                             .font(.archivo(13))
-                            .foregroundColor(Chika.creamMuted)
+                            .foregroundColor(Leaf.creamMuted)
                             .padding(.top, 36)
                         Button {
                             searchQuery = ""
                         } label: {
                             Text("CLEAR SEARCH")
                                 .font(.anton(12))
-                                .foregroundColor(Chika.ink)
+                                .foregroundColor(Leaf.ink)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 6)
-                                .background(Chika.ochre)
+                                .background(Leaf.ochre)
                                 .clipShape(RoundedCornerShape(cornerRadius: 3))
                         }
                         .buttonStyle(.plain)
@@ -383,7 +383,7 @@ struct LibraryView: View {
                     .padding(.top, 20)
                 } else if library.comics.isEmpty {
                     Text("No comics yet. Tap LOAD COMIC to add a CBZ, CBR, or PDF.")
-                        .font(.archivo(13)).foregroundColor(Chika.creamMuted)
+                        .font(.archivo(13)).foregroundColor(Leaf.creamMuted)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 18).padding(.vertical, 12)
                 }
@@ -450,10 +450,10 @@ struct LibraryView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(selectedComics.count) \(selectedComics.count == 1 ? "COMIC" : "COMICS") SELECTED")
                     .font(.anton(15))
-                    .foregroundColor(Chika.paperWhite)
+                    .foregroundColor(Leaf.paperWhite)
                 Text("Tap delete to remove selected copies")
                     .font(.archivo(11))
-                    .foregroundColor(Chika.creamMuted)
+                    .foregroundColor(Leaf.creamMuted)
             }
             Spacer()
             Button {
@@ -461,10 +461,10 @@ struct LibraryView: View {
             } label: {
                 Text("DELETE (\(selectedComics.count))")
                     .font(.anton(13))
-                    .foregroundColor(Chika.paperWhite)
+                    .foregroundColor(Leaf.paperWhite)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 9)
-                    .background(selectedComics.isEmpty ? Chika.crimson.opacity(0.5) : Chika.crimson)
+                    .background(selectedComics.isEmpty ? Leaf.crimson.opacity(0.5) : Leaf.crimson)
                     .clipShape(RoundedCornerShape(cornerRadius: 4))
             }
             .buttonStyle(.plain)
@@ -472,9 +472,9 @@ struct LibraryView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
-        .background(Chika.deepInkSurface.ignoresSafeArea(edges: [.bottom, .horizontal]))
+        .background(Leaf.deepInkSurface.ignoresSafeArea(edges: [.bottom, .horizontal]))
         .overlay(
-            Rectangle().frame(height: 1).foregroundColor(Chika.ink),
+            Rectangle().frame(height: 1).foregroundColor(Leaf.ink),
             alignment: .top
         )
         .shadow(color: .black.opacity(0.4), radius: 6, y: -2)
@@ -518,13 +518,13 @@ struct ComicCard: View {
                 if isEditMode {
                     ZStack {
                         Circle()
-                            .fill(isSelected ? Chika.ochre : Chika.deepInk.opacity(0.80))
+                            .fill(isSelected ? Leaf.ochre : Leaf.deepInk.opacity(0.80))
                             .frame(width: 24, height: 24)
-                            .overlay(Circle().stroke(isSelected ? Chika.ink : Chika.paperWhite, lineWidth: 1.5))
+                            .overlay(Circle().stroke(isSelected ? Leaf.ink : Leaf.paperWhite, lineWidth: 1.5))
                         if isSelected {
                             Image(systemName: "checkmark")
                                 .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(Chika.ink)
+                                .foregroundColor(Leaf.ink)
                         }
                     }
                     .padding(8)
@@ -534,31 +534,31 @@ struct ComicCard: View {
                 // Progress bar inside the cover's bottom edge — always shown (0% when unstarted).
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        Chika.ink
-                        Chika.ochre.frame(width: geo.size.width * CGFloat(pct))
+                        Leaf.ink
+                        Leaf.ochre.frame(width: geo.size.width * CGFloat(pct))
                     }
                 }
                 .frame(height: columns >= 4 ? 5 : 7)
             }
             .aspectRatio(0.7, contentMode: .fit)
             .frame(maxHeight: 430)
-            .background(Chika.inkSoft)
+            .background(Leaf.inkSoft)
             .clipShape(RoundedCornerShape(cornerRadius: 4))
             .overlay(
                 RoundedCornerShape(cornerRadius: 4)
-                    .stroke(isSelected ? Chika.ochre : Chika.ink, lineWidth: isSelected ? 3 : (columns >= 4 ? 2 : 3))
+                    .stroke(isSelected ? Leaf.ochre : Leaf.ink, lineWidth: isSelected ? 3 : (columns >= 4 ? 2 : 3))
             )
             .comicShadow(offset: columns >= 4 ? 3 : 5, color: .black.opacity(0.70), corner: 4)
 
             Text(title)
-                .font(.archivo(columns >= 4 ? 10 : 12, weight: 800)).foregroundColor(Chika.cream)
+                .font(.archivo(columns >= 4 ? 10 : 12, weight: 800)).foregroundColor(Leaf.cream)
                 .lineLimit(2).multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, columns >= 4 ? 6 : 9)
             Text(started
                  ? "\(Int(pct * 100))% · pg \(lastPage + 1)/\(pageCount)"
                  : "\(pageCount) pages")
-                .font(.archivo(columns >= 4 ? 8.5 : 9.5)).foregroundColor(Chika.creamMuted)
+                .font(.archivo(columns >= 4 ? 8.5 : 9.5)).foregroundColor(Leaf.creamMuted)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 2)
         }
@@ -585,9 +585,9 @@ struct GeneratedCover: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            Chika.inkSoft
-            Halftone(color: Chika.leafPrimary, alpha: 0.18)
-            Text(title).font(.anton(fontSize)).foregroundColor(Chika.cream).padding(columns >= 4 ? 8 : 12)
+            Leaf.inkSoft
+            Halftone(color: Leaf.leafPrimary, alpha: 0.18)
+            Text(title).font(.anton(fontSize)).foregroundColor(Leaf.cream).padding(columns >= 4 ? 8 : 12)
         }
     }
 }
@@ -608,22 +608,22 @@ struct AddTile: View {
         Button(action: onTap) {
             VStack(spacing: columns >= 4 ? 8 : 12) {
                 ZStack {
-                    LeafShape().fill(Chika.ochre).frame(width: leafSize, height: leafSize)
+                    LeafShape().fill(Leaf.ochre).frame(width: leafSize, height: leafSize)
                     if importing {
-                        ProgressView().tint(Chika.ink)
+                        ProgressView().tint(Leaf.ink)
                     } else {
-                        Image(systemName: "plus").font(.system(size: iconSize, weight: .bold)).foregroundColor(Chika.ink)
+                        Image(systemName: "plus").font(.system(size: iconSize, weight: .bold)).foregroundColor(Leaf.ink)
                     }
                 }
-                Text("LOAD COMIC").font(.anton(titleSize)).foregroundColor(Chika.cream)
+                Text("LOAD COMIC").font(.anton(titleSize)).foregroundColor(Leaf.cream)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .aspectRatio(0.7, contentMode: .fit)
             .frame(maxHeight: 430)
-            .halftone(color: Chika.ochre, alpha: 0.10)
+            .halftone(color: Leaf.ochre, alpha: 0.10)
             .overlay(
                 RoundedCornerShape(cornerRadius: 4)
-                    .stroke(Chika.creamMuted, style: StrokeStyle(lineWidth: strokeWidth, dash: [14, 10]))
+                    .stroke(Leaf.creamMuted, style: StrokeStyle(lineWidth: strokeWidth, dash: [14, 10]))
             )
             .clipShape(RoundedCornerShape(cornerRadius: 4))
         }

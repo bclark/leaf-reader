@@ -18,12 +18,19 @@ struct Progress: Codable, Equatable {
 /// hasn't explicitly toggled yet — the global half of "remembered per comic + a global default",
 /// matching Android's behaviour.
 enum ReadingPrefs {
-    private static let directionKey = "chika.readingDirection.default.rtl"
-    private static let fillKey = "chika.zoomFill"
+    private static let directionKey = "leaf.readingDirection.default.rtl"
+    private static let fillKey = "leaf.zoomFill"
+    private static let legacyDirectionKey = "chika.readingDirection.default.rtl"
+    private static let legacyFillKey = "chika.zoomFill"
     private static let defaults = UserDefaults.standard
 
     static var defaultRightToLeft: Bool {
-        get { defaults.bool(forKey: directionKey) }
+        get {
+            if defaults.object(forKey: directionKey) != nil {
+                return defaults.bool(forKey: directionKey)
+            }
+            return defaults.bool(forKey: legacyDirectionKey)
+        }
         set { defaults.set(newValue, forKey: directionKey) }
     }
 
@@ -31,20 +38,33 @@ enum ReadingPrefs {
     /// 0.98 is the cross-platform default; the reader lets the user cycle this for taste.
     static let fillLevels: [Float] = [0.86, 0.92, 0.98, 1.0]
     static var zoomFill: Float {
-        get { let v = defaults.float(forKey: fillKey); return v == 0 ? 0.98 : v }
+        get {
+            let v = defaults.float(forKey: fillKey)
+            if v != 0 { return v }
+            let legacyV = defaults.float(forKey: legacyFillKey)
+            return legacyV == 0 ? 0.98 : legacyV
+        }
         set { defaults.set(newValue, forKey: fillKey) }
     }
 }
 
 enum ReadingProgress {
-    private static let key = "chika.progress.v1"
-    private static let openedKey = "chika.lastOpened.v1"
+    private static let key = "leaf.progress.v1"
+    private static let openedKey = "leaf.lastOpened.v1"
+    private static let legacyKey = "chika.progress.v1"
+    private static let legacyOpenedKey = "chika.lastOpened.v1"
     private static let defaults = UserDefaults.standard
 
     private static func load() -> [String: Progress] {
-        guard let data = defaults.data(forKey: key),
-              let map = try? JSONDecoder().decode([String: Progress].self, from: data) else { return [:] }
-        return map
+        if let data = defaults.data(forKey: key),
+           let map = try? JSONDecoder().decode([String: Progress].self, from: data) {
+            return map
+        }
+        if let legacyData = defaults.data(forKey: legacyKey),
+           let map = try? JSONDecoder().decode([String: Progress].self, from: legacyData) {
+            return map
+        }
+        return [:]
     }
 
     private static func save(_ map: [String: Progress]) {
@@ -84,9 +104,15 @@ enum ReadingProgress {
     static func openedAt(_ url: URL) -> Double { openedMap()[url.lastPathComponent] ?? 0 }
 
     private static func openedMap() -> [String: Double] {
-        guard let data = defaults.data(forKey: openedKey),
-              let map = try? JSONDecoder().decode([String: Double].self, from: data) else { return [:] }
-        return map
+        if let data = defaults.data(forKey: openedKey),
+           let map = try? JSONDecoder().decode([String: Double].self, from: data) {
+            return map
+        }
+        if let legacyData = defaults.data(forKey: legacyOpenedKey),
+           let map = try? JSONDecoder().decode([String: Double].self, from: legacyData) {
+            return map
+        }
+        return [:]
     }
 
     private static func saveOpened(_ map: [String: Double]) {

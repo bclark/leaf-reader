@@ -2,7 +2,7 @@ name: Sim Check
 
 # Visual verification for the iOS reader: build the app once, then screenshot the reader across a
 # device matrix (big phone / small phone / current flagship / iPad) in both reading directions,
-# using the CHIKA_DEBUG_* hooks on a synthetic test comic (iosApp/ci/SyntheticManga.cbz — generated
+# using the LEAF_DEBUG_* hooks on a synthetic test comic (iosApp/ci/SyntheticManga.cbz — generated
 # art, no copyrighted content). Screenshots upload as artifacts for inspection.
 on:
   push:
@@ -42,7 +42,7 @@ jobs:
 
       - name: Build app (simulator)
         run: |
-          xcodebuild -workspace iosApp/Chika.xcworkspace -scheme Chika -configuration Debug \
+          xcodebuild -workspace iosApp/Leaf.xcworkspace -scheme Leaf -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath iosApp/build ARCHS=arm64 \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
@@ -50,8 +50,8 @@ jobs:
       - name: Upload app bundle
         uses: actions/upload-artifact@v4
         with:
-          name: chika-sim-app
-          path: iosApp/build/Build/Products/Debug-iphonesimulator/Chika.app
+          name: leaf-sim-app
+          path: iosApp/build/Build/Products/Debug-iphonesimulator/Leaf.app
           if-no-files-found: error
 
   matrix:
@@ -79,8 +79,8 @@ jobs:
       - name: Download app bundle
         uses: actions/download-artifact@v4
         with:
-          name: chika-sim-app
-          path: Chika.app
+          name: leaf-sim-app
+          path: Leaf.app
 
       - name: Boot simulator
         id: sim
@@ -93,7 +93,7 @@ jobs:
       - name: Install app and seed test comic
         run: |
           DEVICE='${{ steps.sim.outputs.device }}'
-          xcrun simctl install "$DEVICE" Chika.app
+          xcrun simctl install "$DEVICE" Leaf.app
           CONT=$(xcrun simctl get_app_container "$DEVICE" com.chakra.comicreader data)
           mkdir -p "$CONT/Documents/Comics"
           cp iosApp/ci/SyntheticManga.cbz "$CONT/Documents/Comics/"
@@ -101,10 +101,10 @@ jobs:
       - name: Screenshot RTL panel 1
         run: |
           DEVICE='${{ steps.sim.outputs.device }}'
-          SIMCTL_CHILD_CHIKA_DEBUG_OPEN=Synthetic \
-          SIMCTL_CHILD_CHIKA_DEBUG_PAGE=0 \
-          SIMCTL_CHILD_CHIKA_DEBUG_STEP=0 \
-          SIMCTL_CHILD_CHIKA_DEBUG_RTL=1 \
+          SIMCTL_CHILD_LEAF_DEBUG_OPEN=Synthetic \
+          SIMCTL_CHILD_LEAF_DEBUG_PAGE=0 \
+          SIMCTL_CHILD_LEAF_DEBUG_STEP=0 \
+          SIMCTL_CHILD_LEAF_DEBUG_RTL=1 \
             xcrun simctl launch "$DEVICE" com.chakra.comicreader
           sleep 20
           xcrun simctl io "$DEVICE" screenshot "${{ matrix.label }}-rtl-panel1.png"
@@ -118,10 +118,10 @@ jobs:
             sleep 1
           done
           sleep 2
-          SIMCTL_CHILD_CHIKA_DEBUG_OPEN=Synthetic \
-          SIMCTL_CHILD_CHIKA_DEBUG_PAGE=0 \
-          SIMCTL_CHILD_CHIKA_DEBUG_STEP=0 \
-          SIMCTL_CHILD_CHIKA_DEBUG_RTL=0 \
+          SIMCTL_CHILD_LEAF_DEBUG_OPEN=Synthetic \
+          SIMCTL_CHILD_LEAF_DEBUG_PAGE=0 \
+          SIMCTL_CHILD_LEAF_DEBUG_STEP=0 \
+          SIMCTL_CHILD_LEAF_DEBUG_RTL=0 \
             xcrun simctl launch "$DEVICE" com.chakra.comicreader
           sleep 20
           xcrun simctl io "$DEVICE" screenshot "${{ matrix.label }}-ltr-panel1.png"

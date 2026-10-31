@@ -50,7 +50,7 @@ import androidx.compose.ui.unit.sp
 import com.chakra.comicreader.data.settings.AppSettings
 import com.chakra.comicreader.data.smb.SmbClient
 import androidx.compose.material3.Surface
-import com.chakra.comicreader.ui.brand.ChikaWordmark
+import com.chakra.comicreader.ui.brand.LeafWordmark
 import com.chakra.comicreader.ui.brand.OchreBadge
 import com.chakra.comicreader.ui.brand.comicShadow
 import com.chakra.comicreader.ui.brand.halftone
@@ -398,7 +398,7 @@ fun MenuScreen(
             // ---- About ---------------------------------------------------------------
             SectionLabel("ABOUT")
             Spacer(Modifier.size(16.dp))
-            ChikaWordmark()
+            LeafWordmark()
             Spacer(Modifier.size(12.dp))
             OchreBadge("VERSION $version")
             Spacer(Modifier.size(14.dp))

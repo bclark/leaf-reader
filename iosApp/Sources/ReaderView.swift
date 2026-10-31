@@ -1,7 +1,7 @@
 import SwiftUI
-import ChikaShared
+import LeafShared
 
-/// Panel-by-panel CBZ reader with Chika chrome: a branded header (back + title + issue), reticle
+/// Panel-by-panel CBZ reader with Leaf chrome: a branded header (back + title + issue), reticle
 /// brackets framing the page, the starburst page coin, and a "tap to step" hint — matching the
 /// Android reader. Tapping the right side steps page → panel 1 → … → next page; the left side steps
 /// back; panels come from the on-device Core ML detector via the shared decoder + planner, and the
@@ -16,8 +16,8 @@ struct ReaderView: View {
     }
 
     private static let detector = LiteRTPanelDetector()
-    private static let ioQueue = DispatchQueue(label: "chika.reader.io", qos: .userInitiated)
-    private static let detectQueue = DispatchQueue(label: "chika.reader.detect", qos: .userInitiated)
+    private static let ioQueue = DispatchQueue(label: "leaf.reader.io", qos: .userInitiated)
+    private static let detectQueue = DispatchQueue(label: "leaf.reader.detect", qos: .userInitiated)
 
     // Flick tuning ported from Android's ReaderScreen: a page turn needs a genuine horizontal flick
     // (velocity, not distance), biased against vertical drags, so a slow reposition doesn't turn.
@@ -31,7 +31,7 @@ struct ReaderView: View {
     private static let cameraTween = Animation.timingCurve(0.4, 0, 0.2, 1, duration: 0.36)
 
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var settings: ChikaSettings
+    @EnvironmentObject private var settings: LeafSettings
     @State private var state: LoadState = .loading
     @State private var page = 0
     @State private var pageCount = 1
@@ -84,11 +84,11 @@ struct ReaderView: View {
             settings.ground.ignoresSafeArea()
             switch state {
             case .loading:
-                ProgressView().tint(Chika.ochre)
+                ProgressView().tint(Leaf.ochre)
             case .failed(let message):
                 VStack(spacing: 10) {
-                    Image(systemName: "exclamationmark.triangle").foregroundColor(Chika.ochre)
-                    Text(message).font(.archivo(14)).foregroundColor(Chika.cream)
+                    Image(systemName: "exclamationmark.triangle").foregroundColor(Leaf.ochre)
+                    Text(message).font(.archivo(14)).foregroundColor(Leaf.cream)
                         .multilineTextAlignment(.center)
                 }
                 .padding()
@@ -123,20 +123,20 @@ struct ReaderView: View {
             // Reading direction: this comic's saved choice, or the global default if never set.
             rightToLeft = ReadingProgress.readingDirection(comicURL)
             // QA hook: force a direction at launch (never set in production).
-            if let r = ChikaDebug.env("CHIKA_DEBUG_RTL") { rightToLeft = (r == "1") }
+            if let r = LeafDebug.env("LEAF_DEBUG_RTL") { rightToLeft = (r == "1") }
             // Resume where we left off (page and panel), clamped to the current page count.
             if let saved = ReadingProgress.get(comicURL) {
                 page = min(max(saved.page, 0), pageCount - 1)
             }
             // QA hook: jump straight to a page (never set in production).
-            if let p = ChikaDebug.env("CHIKA_DEBUG_PAGE"), let pi = Int(p) {
+            if let p = LeafDebug.env("LEAF_DEBUG_PAGE"), let pi = Int(p) {
                 page = min(max(pi, 0), pageCount - 1)
             }
             state = .ready(loader)
             ReadingProgress.markOpened(comicURL)   // bump recency so it sorts to the top of the library
             // QA hook: start on a specific panel index (never set in production).
             var restore = ReadingProgress.get(comicURL)?.step ?? -1
-            if let s = ChikaDebug.env("CHIKA_DEBUG_STEP"), let si = Int(s) { restore = si }
+            if let s = LeafDebug.env("LEAF_DEBUG_STEP"), let si = Int(s) { restore = si }
             loadPage(loader, restoreStep: restore)
         } catch {
             state = .failed("Could not open archive: \(error.localizedDescription)")
@@ -307,10 +307,10 @@ struct ReaderView: View {
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         .clipped()
-        .overlay { if image == nil { ProgressView().tint(Chika.ochre) } }
+        .overlay { if image == nil { ProgressView().tint(Leaf.ochre) } }
         // Reticle framing brackets — only shown in Panel by Panel mode
         .overlay { if image != nil && !settings.pageSlideEnabled {
-            Reticle(color: Chika.crimson.opacity(0.45), inset: 6, length: 16, stroke: 2).padding(6)
+            Reticle(color: Leaf.crimson.opacity(0.45), inset: 6, length: 16, stroke: 2).padding(6)
         } }
         // Gesture layer: interactive page slide in Page Flip mode, panel zoom/pan in guided mode
         .overlay {
@@ -359,14 +359,14 @@ struct ReaderView: View {
             Button { dismiss() } label: {
                 Image(systemName: "arrow.left")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(Chika.cream)
+                    .foregroundColor(Leaf.cream)
                     .frame(width: 38, height: 38)
-                    .background(Chika.cream.opacity(0.12))
+                    .background(Leaf.cream.opacity(0.12))
                     .clipShape(Circle())
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.archivo(14, weight: 800)).foregroundColor(Chika.cream).lineLimit(1)
-                Text(pageStatus).font(.archivo(9)).tracking(1.4).foregroundColor(Chika.creamMuted)
+                Text(title).font(.archivo(14, weight: 800)).foregroundColor(Leaf.cream).lineLimit(1)
+                Text(pageStatus).font(.archivo(9)).tracking(1.4).foregroundColor(Leaf.creamMuted)
             }
             Spacer()
             DirectionChip(rightToLeft: rightToLeft) {
@@ -377,7 +377,7 @@ struct ReaderView: View {
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 18)
         .frame(maxWidth: .infinity)
-        .background(LinearGradient(colors: [Chika.leafPrimary.opacity(0.98), Chika.leafPrimary.opacity(0.88), .clear],
+        .background(LinearGradient(colors: [Leaf.leafPrimary.opacity(0.98), Leaf.leafPrimary.opacity(0.88), .clear],
                                    startPoint: .top, endPoint: .bottom)
             .ignoresSafeArea(edges: [.top, .horizontal]))
     }
@@ -398,15 +398,15 @@ struct ReaderView: View {
                     HStack(spacing: 6) {
                         Image(systemName: settings.pageSlideEnabled ? "book.fill" : "viewfinder")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(Chika.ochre)
+                            .foregroundColor(Leaf.ochre)
                         Text(settings.pageSlideEnabled ? "PAGE FLIP" : "PANEL BY PANEL")
                             .font(.anton(11))
                             .tracking(1)
-                            .foregroundColor(Chika.cream)
+                            .foregroundColor(Leaf.cream)
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Chika.leafPrimary.opacity(0.9))
+                    .background(Leaf.leafPrimary.opacity(0.9))
                     .clipShape(RoundedCornerShape(cornerRadius: 12))
                 }
                 .buttonStyle(.plain)
@@ -431,7 +431,7 @@ struct ReaderView: View {
         .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 12)
         .frame(maxWidth: .infinity)
         // The scrubber sits in the safe area; only its scrim bleeds down behind the home indicator.
-        .background(LinearGradient(colors: [.clear, Chika.inkSoft.opacity(0.98)],
+        .background(LinearGradient(colors: [.clear, Leaf.inkSoft.opacity(0.98)],
                                    startPoint: .top, endPoint: .bottom)
             .ignoresSafeArea(edges: [.bottom, .horizontal]))
         // Keep the scrubber in sync with programmatic page changes (taps/flicks) while not scrubbing.
@@ -662,12 +662,12 @@ struct DirectionChip: View {
         Button(action: onTap) {
             HStack(spacing: 5) {
                 Image(systemName: "arrow.left.arrow.right")
-                    .font(.system(size: 15, weight: .semibold)).foregroundColor(Chika.cream)
+                    .font(.system(size: 15, weight: .semibold)).foregroundColor(Leaf.cream)
                 Text(rightToLeft ? "RTL" : "LTR")
-                    .font(.archivo(11, weight: 700)).tracking(1).foregroundColor(Chika.cream)
+                    .font(.archivo(11, weight: 700)).tracking(1).foregroundColor(Leaf.cream)
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(Chika.cream.opacity(0.12))
+            .background(Leaf.cream.opacity(0.12))
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -690,19 +690,19 @@ struct ComicScrubberSlider: View {
             ZStack(alignment: .leading) {
                 // Inactive track
                 Capsule()
-                    .fill(Chika.cream.opacity(0.20))
+                    .fill(Leaf.cream.opacity(0.20))
                     .frame(height: 4)
 
                 // Active track
                 Capsule()
-                    .fill(Chika.ochre)
+                    .fill(Leaf.ochre)
                     .frame(width: max(w * CGFloat(fraction), 0), height: 4)
 
                 // Thumb: Ochre gold circle with dark ink border and subtle comic shadow
                 Circle()
-                    .fill(Chika.ochre)
+                    .fill(Leaf.ochre)
                     .frame(width: 16, height: 16)
-                    .overlay(Circle().stroke(Chika.ink, lineWidth: 2))
+                    .overlay(Circle().stroke(Leaf.ink, lineWidth: 2))
                     .comicShadow(offset: 1.5, color: .black.opacity(0.4), corner: 8)
                     .offset(x: max(0, min(w - 16, w * CGFloat(fraction) - 8)))
             }

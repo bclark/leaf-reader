@@ -76,7 +76,7 @@ Platform-independent logic is organized in `:shared`, a Kotlin Multiplatform mod
   ui/theme       Leaf brand palette (Forest Green, Sage, Gold Accent, Deep Ink, Paper White) + Anton/Archivo type
 
 iosApp (Native iOS SwiftUI)
-  Sources/       SwiftUI views (ReaderView, LibraryView, MenuView) backed by ChikaShared framework
+  Sources/       SwiftUI views (ReaderView, LibraryView, MenuView) backed by LeafShared framework
 ```
 
 **Technology Stack:**

@@ -1,10 +1,13 @@
 import SwiftUI
 
 /// App-wide UI settings, persisted in UserDefaults — the iOS counterpart to Android's AppSettings.
-final class ChikaSettings: ObservableObject {
-    private static let amoledKey = "chika.amoledTheme"
-    private static let pageSlideKey = "chika.pageSlideEnabled"
-    private static let libraryColumnsKey = "chika.libraryColumns"
+final class LeafSettings: ObservableObject {
+    private static let amoledKey = "leaf.amoledTheme"
+    private static let pageSlideKey = "leaf.pageSlideEnabled"
+    private static let libraryColumnsKey = "leaf.libraryColumns"
+    private static let legacyAmoledKey = "chika.amoledTheme"
+    private static let legacyPageSlideKey = "chika.pageSlideEnabled"
+    private static let legacyLibraryColumnsKey = "chika.libraryColumns"
     private let defaults = UserDefaults.standard
 
     @Published var amoled: Bool {
@@ -22,15 +25,26 @@ final class ChikaSettings: ObservableObject {
     }
 
     init() {
-        amoled = defaults.bool(forKey: Self.amoledKey)
+        if defaults.object(forKey: Self.amoledKey) != nil {
+            amoled = defaults.bool(forKey: Self.amoledKey)
+        } else {
+            amoled = defaults.bool(forKey: Self.legacyAmoledKey)
+        }
+
         // Default pageSlideEnabled to true if not set yet (matching Android's default)
         if defaults.object(forKey: Self.pageSlideKey) != nil {
             pageSlideEnabled = defaults.bool(forKey: Self.pageSlideKey)
+        } else if defaults.object(forKey: Self.legacyPageSlideKey) != nil {
+            pageSlideEnabled = defaults.bool(forKey: Self.legacyPageSlideKey)
         } else {
             pageSlideEnabled = true
         }
+
         if defaults.object(forKey: Self.libraryColumnsKey) != nil {
             let cols = defaults.integer(forKey: Self.libraryColumnsKey)
+            libraryColumns = cols > 0 ? cols : 2
+        } else if defaults.object(forKey: Self.legacyLibraryColumnsKey) != nil {
+            let cols = defaults.integer(forKey: Self.legacyLibraryColumnsKey)
             libraryColumns = cols > 0 ? cols : 2
         } else {
             // Adaptive default: wide displays (Duo / iPad / landscape) look best with 3 or 4 columns
@@ -41,8 +55,8 @@ final class ChikaSettings: ObservableObject {
     }
 
     /// Full-screen ground: true black in AMOLED, brand ink otherwise.
-    var ground: Color { amoled ? .black : Chika.ink }
+    var ground: Color { amoled ? .black : Leaf.ink }
 
     /// Soft raised surface (rows, chips): near-black in AMOLED, brand ink-soft otherwise.
-    var groundSoft: Color { amoled ? Color(hex: 0x101010) : Chika.inkSoft }
+    var groundSoft: Color { amoled ? Color(hex: 0x101010) : Leaf.inkSoft }
 }

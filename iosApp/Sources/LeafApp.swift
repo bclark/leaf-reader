@@ -1,8 +1,8 @@
 import SwiftUI
 
 @main
-struct ChikaApp: App {
-    @StateObject private var settings = ChikaSettings()
+struct LeafApp: App {
+    @StateObject private var settings = LeafSettings()
 
     var body: some Scene {
         WindowGroup {

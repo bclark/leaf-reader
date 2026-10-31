@@ -45,7 +45,7 @@ private val LeafAmoledColorScheme = LeafColorScheme.copy(
 fun ComicReaderTheme(amoled: Boolean = false, content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = if (amoled) LeafAmoledColorScheme else LeafColorScheme,
-        typography = ChikaTypography,
+        typography = LeafTypography,
         content = content,
     )
 }
