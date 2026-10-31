@@ -29,8 +29,15 @@ final class ChikaSettings: ObservableObject {
         } else {
             pageSlideEnabled = true
         }
-        let cols = defaults.integer(forKey: Self.libraryColumnsKey)
-        libraryColumns = cols > 0 ? cols : 2
+        if defaults.object(forKey: Self.libraryColumnsKey) != nil {
+            let cols = defaults.integer(forKey: Self.libraryColumnsKey)
+            libraryColumns = cols > 0 ? cols : 2
+        } else {
+            // Adaptive default: wide displays (Duo / iPad / landscape) look best with 3 or 4 columns
+            let screen = UIScreen.main.bounds
+            let isWide = max(screen.width, screen.height) >= 800 || min(screen.width, screen.height) >= 600
+            libraryColumns = isWide ? 4 : 2
+        }
     }
 
     /// Full-screen ground: true black in AMOLED, brand ink otherwise.

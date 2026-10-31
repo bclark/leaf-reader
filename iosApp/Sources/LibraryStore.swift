@@ -96,6 +96,14 @@ final class LibraryStore: ObservableObject {
         refresh()
     }
 
+    func deleteBatch(_ urls: Set<URL>) {
+        for url in urls {
+            try? FileManager.default.removeItem(at: url)
+            ReadingProgress.clear(url)
+        }
+        refresh()
+    }
+
     /// The first few bytes of [url] as a Kotlin byte array, for shared magic-byte format detection.
     /// Returns empty (→ extension fallback) if the file can't be read.
     private static func leadingBytes(of url: URL, count: Int = 8) -> KotlinByteArray {
