@@ -9,12 +9,16 @@ import com.chakra.comicreader.data.db.ComicEntity
 import com.chakra.comicreader.data.library.LibraryRepository
 import com.chakra.comicreader.data.settings.AppSettings
 import com.chakra.comicreader.data.smb.SmbEntry
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class LibraryViewModel(
@@ -43,6 +47,8 @@ class LibraryViewModel(
     private val _libraryColumns = MutableStateFlow(settings.libraryColumns)
     val libraryColumns: StateFlow<Int> = _libraryColumns.asStateFlow()
 
+    private var importJob: Job? = null
+
     private val _importing = MutableStateFlow(false)
     val importing: StateFlow<Boolean> = _importing.asStateFlow()
 
@@ -51,6 +57,9 @@ class LibraryViewModel(
 
     private val _importStatus = MutableStateFlow<String?>(null)
     val importStatus: StateFlow<String?> = _importStatus.asStateFlow()
+
+    private val _importDetail = MutableStateFlow<String?>(null)
+    val importDetail: StateFlow<String?> = _importDetail.asStateFlow()
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
@@ -66,34 +75,73 @@ class LibraryViewModel(
 
     val hasSmbConfig: Boolean get() = settings.hasSmbConfig
 
+    fun cancelImport() {
+        importJob?.cancel()
+        importJob = null
+        _importing.value = false
+        _importProgress.value = 0f
+        _importStatus.value = null
+        _importDetail.value = null
+        _message.value = "Import cancelled."
+    }
+
     fun importComic(uri: Uri) = importComics(listOf(uri))
 
     fun importComics(uris: List<Uri>) {
         if (uris.isEmpty()) return
-        viewModelScope.launch {
+        importJob?.cancel()
+        importJob = viewModelScope.launch(Dispatchers.IO) {
             _importing.value = true
             _importProgress.value = 0f
+            _importDetail.value = null
             var importedCount = 0
             var failedCount = 0
+            var wasCancelled = false
             val total = uris.size
-            uris.forEachIndexed { index, uri ->
-                _importStatus.value = if (total > 1) "Importing ${index + 1} of $total…" else "Importing comic…"
-                val result = repository.importComic(uri) { fileProgress ->
-                    _importProgress.value = (index + fileProgress) / total
+
+            try {
+                for ((index, uri) in uris.withIndex()) {
+                    if (!isActive) {
+                        wasCancelled = true
+                        break
+                    }
+                    _importStatus.value = if (total > 1) "Importing ${index + 1} of $total…" else "Importing comic…"
+                    val result = repository.importComic(
+                        uri = uri,
+                        onProgress = { fileProgress ->
+                            val overall = (index + fileProgress) / total
+                            _importProgress.value = overall
+                            val pct = (overall * 100).toInt().coerceIn(0, 100)
+                            _importDetail.value = "$pct% completed"
+                        },
+                        isCancelled = { !isActive },
+                    )
+                    if (result.isSuccess) {
+                        importedCount++
+                    } else {
+                        if (!isActive) {
+                            wasCancelled = true
+                            break
+                        }
+                        failedCount++
+                    }
                 }
-                if (result.isSuccess) {
-                    importedCount++
+            } catch (e: CancellationException) {
+                wasCancelled = true
+            } finally {
+                _importing.value = false
+                _importProgress.value = 0f
+                _importStatus.value = null
+                _importDetail.value = null
+                if (wasCancelled) {
+                    _message.value = "Import cancelled."
                 } else {
-                    failedCount++
+                    if (failedCount == 0) {
+                        _message.value = if (total == 1) "Imported 1 comic." else "Imported $importedCount comics."
+                    } else {
+                        _message.value = "Imported $importedCount of $total comics ($failedCount failed)."
+                    }
                 }
-            }
-            _importing.value = false
-            _importProgress.value = 0f
-            _importStatus.value = null
-            if (failedCount == 0) {
-                _message.value = if (total == 1) "Imported 1 comic." else "Imported $importedCount comics."
-            } else {
-                _message.value = "Imported $importedCount of $total comics ($failedCount failed)."
             }
         }
     }
@@ -123,35 +171,73 @@ class LibraryViewModel(
 
     fun importSmbComics(entries: List<SmbEntry>, onFinished: () -> Unit = {}) {
         if (entries.isEmpty()) return
-        viewModelScope.launch {
+        importJob?.cancel()
+        importJob = viewModelScope.launch(Dispatchers.IO) {
             _importing.value = true
             _importProgress.value = 0f
+            _importDetail.value = "Connecting to drive…"
             var importedCount = 0
             var failedCount = 0
+            var wasCancelled = false
             val total = entries.size
-            entries.forEachIndexed { index, entry ->
-                val baseStatus = if (total > 1) "Importing ${index + 1} of $total: ${entry.name}" else "Importing ${entry.name}"
-                _importStatus.value = "$baseStatus…"
-                val result = repository.importSmbComic(entry) { transfer ->
-                    _importProgress.value = (index + transfer.fraction) / total
-                    val speedText = formatSpeed(transfer.bytesPerSec)
-                    _importStatus.value = if (speedText.isNotEmpty()) "$baseStatus ($speedText)" else "$baseStatus…"
+
+            try {
+                for ((index, entry) in entries.withIndex()) {
+                    if (!isActive) {
+                        wasCancelled = true
+                        break
+                    }
+                    val baseStatus = if (total > 1) "Importing ${index + 1} of $total: ${entry.name}" else "Importing ${entry.name}"
+                    _importStatus.value = baseStatus
+
+                    val result = repository.importSmbComic(
+                        entry = entry,
+                        onProgress = { transfer ->
+                            val overall = (index + transfer.fraction) / total
+                            _importProgress.value = overall
+                            val speedText = formatSpeed(transfer.bytesPerSec)
+                            val bytesText = if (transfer.totalBytes > 0L) {
+                                "${formatFileSize(transfer.bytesTransferred)} / ${formatFileSize(transfer.totalBytes)}"
+                            } else if (transfer.bytesTransferred > 0L) {
+                                "${formatFileSize(transfer.bytesTransferred)} downloaded"
+                            } else ""
+                            _importDetail.value = when {
+                                bytesText.isNotEmpty() && speedText.isNotEmpty() -> "$bytesText · $speedText"
+                                bytesText.isNotEmpty() -> bytesText
+                                speedText.isNotEmpty() -> speedText
+                                else -> null
+                            }
+                        },
+                        isCancelled = { !isActive },
+                    )
+                    if (result.isSuccess) {
+                        importedCount++
+                    } else {
+                        if (!isActive) {
+                            wasCancelled = true
+                            break
+                        }
+                        failedCount++
+                    }
                 }
-                if (result.isSuccess) {
-                    importedCount++
+            } catch (e: CancellationException) {
+                wasCancelled = true
+            } finally {
+                _importing.value = false
+                _importProgress.value = 0f
+                _importStatus.value = null
+                _importDetail.value = null
+                if (wasCancelled) {
+                    _message.value = "Import cancelled."
                 } else {
-                    failedCount++
+                    if (failedCount == 0) {
+                        _message.value = if (total == 1) "Imported 1 comic." else "Imported $importedCount comics."
+                    } else {
+                        _message.value = "Imported $importedCount of $total comics ($failedCount failed)."
+                    }
+                    onFinished()
                 }
             }
-            _importing.value = false
-            _importProgress.value = 0f
-            _importStatus.value = null
-            if (failedCount == 0) {
-                _message.value = if (total == 1) "Imported 1 comic." else "Imported $importedCount comics."
-            } else {
-                _message.value = "Imported $importedCount of $total comics ($failedCount failed)."
-            }
-            onFinished()
         }
     }
 
@@ -192,6 +278,14 @@ class LibraryViewModel(
         bytesPerSec >= 1024 * 1024 -> String.format(java.util.Locale.US, "%.1f MB/s", bytesPerSec / (1024f * 1024f))
         bytesPerSec >= 1024 -> String.format(java.util.Locale.US, "%.0f KB/s", bytesPerSec / 1024f)
         else -> "$bytesPerSec B/s"
+    }
+
+    private fun formatFileSize(bytes: Long): String = when {
+        bytes <= 0L -> ""
+        bytes >= 1024L * 1024L * 1024L -> String.format(java.util.Locale.US, "%.1f GB", bytes / (1024f * 1024f * 1024f))
+        bytes >= 1024L * 1024L -> String.format(java.util.Locale.US, "%.1f MB", bytes / (1024f * 1024f))
+        bytes >= 1024L -> String.format(java.util.Locale.US, "%.0f KB", bytes / 1024f)
+        else -> "$bytes B"
     }
 
     companion object {

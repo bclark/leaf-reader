@@ -148,6 +148,7 @@ fun LibraryScreen(
     val importing by viewModel.importing.collectAsStateWithLifecycle()
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
     val importStatus by viewModel.importStatus.collectAsStateWithLifecycle()
+    val importDetail by viewModel.importDetail.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val defaultRtl by viewModel.defaultRightToLeft.collectAsStateWithLifecycle()
     val libraryColumns by viewModel.libraryColumns.collectAsStateWithLifecycle()
@@ -159,6 +160,10 @@ fun LibraryScreen(
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     var isSearchFocused by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = importing) {
+        viewModel.cancelImport()
+    }
 
     BackHandler(enabled = isSearchOpen) {
         isSearchOpen = false
@@ -503,8 +508,10 @@ fun LibraryScreen(
                         importing = importing,
                         progress = importProgress,
                         status = importStatus,
+                        detail = importDetail,
                         columns = actualColumns,
                         onClick = { if (!importing) showSourceDialog = true },
+                        onCancel = { viewModel.cancelImport() },
                     )
                 }
             }
@@ -739,6 +746,7 @@ fun SmbDriveScreen(
     val importing by viewModel.importing.collectAsStateWithLifecycle()
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
     val importStatus by viewModel.importStatus.collectAsStateWithLifecycle()
+    val importDetail by viewModel.importDetail.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -748,7 +756,11 @@ fun SmbDriveScreen(
     val totalFiles = fileEntries.size
     val allSelected = totalFiles > 0 && selectedCount == totalFiles
 
-    BackHandler(enabled = selectedCount > 0 && !importing) {
+    BackHandler(enabled = importing) {
+        viewModel.cancelImport()
+    }
+
+    BackHandler(enabled = !importing && selectedCount > 0) {
         selectedPaths = emptySet()
     }
 
@@ -779,7 +791,9 @@ fun SmbDriveScreen(
                         .clip(CircleShape)
                         .background(PaperWhite.copy(alpha = 0.14f))
                         .clickable {
-                            if (selectedCount > 0) {
+                            if (importing) {
+                                viewModel.cancelImport()
+                            } else if (selectedCount > 0) {
                                 selectedPaths = emptySet()
                             } else if (path.isNotEmpty()) {
                                 viewModel.loadSmbDirectory(path.substringBeforeLast('\\', ""))
@@ -887,41 +901,114 @@ fun SmbDriveScreen(
                 Spacer(Modifier.size(12.dp))
 
                 if (importing) {
+                    val pct = (importProgress * 100).toInt().coerceIn(0, 100)
                     Column(
                         Modifier
                             .fillMaxWidth()
+                            .comicShadow(offset = 3.dp, color = Color(0xB3000000))
                             .clip(RoundedCornerShape(6.dp))
                             .background(DeepInkSurface)
                             .border(2.dp, LeafAccent, RoundedCornerShape(6.dp))
-                            .padding(16.dp),
+                            .padding(14.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Row(
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            CircularProgressIndicator(
-                                color = LeafAccent,
-                                strokeWidth = 2.5.dp,
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Text(
-                                text = importStatus?.uppercase()
-                                    ?: if (importProgress > 0f) "LOADING COMIC… ${(importProgress * 100).toInt()}%"
-                                    else "LOADING COMIC…",
-                                fontFamily = Anton,
-                                fontSize = 13.sp,
-                                color = PaperWhite,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                CircularProgressIndicator(
+                                    color = LeafAccent,
+                                    strokeWidth = 2.5.dp,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Text(
+                                    text = importStatus?.uppercase() ?: "DOWNLOADING COMIC…",
+                                    fontFamily = Anton,
+                                    fontSize = 13.sp,
+                                    color = PaperWhite,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .padding(start = 8.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(LeafPrimary)
+                                    .border(1.dp, LeafAccent, RoundedCornerShape(3.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            ) {
+                                Text(
+                                    text = "$pct%",
+                                    fontFamily = Anton,
+                                    fontSize = 13.sp,
+                                    color = LeafAccent,
+                                    letterSpacing = 0.5.sp,
+                                )
+                            }
                         }
+
                         LinearProgressIndicator(
                             progress = { if (importProgress > 0f) importProgress else 0.05f },
                             color = LeafAccent,
                             trackColor = DeepInk,
-                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(7.dp)
+                                .clip(RoundedCornerShape(3.5.dp)),
                         )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = importDetail ?: if (importProgress > 0f) "$pct% completed" else "Connecting…",
+                                fontFamily = Archivo,
+                                fontSize = 11.5.sp,
+                                color = PaperWhiteMuted,
+                                modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+
+                            // Cancel button below the progress bar
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(DeepInk)
+                                    .border(1.dp, ComicRose, RoundedCornerShape(4.dp))
+                                    .clickable { viewModel.cancelImport() }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Cancel import",
+                                        tint = ComicRose,
+                                        modifier = Modifier.size(12.dp),
+                                    )
+                                    Text(
+                                        text = "CANCEL",
+                                        fontFamily = Anton,
+                                        fontSize = 11.sp,
+                                        color = ComicRose,
+                                        letterSpacing = 0.5.sp,
+                                    )
+                                }
+                            }
+                        }
                     }
                     Spacer(Modifier.size(12.dp))
                 }
@@ -1064,8 +1151,10 @@ private fun AddTile(
     importing: Boolean,
     progress: Float,
     status: String? = null,
+    detail: String? = null,
     columns: Int = 2,
     onClick: () -> Unit,
+    onCancel: () -> Unit = {},
 ) {
     val starburstSize = if (columns >= 5) 42.dp else if (columns >= 4) 50.dp else 64.dp
     val iconSize = if (columns >= 5) 18.dp else if (columns >= 4) 22.dp else 26.dp
@@ -1073,6 +1162,7 @@ private fun AddTile(
     val spacing = if (columns >= 4) 6.dp else 10.dp
     val contentPadding = if (columns >= 4) 8.dp else 16.dp
     val strokeWidth = if (columns >= 4) 2.dp else 3.dp
+    val pct = (progress * 100).toInt().coerceIn(0, 100)
 
     Box(
         Modifier
@@ -1106,10 +1196,11 @@ private fun AddTile(
                 else Icon(Icons.Default.Add, contentDescription = "Load comic", tint = DeepInk, modifier = Modifier.size(iconSize))
             }
             Text(
-                if (importing && status != null) status.uppercase()
-                else if (importing && progress > 0f) "LOADING ${(progress * 100).toInt()}%"
-                else if (importing) "LOADING…"
-                else "LOAD COMIC",
+                if (importing) {
+                    if (status != null) "$pct% · $status".uppercase()
+                    else if (progress > 0f) "LOADING $pct%"
+                    else "LOADING…"
+                } else "LOAD COMIC",
                 fontFamily = Anton,
                 fontSize = fontSize,
                 color = PaperWhite,
@@ -1117,18 +1208,38 @@ private fun AddTile(
                 textAlign = TextAlign.Center,
             )
             if (importing) {
-                if (progress > 0f) {
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        color = LeafAccent,
-                        trackColor = DeepInk,
-                        modifier = Modifier.fillMaxWidth().height(if (columns >= 4) 4.dp else 6.dp).clip(RoundedCornerShape(3.dp)),
+                LinearProgressIndicator(
+                    progress = { if (progress > 0f) progress else 0.05f },
+                    color = LeafAccent,
+                    trackColor = DeepInk,
+                    modifier = Modifier.fillMaxWidth().height(if (columns >= 4) 4.dp else 6.dp).clip(RoundedCornerShape(3.dp)),
+                )
+                if (detail != null) {
+                    Text(
+                        detail,
+                        fontFamily = Archivo,
+                        fontSize = if (columns >= 4) 8.sp else 9.5.sp,
+                        color = PaperWhiteMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
                     )
-                } else {
-                    LinearProgressIndicator(
-                        color = LeafAccent,
-                        trackColor = DeepInk,
-                        modifier = Modifier.fillMaxWidth().height(if (columns >= 4) 4.dp else 6.dp).clip(RoundedCornerShape(3.dp)),
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(DeepInk)
+                        .border(1.dp, ComicRose, RoundedCornerShape(3.dp))
+                        .clickable { onCancel() }
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "CANCEL",
+                        fontFamily = Anton,
+                        fontSize = if (columns >= 4) 9.sp else 10.5.sp,
+                        color = ComicRose,
+                        letterSpacing = 0.5.sp,
                     )
                 }
             }

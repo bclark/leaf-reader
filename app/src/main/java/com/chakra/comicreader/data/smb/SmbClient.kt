@@ -77,6 +77,7 @@ object SmbClient {
         entry: SmbEntry,
         dest: File,
         onProgress: (SmbTransferProgress) -> Unit = {},
+        isCancelled: () -> Boolean = { false },
     ) {
         withShare(settings) { share, basePath ->
             val fullPath = joinPath(basePath, entry.path)
@@ -89,12 +90,13 @@ object SmbClient {
                 null,
             ).use { remoteFile ->
                 val total = entry.sizeBytes.takeIf { it > 0L }
-                    ?: runCatching { remoteFile.fileInformation.standardInformation.endOfFile }.getOrDefault(0L)
+                    ?: runCatching { remoteFile.fileInformation.standardInformation.endOfFile }.getOrNull()?.takeIf { it > 0L }
+                    ?: runCatching { share.getFileInformation(fullPath).standardInformation.endOfFile }.getOrDefault(0L)
                 remoteFile.inputStream.use { input ->
                     BufferedOutputStream(FileOutputStream(dest), 1024 * 1024).use { output ->
                         val buf = ByteArray(1024 * 1024)
                         var copied = 0L
-                        var read: Int
+                        var read = 0
                         var lastReportTime = System.currentTimeMillis()
                         var lastReportBytes = 0L
                         var currentSpeed = 0L
@@ -102,12 +104,15 @@ object SmbClient {
                         // Initial report
                         onProgress(SmbTransferProgress(0f, 0L, total, 0L))
 
-                        while (input.read(buf).also { read = it } >= 0) {
+                        while (!isCancelled() && input.read(buf).also { read = it } >= 0) {
+                            if (isCancelled()) {
+                                throw kotlinx.coroutines.CancellationException("Transfer cancelled")
+                            }
                             output.write(buf, 0, read)
                             copied += read
                             val now = System.currentTimeMillis()
                             val elapsed = now - lastReportTime
-                            if (elapsed >= 250) {
+                            if (elapsed >= 150) {
                                 val bytesDelta = copied - lastReportBytes
                                 currentSpeed = (bytesDelta * 1000L) / elapsed
                                 lastReportTime = now
@@ -115,6 +120,9 @@ object SmbClient {
                                 val fraction = if (total > 0L) (copied.toFloat() / total).coerceIn(0f, 1f) else 0f
                                 onProgress(SmbTransferProgress(fraction, copied, total, currentSpeed))
                             }
+                        }
+                        if (isCancelled()) {
+                            throw kotlinx.coroutines.CancellationException("Transfer cancelled")
                         }
                         val finalFraction = if (total > 0L) 1f else 0f
                         onProgress(SmbTransferProgress(finalFraction, copied, total, currentSpeed))
