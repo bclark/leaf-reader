@@ -220,9 +220,9 @@ struct LibraryView: View {
         }
         .padding(.horizontal, 18)
         .padding(.top, 10)
-        .padding(.bottom, 12)
+        .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
-        .background(Chika.leafPrimary.ignoresSafeArea(edges: [.top, .horizontal]))
+        .background(Color.clear)
     }
 
     // Subheader row: badge on left, Edit / Columns / Reading Direction toggles on right.
