@@ -36,6 +36,10 @@ struct ReaderView: View {
     @State private var page = 0
     @State private var pageCount = 1
     @State private var image: UIImage?
+    @State private var nextImage: UIImage?
+    @State private var prevImage: UIImage?
+    @State private var slideOffset: CGFloat = 0
+    @State private var isTurning = false
     @State private var regions: [Panel] = [Panel.companion.FULL_PAGE]
     @State private var step = -1
     @State private var detecting = false
@@ -161,9 +165,13 @@ struct ReaderView: View {
         let target = page
         Self.ioQueue.async {
             let img = loader.loadPage(target) // downsampled + LRU-cached
+            let next = (target + 1 < loader.pageCount) ? loader.loadPage(target + 1) : nil
+            let prev = (target > 0) ? loader.loadPage(target - 1) : nil
             DispatchQueue.main.async {
                 guard token == self.loadToken else { return } // a newer load superseded this one
                 self.image = img
+                self.nextImage = next
+                self.prevImage = prev
                 withAnimation(.easeOut(duration: 0.28)) { self.pageAlpha = 1 }
                 if let cached = self.panelCache[target] {
                     withAnimation(Self.cameraTween) {   // land on the restored slot with the camera tween
@@ -171,7 +179,7 @@ struct ReaderView: View {
                         // Keep intro (-1) / outro (count) as whole-page; clamp only strays past the outro.
                         if self.step > cached.count { self.step = cached.count }
                     }
-                } else {
+                } else if !self.settings.pageSlideEnabled {
                     self.redetect()
                 }
                 self.prefetch(target + 1, loader)
@@ -238,10 +246,51 @@ struct ReaderView: View {
     private func readerBody(_ loader: PageLoader, size: CGSize) -> some View {
         // `size` is the true full screen (from the GeometryReader that ignores the safe area), so
         // the page is framed in the exact origin-0 full-screen container the sim/Android assume.
-        // The page is a plain Image carried by one animatable transform (CameraFraming) that runs
-        // the shared computePageDraw per frame — so stepping between panels TWEENS the camera the
-        // way Android's Animatable camera does (a Canvas can't animate; it jump-cuts).
         ZStack(alignment: .topLeading) {
+            // Incoming adjacent page sliding in when actively dragging / flipping in Page Flip mode
+            if settings.pageSlideEnabled && slideOffset != 0 {
+                if slideOffset < 0 {
+                    // Sliding left: incoming page is from the right edge
+                    let incoming = rightToLeft ? prevImage : nextImage
+                    if let incoming, let cg = incoming.cgImage {
+                        Image(uiImage: incoming)
+                            .resizable()
+                            .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
+                            .modifier(CameraFraming(
+                                camL: 0, camT: 0, camR: 1, camB: 1,
+                                zoom: 1, panX: size.width + slideOffset, panY: 0,
+                                container: size))
+                    }
+                } else if slideOffset > 0 {
+                    // Sliding right: incoming page is from the left edge
+                    let incoming = rightToLeft ? nextImage : prevImage
+                    if let incoming, let cg = incoming.cgImage {
+                        Image(uiImage: incoming)
+                            .resizable()
+                            .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
+                            .modifier(CameraFraming(
+                                camL: 0, camT: 0, camR: 1, camB: 1,
+                                zoom: 1, panX: -size.width + slideOffset, panY: 0,
+                                container: size))
+                    }
+                }
+
+                // Shadow separator along the sliding seam
+                let dividerX = (slideOffset < 0) ? (size.width + slideOffset) : slideOffset
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.black.opacity(0.40), .clear],
+                            startPoint: (slideOffset < 0) ? .leading : .trailing,
+                            endPoint: (slideOffset < 0) ? .trailing : .leading
+                        )
+                    )
+                    .frame(width: 24, height: size.height)
+                    .position(x: (slideOffset < 0) ? (dividerX + 12) : (dividerX - 12), y: size.height / 2)
+                    .allowsHitTesting(false)
+            }
+
+            // Current page
             if let image, let cg = image.cgImage {
                 Image(uiImage: image)
                     .resizable()
@@ -249,37 +298,48 @@ struct ReaderView: View {
                     .modifier(CameraFraming(
                         camL: CGFloat(camera.left), camT: CGFloat(camera.top),
                         camR: CGFloat(camera.right), camB: CGFloat(camera.bottom),
-                        zoom: zoom, panX: pan.width, panY: pan.height,
+                        zoom: zoom,
+                        panX: (settings.pageSlideEnabled && zoom <= 1.01) ? slideOffset : pan.width,
+                        panY: pan.height,
                         container: size))
                     .opacity(pageAlpha)
             }
         }
-        // topLeading alignment is load-bearing: the bitmap-sized Image makes the ZStack oversized,
-        // and a default (.center) frame alignment would shift the image's local origin — the
-        // CameraFraming transform assumes local (0,0) sits at the container's top-left corner.
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         .clipped()
         .overlay { if image == nil { ProgressView().tint(Chika.ochre) } }
-        // Reticle framing brackets — always drawn while reading (independent of chrome), crimson.
-        .overlay { if image != nil {
+        // Reticle framing brackets — only shown in Panel by Panel mode
+        .overlay { if image != nil && !settings.pageSlideEnabled {
             Reticle(color: Chika.crimson.opacity(0.45), inset: 6, length: 16, stroke: 2).padding(6)
         } }
-        // UIKit gesture layer: pinch to zoom (1×–5×), pan when zoomed, tap zones, double-tap to
-        // jump back to the whole page, and a velocity flick to turn pages — all recognized
-        // simultaneously.
+        // Gesture layer: interactive page slide in Page Flip mode, panel zoom/pan in guided mode
         .overlay {
             ReaderGestures(
                 onTap: { location, sz in tapZone(x: location.x, width: sz.width, in: loader) },
                 onDoubleTap: { showWholePage() },
-                onPinchChanged: { scale in zoom = min(max(steadyZoom * scale, 1), 5) },
+                onPinchChanged: { scale in
+                    if !isTurning {
+                        zoom = min(max(steadyZoom * scale, 1), 5)
+                    }
+                },
                 onPinchEnded: { if zoom <= 1.01 { resetZoom() } else { steadyZoom = zoom } },
                 onPanChanged: { t in
-                    // The comic floats over the background, clamped so it can't be lost off-screen.
-                    let raw = CGSize(width: steadyPan.width + t.width, height: steadyPan.height + t.height)
-                    pan = clampPan(raw, viewSize: size)
+                    if settings.pageSlideEnabled && zoom <= 1.01 {
+                        guard !isTurning else { return }
+                        let isAtLeadingBound = (!rightToLeft && page <= 0) || (rightToLeft && page >= pageCount - 1)
+                        let isAtTrailingBound = (!rightToLeft && page >= pageCount - 1) || (rightToLeft && page <= 0)
+                        if (t.width > 0 && isAtLeadingBound) || (t.width < 0 && isAtTrailingBound) {
+                            slideOffset = t.width * 0.25
+                        } else {
+                            slideOffset = t.width
+                        }
+                    } else {
+                        let raw = CGSize(width: steadyPan.width + t.width, height: steadyPan.height + t.height)
+                        pan = clampPan(raw, viewSize: size)
+                    }
                 },
-                onPanEnded: { _, velocity, maxTouches in
-                    endPan(velocity: velocity, maxTouches: maxTouches, in: loader)
+                onPanEnded: { translation, velocity, maxTouches in
+                    handlePanEnd(translation: translation, velocity: velocity, maxTouches: maxTouches, in: loader, size: size)
                 }
             )
         }
@@ -328,6 +388,7 @@ struct ReaderView: View {
                 Button {
                     withAnimation(Self.cameraTween) {
                         settings.pageSlideEnabled.toggle()
+                        slideOffset = 0
                         if settings.pageSlideEnabled {
                             step = -1
                             resetZoom()
@@ -361,6 +422,7 @@ struct ReaderView: View {
                     else {
                         scrubbing = false
                         page = Int(scrub.rounded())
+                        slideOffset = 0
                         if case .ready(let a) = state { loadPage(a) }
                     }
                 }
@@ -379,15 +441,16 @@ struct ReaderView: View {
     // Tap zones, matching Android: left third turns back (or steps to prev panel), right third turns forward
     // (or steps to next panel), middle third toggles chrome.
     private func tapZone(x: CGFloat, width: CGFloat, in loader: PageLoader) {
+        guard !isTurning else { return }
         if x < width / 3 {
             if settings.pageSlideEnabled {
-                turnPage(next: rightToLeft, in: loader)
+                animateTapTurn(forward: rightToLeft, in: loader, width: width)
             } else {
                 advance(by: rightToLeft ? 1 : -1, in: loader)
             }
         } else if x > width * 2 / 3 {
             if settings.pageSlideEnabled {
-                turnPage(next: !rightToLeft, in: loader)
+                animateTapTurn(forward: !rightToLeft, in: loader, width: width)
             } else {
                 advance(by: rightToLeft ? -1 : 1, in: loader)
             }
@@ -396,20 +459,100 @@ struct ReaderView: View {
         }
     }
 
+    private func animateTapTurn(forward: Bool, in loader: PageLoader, width: CGFloat) {
+        let target = page + (forward ? 1 : -1)
+        guard target >= 0, target < loader.pageCount, !isTurning else { return }
+        isTurning = true
+        let targetOffset: CGFloat
+        if !rightToLeft {
+            targetOffset = forward ? -width : width
+        } else {
+            targetOffset = forward ? width : -width
+        }
+        withAnimation(.easeOut(duration: 0.22)) {
+            slideOffset = targetOffset
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+            // Instant swap with pre-decoded image to avoid blank frames
+            if forward {
+                let incoming = !rightToLeft ? nextImage : prevImage
+                if let incoming { self.image = incoming }
+            } else {
+                let incoming = !rightToLeft ? prevImage : nextImage
+                if let incoming { self.image = incoming }
+            }
+            page = target
+            slideOffset = 0
+            isTurning = false
+            loadPage(loader)
+        }
+    }
+
     // Whether the current slot frames the whole page (intro or outro) — a flick only turns pages here.
     private var isFullPage: Bool { settings.pageSlideEnabled || step < 0 || step >= regions.count }
 
-    // End of a one-finger drag: a fast horizontal flick from the whole-page view (intro or outro,
-    // matching Android's isFullPageView) turns the page; otherwise the floated position is committed.
-    private func endPan(velocity: CGSize, maxTouches: Int, in loader: PageLoader) {
-        let isFlick = maxTouches == 1 && isFullPage && zoom <= 1.01
-            && abs(velocity.width) > Self.flickVelocityPxS
-            && abs(velocity.width) > abs(velocity.height) * Self.swipeHorizontalBias
-        if isFlick {
-            // swipe-left advances in LTR (and is mirrored under RTL); loadPage resets pan.
-            turnPage(next: (velocity.width < 0) != rightToLeft, in: loader)
+    // Handles the end of a pan/drag gesture: interactive settle in Page Flip mode, or swipe in guided mode.
+    private func handlePanEnd(translation: CGSize, velocity: CGSize, maxTouches: Int, in loader: PageLoader, size: CGSize) {
+        if settings.pageSlideEnabled && zoom <= 1.01 {
+            guard !isTurning else { return }
+            let dragX = translation.width
+            let velX = velocity.width
+            let W = size.width
+
+            let canAdvance = !rightToLeft ? (page + 1 < pageCount) : (page > 0)
+            let canGoBack = !rightToLeft ? (page > 0) : (page + 1 < pageCount)
+
+            // In LTR: dragging left (dragX < -60) or swiping left (velX < -300) advances
+            let isAdvance = !rightToLeft ? (dragX < -60 || velX < -300) : (dragX > 60 || velX > 300)
+            let isGoBack = !rightToLeft ? (dragX > 60 || velX > 300) : (dragX < -60 || velX < -300)
+
+            if isAdvance && canAdvance {
+                isTurning = true
+                let targetOffset = !rightToLeft ? -W : W
+                withAnimation(.easeOut(duration: 0.20)) {
+                    slideOffset = targetOffset
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                    let incoming = !rightToLeft ? nextImage : prevImage
+                    if let incoming { self.image = incoming }
+                    page = !rightToLeft ? page + 1 : page - 1
+                    slideOffset = 0
+                    isTurning = false
+                    loadPage(loader)
+                }
+            } else if isGoBack && canGoBack {
+                isTurning = true
+                let targetOffset = !rightToLeft ? W : -W
+                withAnimation(.easeOut(duration: 0.20)) {
+                    slideOffset = targetOffset
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                    let incoming = !rightToLeft ? prevImage : nextImage
+                    if let incoming { self.image = incoming }
+                    page = !rightToLeft ? page - 1 : page + 1
+                    slideOffset = 0
+                    isTurning = false
+                    loadPage(loader)
+                }
+            } else {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                    slideOffset = 0
+                }
+            }
         } else {
-            steadyPan = pan   // commit the floated / zoomed-pan position
+            if zoom > 1.01 {
+                steadyPan = pan
+            } else if isFullPage {
+                let dragX = translation.width
+                let velX = velocity.width
+                let isAdvance = !rightToLeft ? (dragX < -60 || velX < -300) : (dragX > 60 || velX > 300)
+                let isGoBack = !rightToLeft ? (dragX > 60 || velX > 300) : (dragX < -60 || velX < -300)
+                if isAdvance {
+                    turnPage(next: !rightToLeft, in: loader)
+                } else if isGoBack {
+                    turnPage(next: rightToLeft, in: loader)
+                }
+            }
         }
     }
 
