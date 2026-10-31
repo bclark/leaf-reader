@@ -27,7 +27,11 @@ struct LibraryView: View {
     // per-comic + default behaviour). Mirrors ReadingPrefs so the pill redraws on toggle.
     @State private var defaultRTL = ReadingPrefs.defaultRightToLeft
 
-    private let columns = [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
+    private var columns: [GridItem] {
+        let count = settings.libraryColumns
+        let spacing: CGFloat = count >= 4 ? 12 : 16
+        return Array(repeating: GridItem(.flexible(), spacing: spacing), count: count)
+    }
 
     var body: some View {
         NavigationStack {
@@ -157,10 +161,10 @@ struct LibraryView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 18).padding(.vertical, 12)
             }
-            LazyVGrid(columns: columns, spacing: 18) {
+            LazyVGrid(columns: columns, spacing: settings.libraryColumns >= 4 ? 14 : 18) {
                 ForEach(library.comics, id: \.self) { url in
                     Button { openComic = OpenComic(url: url) } label: {
-                        ComicCard(url: url, progress: progress[url.lastPathComponent] ?? nil)
+                        ComicCard(url: url, progress: progress[url.lastPathComponent] ?? nil, columns: settings.libraryColumns)
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
@@ -169,7 +173,7 @@ struct LibraryView: View {
                         }
                     }
                 }
-                AddTile(importing: library.importing) { showPicker = true }
+                AddTile(importing: library.importing, columns: settings.libraryColumns) { showPicker = true }
             }
             .padding(.horizontal, 18)
             .padding(.bottom, 48)
@@ -183,6 +187,7 @@ struct LibraryView: View {
 struct ComicCard: View {
     let url: URL
     let progress: Progress?
+    var columns: Int = 2
     @State private var cover: UIImage?
     @State private var pages = 0
 
@@ -200,7 +205,7 @@ struct ComicCard: View {
                     if let cover {
                         Image(uiImage: cover).resizable().scaledToFill()
                     } else {
-                        GeneratedCover(title: title)
+                        GeneratedCover(title: title, columns: columns)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -213,23 +218,23 @@ struct ComicCard: View {
                         Chika.ochre.frame(width: geo.size.width * CGFloat(pct))
                     }
                 }
-                .frame(height: 7)
+                .frame(height: columns >= 4 ? 5 : 7)
             }
             .aspectRatio(0.7, contentMode: .fit)
             .background(Chika.inkSoft)
             .clipShape(RoundedCornerShape(cornerRadius: 4))
-            .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Chika.ink, lineWidth: 3))
-            .comicShadow(offset: 5, color: .black.opacity(0.70), corner: 4)
+            .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Chika.ink, lineWidth: columns >= 4 ? 2 : 3))
+            .comicShadow(offset: columns >= 4 ? 3 : 5, color: .black.opacity(0.70), corner: 4)
 
             Text(title)
-                .font(.archivo(12, weight: 800)).foregroundColor(Chika.cream)
+                .font(.archivo(columns >= 4 ? 10 : 12, weight: 800)).foregroundColor(Chika.cream)
                 .lineLimit(2).multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 9)
+                .padding(.top, columns >= 4 ? 6 : 9)
             Text(started
                  ? "\(Int(pct * 100))% · pg \(lastPage + 1)/\(pageCount)"
                  : "\(pageCount) pages")
-                .font(.archivo(9.5)).foregroundColor(Chika.creamMuted)
+                .font(.archivo(columns >= 4 ? 8.5 : 9.5)).foregroundColor(Chika.creamMuted)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 2)
         }
@@ -245,40 +250,55 @@ struct ComicCard: View {
 /// and the title in Anton bottom-left — Android's GeneratedCover.
 struct GeneratedCover: View {
     let title: String
+    var columns: Int = 2
+
+    private var fontSize: CGFloat {
+        if columns >= 5 { return 13 }
+        if columns >= 4 { return 15 }
+        if columns == 3 { return 18 }
+        return 22
+    }
+
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             Chika.inkSoft
-            Halftone(color: Chika.crimson, alpha: 0.18)
-            Text(title).font(.anton(22)).foregroundColor(Chika.cream).padding(12)
+            Halftone(color: Chika.leafPrimary, alpha: 0.18)
+            Text(title).font(.anton(fontSize)).foregroundColor(Chika.cream).padding(columns >= 4 ? 8 : 12)
         }
     }
 }
 
-/// The in-grid "LOAD COMIC" tile: a dashed-border cell with an ochre halftone and a crimson
-/// starburst holding a + (or a spinner while importing) — Android's AddTile.
+/// The in-grid "LOAD COMIC" tile: a dashed-border cell with an ochre halftone and an upright gold leaf
+/// holding a + (or a spinner while importing) — matching Android's updated AddTile.
 struct AddTile: View {
     let importing: Bool
+    var columns: Int = 2
     let onTap: () -> Void
+
+    private var leafSize: CGFloat { columns >= 4 ? 48 : 64 }
+    private var iconSize: CGFloat { columns >= 4 ? 18 : 22 }
+    private var titleSize: CGFloat { columns >= 4 ? 12 : 14 }
+    private var strokeWidth: CGFloat { columns >= 4 ? 2 : 3 }
 
     var body: some View {
         Button(action: onTap) {
-            VStack(spacing: 12) {
+            VStack(spacing: columns >= 4 ? 8 : 12) {
                 ZStack {
-                    LeafShape().fill(Chika.crimson).frame(width: 64, height: 64)
+                    LeafShape().fill(Chika.ochre).frame(width: leafSize, height: leafSize)
                     if importing {
-                        ProgressView().tint(Chika.cream)
+                        ProgressView().tint(Chika.ink)
                     } else {
-                        Image(systemName: "plus").font(.system(size: 22, weight: .bold)).foregroundColor(Chika.cream)
+                        Image(systemName: "plus").font(.system(size: iconSize, weight: .bold)).foregroundColor(Chika.ink)
                     }
                 }
-                Text("LOAD COMIC").font(.anton(14)).foregroundColor(Chika.cream)
+                Text("LOAD COMIC").font(.anton(titleSize)).foregroundColor(Chika.cream)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .aspectRatio(0.7, contentMode: .fit)
             .halftone(color: Chika.ochre, alpha: 0.10)
             .overlay(
                 RoundedCornerShape(cornerRadius: 4)
-                    .stroke(Chika.creamMuted, style: StrokeStyle(lineWidth: 3, dash: [14, 10]))
+                    .stroke(Chika.creamMuted, style: StrokeStyle(lineWidth: strokeWidth, dash: [14, 10]))
             )
             .clipShape(RoundedCornerShape(cornerRadius: 4))
         }

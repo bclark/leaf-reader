@@ -57,12 +57,15 @@ struct ReaderView: View {
 
     private var title: String { comicURL.deletingPathExtension().lastPathComponent }
     // Slot model matching Android: step -1 = whole-page intro, 0…n-1 = panels, n = whole-page outro.
-    // The intro and outro both frame the whole page, so page turns always land zoomed-out.
+    // In Page Flip mode, the camera always frames the whole page.
     private var camera: Panel {
-        (step >= 0 && step < regions.count) ? regions[step] : Panel.companion.FULL_PAGE
+        if settings.pageSlideEnabled {
+            return Panel.companion.FULL_PAGE
+        }
+        return (step >= 0 && step < regions.count) ? regions[step] : Panel.companion.FULL_PAGE
     }
     // Whether the current slot is a framed panel (vs. the whole-page intro/outro).
-    private var onPanel: Bool { step >= 0 && step < regions.count }
+    private var onPanel: Bool { !settings.pageSlideEnabled && step >= 0 && step < regions.count }
 
     private var isReady: Bool { if case .ready = state { return true }; return false }
 
@@ -143,8 +146,12 @@ struct ReaderView: View {
     private func loadPage(_ loader: PageLoader, restoreStep: Int = -1) {
         regions = panelCache[page] ?? [Panel.companion.FULL_PAGE]
         // Resolve the outro sentinel now that this page's regions are known (backward page turns
-        // land on the whole-page outro, matching Android).
-        step = (restoreStep == Self.outroSlot) ? regions.count : restoreStep
+        // land on the whole-page outro, matching Android). In Page Flip mode, always stay at -1.
+        if settings.pageSlideEnabled {
+            step = -1
+        } else {
+            step = (restoreStep == Self.outroSlot) ? regions.count : restoreStep
+        }
         resetZoom()
         persist()
         pageAlpha = 0.35   // fades up to 1 once the page renders (Android's 280ms page fade-in)
@@ -281,6 +288,7 @@ struct ReaderView: View {
     // Top-bar status line, matching Android: "Page X/Y · panel N/M" / "· full page" / "· detecting…".
     private var pageStatus: String {
         let prefix = "Page \(page + 1)/\(pageCount) · "
+        if settings.pageSlideEnabled { return prefix + "page flip" }
         if detecting { return prefix + "detecting…" }
         if onPanel { return prefix + "panel \(step + 1)/\(regions.count)" }
         return prefix + "full page"
@@ -301,13 +309,6 @@ struct ReaderView: View {
                 Text(pageStatus).font(.archivo(9)).tracking(1.4).foregroundColor(Chika.creamMuted)
             }
             Spacer()
-            // Show whole page (Android's ZoomOutMap): plain icon, always enabled (no-op on full page).
-            Button { showWholePage() } label: {   // showWholePage runs its own camera tween
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(Chika.cream)
-                    .frame(width: 38, height: 38)
-            }
             DirectionChip(rightToLeft: rightToLeft) {
                 rightToLeft.toggle()
                 panelCache.removeAll() // panels are ordered per-direction; re-detect under the new one
@@ -316,7 +317,7 @@ struct ReaderView: View {
         }
         .padding(.leading, 12).padding(.trailing, 6).padding(.top, 8).padding(.bottom, 18)
         // The bar itself sits in the safe area; only its scrim bleeds up behind the status bar.
-        .background(LinearGradient(colors: [Chika.ink.opacity(0.94), .clear],
+        .background(LinearGradient(colors: [Chika.leafPrimary.opacity(0.98), Chika.leafPrimary.opacity(0.88), .clear],
                                    startPoint: .top, endPoint: .bottom)
             .ignoresSafeArea(edges: .top))
     }
@@ -324,7 +325,31 @@ struct ReaderView: View {
     private var bottomBar: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("SWIPE TO TURN").font(.anton(12)).tracking(2).foregroundColor(Chika.creamMuted)
+                Button {
+                    withAnimation(Self.cameraTween) {
+                        settings.pageSlideEnabled.toggle()
+                        if settings.pageSlideEnabled {
+                            step = -1
+                            resetZoom()
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: settings.pageSlideEnabled ? "book.fill" : "viewfinder")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Chika.ochre)
+                        Text(settings.pageSlideEnabled ? "PAGE FLIP" : "PANEL BY PANEL")
+                            .font(.anton(11))
+                            .tracking(1)
+                            .foregroundColor(Chika.cream)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Chika.leafPrimary.opacity(0.9))
+                    .clipShape(RoundedCornerShape(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+
                 Spacer()
                 PageCoin(page: (scrubbing ? Int(scrub.rounded()) : page) + 1, total: pageCount)
             }
@@ -344,24 +369,35 @@ struct ReaderView: View {
         }
         .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 12)
         // The scrubber sits in the safe area; only its scrim bleeds down behind the home indicator.
-        .background(LinearGradient(colors: [.clear, Chika.ink.opacity(0.97)],
+        .background(LinearGradient(colors: [.clear, Chika.inkSoft.opacity(0.98)],
                                    startPoint: .top, endPoint: .bottom)
             .ignoresSafeArea(edges: .bottom))
         // Keep the scrubber in sync with programmatic page changes (taps/flicks) while not scrubbing.
         .onChange(of: page) { if !scrubbing { scrub = Double($0) } }
     }
 
-    // Tap zones, matching Android: left third turns a page back, right third turns a page forward,
-    // middle third toggles chrome. The double-tap (show whole page) is disambiguated natively by
-    // the UIKit tap recognizers, so no defer.
+    // Tap zones, matching Android: left third turns back (or steps to prev panel), right third turns forward
+    // (or steps to next panel), middle third toggles chrome.
     private func tapZone(x: CGFloat, width: CGFloat, in loader: PageLoader) {
-        if x < width / 3 { turnPage(next: false, in: loader) }
-        else if x > width * 2 / 3 { turnPage(next: true, in: loader) }
-        else { withAnimation { showChrome.toggle() } }
+        if x < width / 3 {
+            if settings.pageSlideEnabled {
+                turnPage(next: rightToLeft, in: loader)
+            } else {
+                advance(by: rightToLeft ? 1 : -1, in: loader)
+            }
+        } else if x > width * 2 / 3 {
+            if settings.pageSlideEnabled {
+                turnPage(next: !rightToLeft, in: loader)
+            } else {
+                advance(by: rightToLeft ? -1 : 1, in: loader)
+            }
+        } else {
+            withAnimation { showChrome.toggle() }
+        }
     }
 
     // Whether the current slot frames the whole page (intro or outro) — a flick only turns pages here.
-    private var isFullPage: Bool { step < 0 || step >= regions.count }
+    private var isFullPage: Bool { settings.pageSlideEnabled || step < 0 || step >= regions.count }
 
     // End of a one-finger drag: a fast horizontal flick from the whole-page view (intro or outro,
     // matching Android's isFullPageView) turns the page; otherwise the floated position is committed.

@@ -14,7 +14,7 @@ settings:
     # App Store versioning: CI overrides these per release (see release-ios workflow); the
     # defaults keep local archives valid. CURRENT_PROJECT_VERSION must increase monotonically
     # per App Store Connect upload.
-    MARKETING_VERSION: "0.2.1"
+    MARKETING_VERSION: "0.3.2"
     CURRENT_PROJECT_VERSION: "1"
     # Automatic signing. Set your Apple Developer Team ID here (Xcode → Settings → Accounts),
     # or override with xcodebuild DEVELOPMENT_TEAM=XXXXXXXXXX for CI/App Store archives.
@@ -45,7 +45,7 @@ targets:
     info:
       path: Sources/Info.plist
       properties:
-        CFBundleDisplayName: Chika
+        CFBundleDisplayName: Leaf
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # The app uses no encryption beyond what the OS provides — declares export compliance so
