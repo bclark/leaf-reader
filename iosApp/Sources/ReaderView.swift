@@ -315,15 +315,15 @@ struct ReaderView: View {
                 persist(); redetect()
             }
         }
-        .padding(.leading, 12).padding(.trailing, 6).padding(.top, 8).padding(.bottom, 18)
-        // The bar itself sits in the safe area; only its scrim bleeds up behind the status bar.
+        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 18)
+        .frame(maxWidth: .infinity)
         .background(LinearGradient(colors: [Chika.leafPrimary.opacity(0.98), Chika.leafPrimary.opacity(0.88), .clear],
                                    startPoint: .top, endPoint: .bottom)
-            .ignoresSafeArea(edges: .top))
+            .ignoresSafeArea(edges: [.top, .horizontal]))
     }
 
     private var bottomBar: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 8) {
             HStack {
                 Button {
                     withAnimation(Self.cameraTween) {
@@ -353,9 +353,9 @@ struct ReaderView: View {
                 Spacer()
                 PageCoin(page: (scrubbing ? Int(scrub.rounded()) : page) + 1, total: pageCount)
             }
-            Slider(
+            ComicScrubberSlider(
                 value: $scrub,
-                in: 0...Double(max(pageCount - 1, 1)),
+                range: 0...Double(max(pageCount - 1, 1)),
                 onEditingChanged: { editing in
                     if editing { scrubbing = true }
                     else {
@@ -365,13 +365,13 @@ struct ReaderView: View {
                     }
                 }
             )
-            .tint(Chika.ochre)
         }
         .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 12)
+        .frame(maxWidth: .infinity)
         // The scrubber sits in the safe area; only its scrim bleeds down behind the home indicator.
         .background(LinearGradient(colors: [.clear, Chika.inkSoft.opacity(0.98)],
                                    startPoint: .top, endPoint: .bottom)
-            .ignoresSafeArea(edges: .bottom))
+            .ignoresSafeArea(edges: [.bottom, .horizontal]))
         // Keep the scrubber in sync with programmatic page changes (taps/flicks) while not scrubbing.
         .onChange(of: page) { if !scrubbing { scrub = Double($0) } }
     }
@@ -528,5 +528,55 @@ struct DirectionChip: View {
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Custom comic scrubber slider styled with Leaf colors (Ochre gold track + thumb, Cream track background),
+/// matching Android's slider appearance instead of the system slider's white thumb.
+struct ComicScrubberSlider: View {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let onEditingChanged: (Bool) -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let total = max(range.upperBound - range.lowerBound, 1)
+            let fraction = max(0, min(1, (value - range.lowerBound) / total))
+
+            ZStack(alignment: .leading) {
+                // Inactive track
+                Capsule()
+                    .fill(Chika.cream.opacity(0.20))
+                    .frame(height: 4)
+
+                // Active track
+                Capsule()
+                    .fill(Chika.ochre)
+                    .frame(width: max(w * CGFloat(fraction), 0), height: 4)
+
+                // Thumb: Ochre gold circle with dark ink border and subtle comic shadow
+                Circle()
+                    .fill(Chika.ochre)
+                    .frame(width: 16, height: 16)
+                    .overlay(Circle().stroke(Chika.ink, lineWidth: 2))
+                    .comicShadow(offset: 1.5, color: .black.opacity(0.4), corner: 8)
+                    .offset(x: max(0, min(w - 16, w * CGFloat(fraction) - 8)))
+            }
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { gesture in
+                        onEditingChanged(true)
+                        let newFraction = max(0, min(1, gesture.location.x / w))
+                        value = range.lowerBound + Double(newFraction) * total
+                    }
+                    .onEnded { _ in
+                        onEditingChanged(false)
+                    }
+            )
+        }
+        .frame(height: 28)
     }
 }
