@@ -175,8 +175,8 @@ fun OchreBadge(text: String, modifier: Modifier = Modifier) {
         modifier = modifier
             .graphicsLayer { rotationZ = -1.5f }
             .comicShadow(offset = 3.dp, color = Color(0x99000000))
-            .background(Ochre, RoundedCornerShape(3.dp))
-            .border(2.5.dp, Ink, RoundedCornerShape(3.dp))
+            .background(Ochre, RoundedCornerShape(4.dp))
+            .border(2.5.dp, Ink, RoundedCornerShape(4.dp))
             .padding(horizontal = 16.dp, vertical = 6.dp),
     )
 }

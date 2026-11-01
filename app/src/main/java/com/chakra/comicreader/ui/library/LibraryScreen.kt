@@ -410,9 +410,9 @@ fun LibraryScreen(
                                 Box(
                                     modifier = Modifier
                                         .height(30.dp)
-                                        .clip(RoundedCornerShape(3.dp))
+                                        .clip(RoundedCornerShape(4.dp))
                                         .background(InkSoft)
-                                        .border(1.dp, Ink, RoundedCornerShape(3.dp))
+                                        .border(1.dp, Ink, RoundedCornerShape(4.dp))
                                         .clickable { viewModel.setEditMode(true) }
                                         .padding(horizontal = 10.dp),
                                     contentAlignment = Alignment.Center,
@@ -429,9 +429,9 @@ fun LibraryScreen(
                                 Box(
                                     modifier = Modifier
                                         .height(30.dp)
-                                        .clip(RoundedCornerShape(3.dp))
+                                        .clip(RoundedCornerShape(4.dp))
                                         .background(if (allSelected) Ochre else InkSoft)
-                                        .border(1.dp, Ink, RoundedCornerShape(3.dp))
+                                        .border(1.dp, Ink, RoundedCornerShape(4.dp))
                                         .clickable {
                                             if (allSelected) viewModel.clearComicSelection()
                                             else viewModel.selectAllComics(comics.map { it.id })
@@ -449,7 +449,7 @@ fun LibraryScreen(
                                 Box(
                                     modifier = Modifier
                                         .height(30.dp)
-                                        .clip(RoundedCornerShape(3.dp))
+                                        .clip(RoundedCornerShape(4.dp))
                                         .background(Ochre)
                                         .clickable { viewModel.setEditMode(false) }
                                         .padding(horizontal = 10.dp),
@@ -468,9 +468,9 @@ fun LibraryScreen(
                                 Box(
                                     modifier = Modifier
                                         .height(30.dp)
-                                        .clip(RoundedCornerShape(3.dp))
+                                        .clip(RoundedCornerShape(4.dp))
                                         .background(Ochre)
-                                        .border(1.dp, Ink, RoundedCornerShape(3.dp))
+                                        .border(1.dp, Ink, RoundedCornerShape(4.dp))
                                         .clickable {
                                             val idx = availableColumns.indexOf(actualColumns)
                                             val next = availableColumns[(if (idx >= 0) idx + 1 else 0) % availableColumns.size]
@@ -496,9 +496,9 @@ fun LibraryScreen(
                                 Box(
                                     modifier = Modifier
                                         .height(30.dp)
-                                        .clip(RoundedCornerShape(3.dp))
+                                        .clip(RoundedCornerShape(4.dp))
                                         .background(Ochre)
-                                        .border(1.dp, Ink, RoundedCornerShape(3.dp))
+                                        .border(1.dp, Ink, RoundedCornerShape(4.dp))
                                         .clickable { viewModel.toggleDefaultDirection() }
                                         .padding(horizontal = 10.dp),
                                     contentAlignment = Alignment.Center,
@@ -680,6 +680,7 @@ fun LibraryScreen(
                     onClick = { if (!importing) showSourceDialog = true },
                     containerColor = LeafAccent,
                     contentColor = DeepInk,
+                    shape = RoundedCornerShape(4.dp),
                     elevation = FloatingActionButtonDefaults.elevation(6.dp),
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -1020,9 +1021,9 @@ private fun ComicCard(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(if (columns >= 4) 4.dp else 6.dp)
-                        .clip(RoundedCornerShape(3.dp))
+                        .clip(RoundedCornerShape(4.dp))
                         .background(DeepInk.copy(alpha = 0.88f))
-                        .border(1.dp, LeafAccent, RoundedCornerShape(3.dp))
+                        .border(1.dp, LeafAccent, RoundedCornerShape(4.dp))
                         .padding(horizontal = if (columns >= 4) 4.dp else 5.dp, vertical = 2.dp),
                 ) {
                     Row(
@@ -1208,9 +1209,9 @@ fun SmbDriveScreen(
                             if (selectedCount > 0 && !allSelected) {
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(3.dp))
+                                        .clip(RoundedCornerShape(4.dp))
                                         .background(DeepInkSurface)
-                                        .border(1.dp, DeepInk, RoundedCornerShape(3.dp))
+                                        .border(1.dp, DeepInk, RoundedCornerShape(4.dp))
                                         .clickable { selectedPaths = emptySet() }
                                         .padding(horizontal = 8.dp, vertical = 4.dp),
                                     contentAlignment = Alignment.Center,
@@ -1225,9 +1226,9 @@ fun SmbDriveScreen(
                             }
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(3.dp))
+                                    .clip(RoundedCornerShape(4.dp))
                                     .background(if (allSelected) Ochre else DeepInkSurface)
-                                    .border(1.dp, if (allSelected) Ochre else DeepInk, RoundedCornerShape(3.dp))
+                                    .border(1.dp, if (allSelected) Ochre else DeepInk, RoundedCornerShape(4.dp))
                                     .clickable {
                                         selectedPaths = if (allSelected) emptySet() else fileEntries.map { it.path }.toSet()
                                     }
