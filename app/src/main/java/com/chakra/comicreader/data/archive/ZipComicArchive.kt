@@ -27,5 +27,15 @@ class ZipComicArchive(file: File) : ComicArchive {
 
     override fun pageName(index: Int): String = entries[index].name
 
+    override fun readComicInfoXml(): String? {
+        val entry = zip.entries.asSequence().firstOrNull {
+            it.name.equals("ComicInfo.xml", ignoreCase = true) ||
+            it.name.endsWith("/ComicInfo.xml", ignoreCase = true)
+        } ?: return null
+        return runCatching {
+            zip.getInputStream(entry).use { it.readBytes().decodeToString() }
+        }.getOrNull()
+    }
+
     override fun close() = zip.close()
 }

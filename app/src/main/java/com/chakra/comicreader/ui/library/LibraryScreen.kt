@@ -139,6 +139,7 @@ private fun formatBytes(bytes: Long): String {
 fun LibraryScreen(
     viewModel: LibraryViewModel,
     onOpenComic: (Long) -> Unit,
+    onOpenSeries: (String, String?) -> Unit,
     onOpenMenu: () -> Unit,
     onOpenDrive: () -> Unit,
 ) {
@@ -872,7 +873,7 @@ private fun ComicCard(
 }
 
 @Composable
-private fun GeneratedCover(title: String, columns: Int = 2) {
+internal fun GeneratedCover(title: String, columns: Int = 2) {
     val fontSize = if (columns >= 5) 13.sp else if (columns >= 4) 15.sp else if (columns == 3) 18.sp else 22.sp
     val padding = if (columns >= 4) 8.dp else 12.dp
     Box(Modifier.fillMaxSize().background(InkSoft).halftone(Crimson, alpha = 0.18f)) {
@@ -1425,7 +1426,7 @@ private fun SmbRow(
 }
 
 @Composable
-private fun rememberCover(path: String?): ImageBitmap? {
+internal fun rememberCover(path: String?): ImageBitmap? {
     val state by produceState<ImageBitmap?>(initialValue = null, key1 = path) {
         value = if (path == null) null else withContext(Dispatchers.IO) {
             runCatching {

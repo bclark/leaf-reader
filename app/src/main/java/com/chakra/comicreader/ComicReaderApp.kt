@@ -20,7 +20,7 @@ class ComicReaderApp : Application() {
     val database: AppDatabase by lazy { AppDatabase.get(this) }
     val settings: AppSettings by lazy { AppSettings(this) }
     val libraryRepository: LibraryRepository by lazy {
-        LibraryRepository(this, database.comicDao(), settings)
+        LibraryRepository(this, database.comicDao(), settings, database.readingListDao())
     }
 
     /** On-device ML panel detector; falls back to whole-page-only if the model can't load. */
