@@ -13,6 +13,7 @@ import net.digitalbc.leafreader.data.smb.SmbEntry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -474,7 +475,31 @@ class LibraryViewModel(
             }
             _selectedComicIds.value = emptySet()
             _isEditMode.value = false
-            _message.value = "Added ${comicIds.size} comics to reading list"
+            _message.value = "Added ${comicIds.size} ${if (comicIds.size == 1) "comic" else "comics"} to reading list"
+        }
+    }
+
+    fun observeComicsForList(listId: Long): Flow<List<ComicEntity>> =
+        repository.observeComicsForList(listId)
+
+    fun renameReadingList(id: Long, name: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            repository.renameReadingList(id, name.trim())
+            _message.value = "Renamed list to \"${name.trim()}\""
+        }
+    }
+
+    fun deleteReadingList(id: Long) {
+        viewModelScope.launch {
+            repository.deleteReadingList(id)
+            _message.value = "Deleted reading list"
+        }
+    }
+
+    fun removeComicFromReadingList(listId: Long, comicId: Long) {
+        viewModelScope.launch {
+            repository.removeComicFromReadingList(listId, comicId)
         }
     }
 

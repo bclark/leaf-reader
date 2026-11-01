@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -111,6 +112,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.digitalbc.leafreader.data.db.ComicEntity
+import net.digitalbc.leafreader.data.db.ReadingListEntity
 import net.digitalbc.leafreader.data.smb.SmbEntry
 import net.digitalbc.leafreader.ui.brand.LeafWordmark
 import net.digitalbc.leafreader.ui.brand.LeafShape
@@ -176,6 +178,12 @@ fun LibraryScreen(
     var showGroupDialog by remember { mutableStateOf(false) }
     var seriesInput by remember(showGroupDialog) { mutableStateOf("") }
     var volumeInput by remember(showGroupDialog) { mutableStateOf("") }
+    var showAddToListDialog by remember { mutableStateOf(false) }
+    var isCreatingListInDialog by remember { mutableStateOf(false) }
+    var newListNameInDialog by remember { mutableStateOf("") }
+    var activeReadingList by remember { mutableStateOf<ReadingListEntity?>(null) }
+    var showRenameListDialog by remember { mutableStateOf(false) }
+    var renameListInput by remember(showRenameListDialog) { mutableStateOf("") }
 
     var isSearchOpen by rememberSaveable { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
@@ -653,7 +661,7 @@ fun LibraryScreen(
                                 item = item,
                                 columns = actualColumns,
                                 onClick = {
-                                    // Reading list open
+                                    activeReadingList = item.readingList
                                 },
                             )
                         }
@@ -748,26 +756,41 @@ fun LibraryScreen(
                                         color = PaperWhite,
                                     )
                                     Text(
-                                        text = "Group into series stack or delete selected",
+                                        text = "Group into series, add to list, or delete",
                                         fontFamily = Archivo,
                                         fontSize = 11.sp,
                                         color = PaperWhiteMuted,
                                     )
                                 }
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(4.dp))
                                             .background(Ochre)
                                             .clickable { showGroupDialog = true }
-                                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                                            .padding(horizontal = 9.dp, vertical = 9.dp),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         Text(
                                             text = "SET SERIES",
                                             fontFamily = Anton,
-                                            fontSize = 12.sp,
+                                            fontSize = 11.sp,
                                             color = Ink,
+                                        )
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(LeafAccent)
+                                            .clickable { showAddToListDialog = true }
+                                            .padding(horizontal = 9.dp, vertical = 9.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            text = "ADD TO LIST",
+                                            fontFamily = Anton,
+                                            fontSize = 11.sp,
+                                            color = DeepInk,
                                         )
                                     }
                                     Box(
@@ -775,13 +798,13 @@ fun LibraryScreen(
                                             .clip(RoundedCornerShape(4.dp))
                                             .background(ComicRose)
                                             .clickable { showBatchDeleteDialog = true }
-                                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                                            .padding(horizontal = 9.dp, vertical = 9.dp),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         Text(
                                             text = "DELETE",
                                             fontFamily = Anton,
-                                            fontSize = 12.sp,
+                                            fontSize = 11.sp,
                                             color = PaperWhite,
                                         )
                                     }
@@ -913,6 +936,312 @@ fun LibraryScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showGroupDialog = false }) { Text("CANCEL", color = PaperWhiteMuted) }
+            },
+            containerColor = DeepInkSurface,
+        )
+    }
+
+    if (showAddToListDialog) {
+        val readingLists by viewModel.readingLists.collectAsStateWithLifecycle()
+
+        AlertDialog(
+            onDismissRequest = {
+                showAddToListDialog = false
+                isCreatingListInDialog = false
+                newListNameInDialog = ""
+            },
+            title = {
+                Text(
+                    text = if (isCreatingListInDialog) "Create New Reading List" else "Add to Reading List",
+                    fontFamily = Anton,
+                    color = PaperWhite,
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (isCreatingListInDialog) {
+                        Text(
+                            text = "Enter a name for your new reading list.",
+                            fontFamily = Archivo,
+                            fontSize = 12.sp,
+                            color = PaperWhiteMuted,
+                        )
+                        OutlinedTextField(
+                            value = newListNameInDialog,
+                            onValueChange = { newListNameInDialog = it },
+                            label = { Text("List Name (e.g. Favorites)", color = CreamMuted) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Ochre,
+                                unfocusedBorderColor = DeepInk,
+                                focusedTextColor = PaperWhite,
+                                unfocusedTextColor = PaperWhite,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        Text(
+                            text = "Choose a reading list to add ${selectedComicIds.size} selected ${if (selectedComicIds.size == 1) "comic" else "comics"}.",
+                            fontFamily = Archivo,
+                            fontSize = 12.sp,
+                            color = PaperWhiteMuted,
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(LeafAccent)
+                                .clickable { isCreatingListInDialog = true }
+                                .padding(vertical = 10.dp, horizontal = 14.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, tint = DeepInk, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("+ CREATE NEW LIST", fontFamily = Anton, fontSize = 13.sp, color = DeepInk)
+                        }
+
+                        if (readingLists.isEmpty()) {
+                            Text(
+                                text = "No reading lists created yet. Tap above to create one!",
+                                fontFamily = Archivo,
+                                fontSize = 12.sp,
+                                color = CreamMuted,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        } else {
+                            LazyColumn(
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.heightIn(max = 240.dp),
+                            ) {
+                                items(readingLists, key = { it.id }) { list ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(DeepInk)
+                                            .border(1.dp, Ochre, RoundedCornerShape(4.dp))
+                                            .clickable {
+                                                viewModel.addComicsToReadingList(list.id, selectedComicIds.toList())
+                                                showAddToListDialog = false
+                                            }
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = list.name.uppercase(),
+                                            fontFamily = Anton,
+                                            fontSize = 13.sp,
+                                            color = PaperWhite,
+                                        )
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = "Select",
+                                            tint = Ochre,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                if (isCreatingListInDialog) {
+                    TextButton(onClick = {
+                        if (newListNameInDialog.isNotBlank()) {
+                            viewModel.createReadingList(newListNameInDialog) { newListId ->
+                                viewModel.addComicsToReadingList(newListId, selectedComicIds.toList())
+                            }
+                            showAddToListDialog = false
+                            isCreatingListInDialog = false
+                            newListNameInDialog = ""
+                        }
+                    }) {
+                        Text("CREATE & ADD", color = Ochre, fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    if (isCreatingListInDialog) {
+                        isCreatingListInDialog = false
+                    } else {
+                        showAddToListDialog = false
+                    }
+                }) {
+                    Text("CANCEL", color = PaperWhiteMuted)
+                }
+            },
+            containerColor = DeepInkSurface,
+        )
+    }
+
+    activeReadingList?.let { list ->
+        val comicsInList by viewModel.observeComicsForList(list.id).collectAsStateWithLifecycle(emptyList())
+
+        AlertDialog(
+            onDismissRequest = { activeReadingList = null },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(text = list.name.uppercase(), fontFamily = Anton, color = PaperWhite, modifier = Modifier.weight(1f))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(InkSoft)
+                                .border(1.dp, Ink, RoundedCornerShape(3.dp))
+                                .clickable {
+                                    renameListInput = list.name
+                                    showRenameListDialog = true
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        ) {
+                            Text("RENAME", fontFamily = Anton, fontSize = 10.5.sp, color = Cream)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(ComicRose)
+                                .clickable {
+                                    viewModel.deleteReadingList(list.id)
+                                    activeReadingList = null
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        ) {
+                            Text("DELETE", fontFamily = Anton, fontSize = 10.5.sp, color = PaperWhite)
+                        }
+                    }
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "${comicsInList.size} ${if (comicsInList.size == 1) "COMIC" else "COMICS"} IN LIST",
+                        fontFamily = Archivo,
+                        fontSize = 11.5.sp,
+                        color = LeafAccent,
+                    )
+
+                    if (comicsInList.isEmpty()) {
+                        Text(
+                            text = "This reading list is empty. Select comics in Edit mode and tap 'ADD TO LIST' to populate it.",
+                            fontFamily = Archivo,
+                            fontSize = 12.sp,
+                            color = PaperWhiteMuted,
+                            modifier = Modifier.padding(vertical = 12.dp),
+                        )
+                    } else {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.heightIn(max = 320.dp),
+                        ) {
+                            items(comicsInList, key = { it.id }) { comic ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(DeepInk)
+                                        .border(1.dp, LeafSecondary.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                                        .clickable {
+                                            activeReadingList = null
+                                            onOpenComic(comic.id)
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp, 50.dp)
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(InkSoft),
+                                    ) {
+                                        val cover = rememberCover(comic.coverPath)
+                                        if (cover != null) {
+                                            Image(cover, comic.title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                        }
+                                    }
+                                    Text(
+                                        text = comic.title.uppercase(),
+                                        fontFamily = Archivo,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.5.sp,
+                                        color = PaperWhite,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clip(CircleShape)
+                                            .background(PaperWhite.copy(alpha = 0.12f))
+                                            .clickable {
+                                                viewModel.removeComicFromReadingList(list.id, comic.id)
+                                            },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Remove from list",
+                                            tint = ComicRose,
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { activeReadingList = null }) { Text("CLOSE", color = PaperWhiteMuted) }
+            },
+            containerColor = DeepInkSurface,
+        )
+    }
+
+    if (showRenameListDialog && activeReadingList != null) {
+        val list = activeReadingList!!
+        AlertDialog(
+            onDismissRequest = { showRenameListDialog = false },
+            title = { Text("Rename Reading List", fontFamily = Anton, color = PaperWhite) },
+            text = {
+                OutlinedTextField(
+                    value = renameListInput,
+                    onValueChange = { renameListInput = it },
+                    label = { Text("List Name", color = CreamMuted) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Ochre,
+                        unfocusedBorderColor = DeepInk,
+                        focusedTextColor = PaperWhite,
+                        unfocusedTextColor = PaperWhite,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (renameListInput.isNotBlank()) {
+                        viewModel.renameReadingList(list.id, renameListInput)
+                        activeReadingList = list.copy(name = renameListInput.trim())
+                        showRenameListDialog = false
+                    }
+                }) {
+                    Text("SAVE", color = Ochre, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameListDialog = false }) { Text("CANCEL", color = PaperWhiteMuted) }
             },
             containerColor = DeepInkSurface,
         )
