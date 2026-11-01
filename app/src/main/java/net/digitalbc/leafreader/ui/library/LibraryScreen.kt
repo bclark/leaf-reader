@@ -1713,35 +1713,6 @@ private fun ComicCard(
                         )
                     }
                 }
-            } else if (comic.source == "smb") {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(if (columns >= 4) 4.dp else 6.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(DeepInk.copy(alpha = 0.88f))
-                        .border(1.dp, LeafAccent, RoundedCornerShape(4.dp))
-                        .padding(horizontal = if (columns >= 4) 4.dp else 5.dp, vertical = 2.dp),
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp),
-                    ) {
-                        Icon(
-                            Icons.Default.Cloud,
-                            contentDescription = "From SMB Drive",
-                            tint = LeafAccent,
-                            modifier = Modifier.size(if (columns >= 4) 9.dp else 11.dp),
-                        )
-                        Text(
-                            text = "SMB",
-                            fontFamily = Anton,
-                            fontSize = if (columns >= 4) 8.sp else 9.5.sp,
-                            color = PaperWhite,
-                            letterSpacing = 0.5.sp,
-                        )
-                    }
-                }
             }
 
             if (!isEditMode) {
@@ -2184,22 +2155,39 @@ private fun ComicStackCard(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(0.7f)
+                .padding(top = if (stack.totalIssues > 1) 8.dp else 0.dp)
         ) {
-            if (stack.totalIssues > 1) {
+            // Neat Stack Layer 3 (for 3+ issues) - highest top offset
+            if (stack.totalIssues >= 3) {
                 Box(
                     Modifier
-                        .matchParentSize()
+                        .fillMaxSize()
                         .graphicsLayer {
-                            rotationZ = 3f
-                            translationX = 6.dp.toPx()
-                            translationY = 4.dp.toPx()
+                            translationY = (-8).dp.toPx()
+                            scaleX = 0.93f
                         }
-                        .comicShadow(offset = 1.dp, color = Color(0x80000000))
                         .clip(RoundedCornerShape(4.dp))
                         .background(InkSoft)
-                        .border(1.dp, Ink, RoundedCornerShape(4.dp))
+                        .border(1.5.dp, LeafSecondary, RoundedCornerShape(4.dp))
                 )
             }
+
+            // Neat Stack Layer 2 (for 2+ issues) - middle top offset
+            if (stack.totalIssues >= 2) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationY = (-4).dp.toPx()
+                            scaleX = 0.96f
+                        }
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(DeepInkSurface)
+                        .border(1.5.dp, Ochre, RoundedCornerShape(4.dp))
+                )
+            }
+
+            // Front Layer (Main cover)
             Box(
                 Modifier
                     .fillMaxSize()
@@ -2272,30 +2260,110 @@ private fun ReadingListCard(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(0.7f)
-                .comicShadow(offset = shadowOffset, color = Color(0xB3000000))
-                .clip(RoundedCornerShape(4.dp))
-                .background(DeepInkSurface)
-                .border(width = borderWidth, color = Ochre, shape = RoundedCornerShape(4.dp))
-                .padding(16.dp),
-            contentAlignment = Alignment.Center,
+                .padding(
+                    horizontal = if (item.itemCount > 1) 6.dp else 0.dp,
+                    vertical = if (item.itemCount > 1) 4.dp else 0.dp,
+                )
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(
-                    Icons.Default.Menu,
-                    contentDescription = null,
-                    tint = Ochre,
-                    modifier = Modifier.size(32.dp),
-                )
-                Text(
-                    item.readingList.name.uppercase(),
-                    fontFamily = Anton,
-                    fontSize = 14.sp,
-                    color = Cream,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                )
-                OchreBadge("${item.itemCount} ITEMS")
+            // Messy Layer 3 (Rotated Left) - for 3+ items
+            if (item.itemCount >= 3) {
+                val backCoverPath = item.previewComics.getOrNull(2)?.coverPath
+                val backCover = rememberCover(backCoverPath)
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            rotationZ = -6f
+                            translationX = (-6).dp.toPx()
+                            translationY = (-4).dp.toPx()
+                        }
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(InkSoft)
+                        .border(1.5.dp, LeafSecondary, RoundedCornerShape(4.dp))
+                ) {
+                    if (backCover != null) {
+                        Image(
+                            backCover,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                            alpha = 0.85f,
+                        )
+                    }
+                }
+            }
+
+            // Messy Layer 2 (Rotated Right) - for 2+ items
+            if (item.itemCount >= 2) {
+                val midCoverPath = item.previewComics.getOrNull(1)?.coverPath
+                val midCover = rememberCover(midCoverPath)
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            rotationZ = 5f
+                            translationX = 7.dp.toPx()
+                            translationY = (-3).dp.toPx()
+                        }
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(DeepInkSurface)
+                        .border(1.5.dp, Ochre, RoundedCornerShape(4.dp))
+                ) {
+                    if (midCover != null) {
+                        Image(
+                            midCover,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                            alpha = 0.85f,
+                        )
+                    }
+                }
+            }
+
+            // Front Main List Card
+            val topCoverPath = item.previewComics.firstOrNull()?.coverPath
+            val topCover = rememberCover(topCoverPath)
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .comicShadow(offset = shadowOffset, color = Color(0xB3000000))
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(DeepInkSurface)
+                    .border(width = borderWidth, color = Ochre, shape = RoundedCornerShape(4.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (topCover != null) {
+                    Image(
+                        topCover,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 0.22f },
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(14.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Menu,
+                        contentDescription = null,
+                        tint = Ochre,
+                        modifier = Modifier.size(32.dp),
+                    )
+                    Text(
+                        item.readingList.name.uppercase(),
+                        fontFamily = Anton,
+                        fontSize = 14.sp,
+                        color = Cream,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                    )
+                    OchreBadge("${item.itemCount} ${if (item.itemCount == 1) "ITEM" else "ITEMS"}")
+                }
             }
         }
         Spacer(Modifier.height(18.dp))
