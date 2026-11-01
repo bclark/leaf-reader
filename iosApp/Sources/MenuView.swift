@@ -10,6 +10,7 @@ struct MenuView: View {
     private static let upstreamURL = URL(string: "https://github.com/batunii/chika")!
     private static let privacyURL = URL(string: "https://github.com/bclark/leaf-reader/blob/main/PRIVACY.md")!
     private static let licensesURL = URL(string: "https://github.com/bclark/leaf-reader/blob/main/THIRD_PARTY_NOTICES.md")!
+    private static let kofiURL = URL(string: "https://ko-fi.com/bryanclark")!
 
     private var version: String {
         let info = Bundle.main.infoDictionary
@@ -205,22 +206,76 @@ struct MenuView: View {
 
                         Spacer().frame(height: 24)
 
-                        // ---- Support -----------------------------------------------------
-                        Text("Leaf is free and made with care. If it brings you joy, you can support upstream development.")
-                            .font(.archivo(12)).lineSpacing(3).foregroundColor(Leaf.creamMuted)
-                        Spacer().frame(height: 14)
-                        Link(destination: Self.repoURL) {
+                        // ---- Support Leaf ------------------------------------------------
+                        SectionLabel("SUPPORT LEAF")
+                        Spacer().frame(height: 10)
+                        Text("Enjoying Leaf? You can leave an optional tip to support development. All features remain free.")
+                            .font(.archivo(12, weight: .medium))
+                            .lineSpacing(4)
+                            .foregroundColor(Leaf.cream)
+                        Spacer().frame(height: 12)
+                        Button {
+                            UIApplication.shared.open(Self.kofiURL)
+                        } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: "heart.fill")
-                                    .font(.system(size: 18)).foregroundColor(Leaf.cream)
-                                Text("SUPPORT UPSTREAM")
-                                    .font(.anton(15)).tracking(0.5).foregroundColor(Leaf.cream)
+                                    .font(.system(size: 16))
+                                    .foregroundColor(Leaf.cream)
+                                Text("TIP ON KO-FI")
+                                    .font(.anton(15))
+                                    .tracking(0.5)
+                                    .foregroundColor(Leaf.cream)
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
-                            .background(Leaf.leafPrimary)
+                            .background(Leaf.crimson)
                             .clipShape(RoundedCornerShape(cornerRadius: 4))
                             .comicShadow(offset: 4, color: .black.opacity(0.6), corner: 4)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Tip on Ko-fi")
+                        .accessibilityHint("Opens ko-fi.com/bryanclark in external web browser")
+
+                        Spacer().frame(height: 6)
+                        Link(destination: Self.kofiURL) {
+                            Text("ko-fi.com/bryanclark")
+                                .font(.archivo(11, weight: .semibold))
+                                .foregroundColor(Leaf.ochre)
+                        }
+
+                        Spacer().frame(height: 24)
+
+                        // ---- Support Upstream --------------------------------------------
+                        Text("Support the upstream creator of Chika:")
+                            .font(.archivo(12, weight: .medium))
+                            .lineSpacing(3)
+                            .foregroundColor(Leaf.creamMuted)
+                        Spacer().frame(height: 12)
+                        Link(destination: Self.upstreamURL) {
+                            HStack(spacing: 10) {
+                                Image(systemName: "heart.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(Leaf.ochre)
+                                Text("SUPPORT ORIGINAL PROJECT")
+                                    .font(.anton(15))
+                                    .tracking(0.5)
+                                    .foregroundColor(Leaf.cream)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(Leaf.deepInkSurface)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(Leaf.ochre, lineWidth: 1.5)
+                            )
+                            .clipShape(RoundedCornerShape(cornerRadius: 4))
+                            .comicShadow(offset: 4, color: .black.opacity(0.6), corner: 4)
+                        }
+                        Spacer().frame(height: 6)
+                        Link(destination: Self.upstreamURL) {
+                            Text("github.com/batunii/chika")
+                                .font(.archivo(11, weight: .semibold))
+                                .foregroundColor(Leaf.ochre)
                         }
                     }
                     .padding(.horizontal, 24)

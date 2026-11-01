@@ -2,7 +2,9 @@ package com.chakra.comicreader.ui.menu
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,7 +44,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import com.chakra.comicreader.R
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -59,11 +63,13 @@ import com.chakra.comicreader.ui.theme.Archivo
 import com.chakra.comicreader.ui.theme.Cream
 import com.chakra.comicreader.ui.theme.CreamMuted
 import com.chakra.comicreader.ui.theme.Crimson
+import com.chakra.comicreader.ui.theme.DeepInkSurface
 import com.chakra.comicreader.ui.theme.Ink
 import com.chakra.comicreader.ui.theme.InkSoft
 import com.chakra.comicreader.ui.theme.LeafPrimary
 import com.chakra.comicreader.ui.theme.LeafSecondary
 import com.chakra.comicreader.ui.theme.Ochre
+import com.chakra.comicreader.ui.theme.PaperWhite
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -72,6 +78,7 @@ private const val SOURCE_URL = "https://github.com/bclark/leaf-reader"
 private const val UPSTREAM_URL = "https://github.com/batunii/chika"
 private const val PRIVACY_URL = "https://github.com/bclark/leaf-reader/blob/main/PRIVACY.md"
 private const val LICENSES_URL = "https://github.com/bclark/leaf-reader/blob/main/THIRD_PARTY_NOTICES.md"
+private const val SUPPORT_KOFI_URL = "https://ko-fi.com/bryanclark"
 
 @Composable
 fun MenuScreen(
@@ -102,6 +109,13 @@ fun MenuScreen(
     }
     val openUpstream = {
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(UPSTREAM_URL)))
+    }
+    val openKofi = {
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SUPPORT_KOFI_URL)))
+        }.onFailure {
+            Toast.makeText(context, "No web browser found to open link.", Toast.LENGTH_SHORT).show()
+        }
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -460,7 +474,60 @@ fun MenuScreen(
 
             Spacer(Modifier.size(24.dp))
 
-            // ---- Support -------------------------------------------------------------
+            // ---- Support Leaf --------------------------------------------------------
+            SectionLabel(stringResource(R.string.support_leaf_title))
+            Spacer(Modifier.size(10.dp))
+            Text(
+                stringResource(R.string.support_leaf_description),
+                fontFamily = Archivo,
+                fontWeight = FontWeight.Medium,
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                color = Cream,
+            )
+            Spacer(Modifier.size(12.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .comicShadow(offset = 4.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Crimson)
+                    .clickable(
+                        onClickLabel = stringResource(R.string.support_leaf_kofi_cd),
+                        onClick = { openKofi() },
+                    )
+                    .padding(vertical = 14.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Favorite, contentDescription = null, tint = Cream, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(10.dp))
+                Text(
+                    stringResource(R.string.support_leaf_kofi_button).uppercase(),
+                    fontFamily = Anton,
+                    fontSize = 15.sp,
+                    letterSpacing = 0.5.sp,
+                    color = Cream,
+                )
+            }
+            Spacer(Modifier.size(6.dp))
+            Text(
+                "ko-fi.com/bryanclark",
+                fontFamily = Archivo,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 11.sp,
+                color = Ochre,
+                modifier = Modifier
+                    .clickable(
+                        onClickLabel = stringResource(R.string.support_leaf_kofi_cd),
+                        onClick = { openKofi() },
+                    )
+                    .padding(top = 2.dp),
+            )
+
+            Spacer(Modifier.size(24.dp))
+
+            // ---- Support Upstream ----------------------------------------------------
             Text(
                 "Support the upstream creator of Chika:",
                 fontFamily = Archivo,
@@ -475,20 +542,21 @@ fun MenuScreen(
                     .fillMaxWidth()
                     .comicShadow(offset = 4.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(Crimson)
+                    .background(DeepInkSurface)
+                    .border(1.5.dp, Ochre, RoundedCornerShape(4.dp))
                     .clickable(onClick = openUpstream)
                     .padding(vertical = 14.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Default.Favorite, contentDescription = null, tint = Cream, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.Favorite, contentDescription = null, tint = Ochre, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(10.dp))
                 Text(
                     "SUPPORT ORIGINAL PROJECT",
                     fontFamily = Anton,
                     fontSize = 15.sp,
                     letterSpacing = 0.5.sp,
-                    color = Cream,
+                    color = PaperWhite,
                 )
             }
             Spacer(Modifier.size(6.dp))

@@ -110,6 +110,14 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 
 ---
 
+## Support Leaf
+
+Leaf is maintained by [Bryan Clark](https://github.com/bclark) (forked with appreciation from Chika by Chakra). All features remain 100% free and open source. If you enjoy using Leaf, you can leave an optional tip to support ongoing development:
+
+* **Ko-fi:** [ko-fi.com/bryanclark](https://ko-fi.com/bryanclark)
+
+---
+
 ## License & Third-Party Notices
 
 Leaf is licensed under the **Mozilla Public License 2.0** — see [`LICENSE`](LICENSE).
