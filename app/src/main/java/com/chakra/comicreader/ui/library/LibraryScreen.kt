@@ -9,6 +9,10 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -30,6 +34,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -44,6 +49,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -82,6 +88,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.PathEffect
@@ -199,6 +207,12 @@ fun LibraryScreen(
     }
     val actualColumns = libraryColumns.coerceIn(2, availableColumns.last())
     val gridState = rememberLazyGridState()
+
+    val rtlRotation by animateFloatAsState(
+        targetValue = if (defaultRtl) 180f else 0f,
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "directionFlip",
+    )
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (!uris.isNullOrEmpty()) viewModel.importComics(uris)
@@ -384,7 +398,7 @@ fun LibraryScreen(
                         } else if (searchQuery.isNotBlank()) {
                             OchreBadge("FOUND ${comics.size} ${if (comics.size == 1) "COMIC" else "COMICS"}")
                         } else {
-                            OchreBadge("YOUR LIBRARY")
+                            Spacer(Modifier.width(1.dp))
                         }
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -454,58 +468,62 @@ fun LibraryScreen(
                                         fontSize = 7.sp,
                                         color = CreamMuted,
                                     )
-                                    Row(
+                                    Box(
                                         modifier = Modifier
                                             .padding(top = 1.dp)
                                             .clip(RoundedCornerShape(3.dp))
-                                            .background(InkSoft)
-                                            .border(1.dp, Ink, RoundedCornerShape(3.dp)),
-                                        horizontalArrangement = Arrangement.spacedBy(1.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        availableColumns.forEach { count ->
-                                            val isSelected = actualColumns == count
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(2.dp))
-                                                    .background(if (isSelected) Ochre else Color.Transparent)
-                                                    .clickable { viewModel.setLibraryColumns(count) }
-                                                    .padding(horizontal = 7.dp, vertical = 3.5.dp),
-                                                contentAlignment = Alignment.Center,
-                                            ) {
-                                                Text(
-                                                    "$count",
-                                                    fontFamily = Archivo,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 11.5.sp,
-                                                    color = if (isSelected) Ink else CreamMuted,
-                                                )
+                                            .background(Ochre)
+                                            .border(1.dp, Ink, RoundedCornerShape(3.dp))
+                                            .clickable {
+                                                val idx = availableColumns.indexOf(actualColumns)
+                                                val next = availableColumns[(if (idx >= 0) idx + 1 else 0) % availableColumns.size]
+                                                viewModel.setLibraryColumns(next)
                                             }
+                                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        ) {
+                                            ColumnDensityIcon(columns = actualColumns)
+                                            Text(
+                                                "$actualColumns",
+                                                fontFamily = Anton,
+                                                fontSize = 11.5.sp,
+                                                color = Ink,
+                                            )
                                         }
                                     }
                                 }
 
                                 Column(horizontalAlignment = Alignment.End) {
                                     Text(
-                                        "NEW COMICS OPEN",
+                                        "READING DIRECTION",
                                         fontFamily = Archivo,
                                         fontWeight = FontWeight.SemiBold,
                                         fontSize = 7.sp,
                                         color = CreamMuted,
                                     )
-                                    Text(
-                                        if (defaultRtl) "RTL" else "LTR",
-                                        fontFamily = Archivo,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = Ink,
+                                    Box(
                                         modifier = Modifier
                                             .padding(top = 1.dp)
                                             .clip(RoundedCornerShape(3.dp))
                                             .background(Ochre)
+                                            .border(1.dp, Ink, RoundedCornerShape(3.dp))
                                             .clickable { viewModel.toggleDefaultDirection() }
                                             .padding(horizontal = 10.dp, vertical = 4.dp),
-                                    )
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                            contentDescription = if (defaultRtl) "Reading Direction: RTL" else "Reading Direction: LTR",
+                                            tint = Ink,
+                                            modifier = Modifier
+                                                .size(16.dp)
+                                                .graphicsLayer { rotationY = rtlRotation },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1815,6 +1833,26 @@ private fun ImportProgressBanner(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ColumnDensityIcon(columns: Int, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(13.dp)) {
+        val gap = 2.dp.toPx()
+        val totalGaps = (columns - 1) * gap
+        val colWidth = (size.width - totalGaps) / columns
+        val corner = 1.dp.toPx()
+
+        for (i in 0 until columns) {
+            val left = i * (colWidth + gap)
+            drawRoundRect(
+                color = Ink,
+                topLeft = Offset(left, 0f),
+                size = Size(colWidth, size.height),
+                cornerRadius = CornerRadius(corner, corner),
+            )
         }
     }
 }
