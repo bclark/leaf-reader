@@ -11,7 +11,7 @@ android {
     buildToolsVersion = "36.1.0"
 
     defaultConfig {
-        applicationId = "com.chakra.comicreader"
+        applicationId = "net.digitalbc.leaf"
         minSdk = 26
         targetSdk = 36
         versionName = "0.3.2"
@@ -19,6 +19,16 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
+    }
+
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("full") {
+            dimension = "distribution"
+        }
+        create("fdroid") {
+            dimension = "distribution"
+        }
     }
 
     // Release signing is configured only when a keystore is supplied via environment variables
@@ -111,7 +121,7 @@ dependencies {
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.commons.compress)
-    implementation(libs.sevenzip)
+    "fullImplementation"(libs.sevenzip)
     implementation(libs.smbj)
 
     implementation(libs.tensorflow.lite)

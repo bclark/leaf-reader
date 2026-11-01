@@ -24,6 +24,10 @@ This document tracks verified legal/compliance requirements and open blockers fo
   - Documented the APK binary replacement procedure (`unzip`, replace `lib7-Zip-JBinding.so`, `zipalign`, `apksigner`) in `THIRD_PARTY_NOTICES.md`.
   - Retained required unRAR restriction notice (decompression permitted; compression creation prohibited).
   - Clarified that iOS uses `libarchive` (BSD-licensed) and contains no LGPL / 7-Zip code.
+- [x] **Application ID (`net.digitalbc.leaf`):** Assigned permanent application ID under `digitalbc.net` in `app/build.gradle.kts`.
+- [x] **F-Droid Build Flavors:** Implemented `full` and `fdroid` product flavors. `7-Zip-JBinding-4Android` is completely excluded from the `fdroid` dependency graph, compile classpath, and native binaries.
+- [x] **Deterministic Versioning & Unsigned Release Build:** `versionName = "0.3.2"`, `versionCode = 30200`. Removed debug signing fallback in `release` build type so `./gradlew :app:assembleFdroidRelease` produces a clean unsigned APK (`app-fdroid-release-unsigned.apk`) for F-Droid server signing.
+- [x] **Store Metadata & Notices:** Updated Fastlane metadata and changelog `30200.txt`. Bundled full third-party notices directly in `app/src/main/assets/THIRD_PARTY_NOTICES.md`.
 
 ---
 

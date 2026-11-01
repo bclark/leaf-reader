@@ -17,7 +17,7 @@ Builds:
     versionCode: 30200
     commit: v0.3.2
     gradle:
-      - assembleRelease
+      - fdroidRelease
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9.]+$
