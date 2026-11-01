@@ -28,7 +28,7 @@ The app's menu contains a link to the project's GitHub page. Opening it hands of
 
 ## Children
 
-Chika does not collect data from anyone, including children.
+Leaf does not collect data from anyone, including children.
 
 ## Changes
 
@@ -36,4 +36,4 @@ Any change to this policy will be published at this URL alongside the app's sour
 
 ## Contact
 
-Questions? Open an issue at <https://github.com/batunii/chika/issues>.
+Questions? Open an issue at <https://github.com/bclark/leaf-reader/issues>.

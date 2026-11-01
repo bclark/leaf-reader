@@ -22,7 +22,8 @@ float32, output `[1,N,6]` (`x1,y1,x2,y2,score,cls`), classes **panel=0, text=1**
 ## Step 1 — get the manga data (the gated part)
 Manga109 panel boxes are the only real manga source and need a one-time form (no academic email
 required — just describe the use case; approval ~2–3 days):
-- Request **Manga109-s** (the redistributable subset) here: http://www.manga109.org/en/download_s.html
+- Request **Manga109-s** (the research dataset subset) here: http://www.manga109.org/en/download_s.html
+  *(Note: Manga109-s is available upon approved request for academic/research purposes; it is not a freely redistributable dataset).*
 - Unzip the approved download somewhere with space; you want this layout:
   `<root>/annotations/<Title>.xml` and `<root>/images/<Title>/<index>.jpg`
 

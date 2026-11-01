@@ -24,7 +24,7 @@ at most minor non-free components (flagged). Steps:
 2. Open an inclusion request issue at **https://codeberg.org/IzzyOnDroid/repodata/issues** (use the
    inclusion template). They check the license, scan for anti-features, and pull the APK + the
    fastlane metadata.
-3. Users add the IzzyOnDroid repo to the F-Droid client and install Chika.
+3. Users add the IzzyOnDroid repo to the F-Droid client and install Leaf.
 
 ## Route B — F-Droid main repo (more rigorous)
 
@@ -57,9 +57,10 @@ A ready-to-submit recipe is in [`fdroid/com.chakra.comicreader.yml`](fdroid/com.
 
 **IzzyOnDroid request** — open an issue at https://codeberg.org/IzzyOnDroid/repodata/issues with:
 
-> **App:** Chika — Chitra Katha
+> **App:** Leaf (forked from Chika)
 > **Package:** `com.chakra.comicreader`
-> **Source:** https://github.com/batunii/chika
+> **Source:** https://github.com/bclark/leaf-reader
+> **Upstream:** https://github.com/batunii/chika
 > **License:** MPL-2.0 (FOSS)
 > **Releases:** signed APKs attached to GitHub Releases (`v*` tags); fastlane metadata in
 > `fastlane/metadata/android/en-US`.

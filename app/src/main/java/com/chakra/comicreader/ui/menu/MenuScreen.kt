@@ -68,9 +68,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private const val DONATION_URL = "https://github.com/batunii/chika"
-private const val PRIVACY_URL = "https://github.com/batunii/chika/blob/main/PRIVACY.md"
-private const val LICENSES_URL = "https://github.com/batunii/chika/blob/main/THIRD_PARTY_NOTICES.md"
+private const val SOURCE_URL = "https://github.com/bclark/leaf-reader"
+private const val UPSTREAM_URL = "https://github.com/batunii/chika"
+private const val PRIVACY_URL = "https://github.com/bclark/leaf-reader/blob/main/PRIVACY.md"
+private const val LICENSES_URL = "https://github.com/bclark/leaf-reader/blob/main/THIRD_PARTY_NOTICES.md"
 
 @Composable
 fun MenuScreen(
@@ -96,8 +97,11 @@ fun MenuScreen(
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull() ?: "—"
     }
-    val openDonation = {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(DONATION_URL)))
+    val openSource = {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SOURCE_URL)))
+    }
+    val openUpstream = {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(UPSTREAM_URL)))
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -420,22 +424,29 @@ fun MenuScreen(
             )
             Spacer(Modifier.size(14.dp))
             Text(
+                "Source: github.com/bclark/leaf-reader",
+                fontFamily = Archivo,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 11.sp,
+                color = Ochre,
+                modifier = Modifier.clickable(onClick = openSource).padding(top = 2.dp),
+            )
+            Spacer(Modifier.size(8.dp))
+            Text(
                 "Forked with appreciation from Chika by Chakra.",
                 fontFamily = Archivo,
                 fontWeight = FontWeight.Medium,
                 fontSize = 12.sp,
                 color = CreamMuted,
             )
-            Spacer(Modifier.size(6.dp))
+            Spacer(Modifier.size(4.dp))
             Text(
                 "Upstream: github.com/batunii/chika",
                 fontFamily = Archivo,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 11.sp,
-                color = Ochre,
-                modifier = Modifier.clickable {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/batunii/chika")))
-                }.padding(top = 2.dp),
+                color = CreamMuted,
+                modifier = Modifier.clickable(onClick = openUpstream).padding(top = 2.dp),
             )
 
             Spacer(Modifier.size(18.dp))
@@ -465,7 +476,7 @@ fun MenuScreen(
                     .comicShadow(offset = 4.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(Crimson)
-                    .clickable(onClick = openDonation)
+                    .clickable(onClick = openUpstream)
                     .padding(vertical = 14.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
@@ -487,7 +498,7 @@ fun MenuScreen(
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 11.sp,
                 color = Ochre,
-                modifier = Modifier.clickable(onClick = openDonation).padding(top = 2.dp),
+                modifier = Modifier.clickable(onClick = openUpstream).padding(top = 2.dp),
             )
         }
     }

@@ -6,9 +6,10 @@ struct MenuView: View {
     @EnvironmentObject private var settings: LeafSettings
     @Environment(\.dismiss) private var dismiss
 
-    private static let repoURL = URL(string: "https://github.com/batunii/chika")!
-    private static let privacyURL = URL(string: "https://github.com/batunii/chika/blob/main/PRIVACY.md")!
-    private static let licensesURL = URL(string: "https://github.com/batunii/chika/blob/main/THIRD_PARTY_NOTICES.md")!
+    private static let repoURL = URL(string: "https://github.com/bclark/leaf-reader")!
+    private static let upstreamURL = URL(string: "https://github.com/batunii/chika")!
+    private static let privacyURL = URL(string: "https://github.com/bclark/leaf-reader/blob/main/PRIVACY.md")!
+    private static let licensesURL = URL(string: "https://github.com/bclark/leaf-reader/blob/main/THIRD_PARTY_NOTICES.md")!
 
     private var version: String {
         let info = Bundle.main.infoDictionary
@@ -160,12 +161,18 @@ struct MenuView: View {
                         Text("Leaf is an offline comic reader with on-device ML panel detection, interactive page flip, and multi-format archives.")
                             .font(.archivo(13)).lineSpacing(4).foregroundColor(Leaf.cream)
                         Spacer().frame(height: 14)
-                        Text("Forked with appreciation from Leaf by Chakra.")
+                        Link(destination: Self.repoURL) {
+                            Text("Source: github.com/bclark/leaf-reader")
+                                .font(.archivo(11, weight: 600)).foregroundColor(Leaf.ochre)
+                                .padding(.top, 2)
+                        }
+                        Spacer().frame(height: 10)
+                        Text("Forked with appreciation from Chika by Chakra.")
                             .font(.archivo(12)).foregroundColor(Leaf.creamMuted)
                         Spacer().frame(height: 6)
-                        Link(destination: Self.repoURL) {
+                        Link(destination: Self.upstreamURL) {
                             Text("Upstream: github.com/batunii/chika")
-                                .font(.archivo(11, weight: 600)).foregroundColor(Leaf.ochre)
+                                .font(.archivo(11, weight: 600)).foregroundColor(Leaf.creamMuted)
                                 .padding(.top, 2)
                         }
 

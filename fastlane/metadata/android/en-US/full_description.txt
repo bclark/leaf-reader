@@ -16,4 +16,4 @@ Features:
   (page and panel).
 * No accounts, no ads, no trackers, no network access.
 
-Chika is free and open source (Mozilla Public License 2.0).
+Leaf is free and open source (Mozilla Public License 2.0), forked from Chika.

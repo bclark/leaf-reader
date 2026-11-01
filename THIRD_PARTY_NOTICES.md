@@ -1,89 +1,100 @@
 # Third-Party Notices
 
-Chika (the application source) is licensed under the **Mozilla Public License 2.0** — see
-[`LICENSE`](LICENSE). This file documents the third-party software, models, fonts, and data that
-Chika depends on or bundles, along with the obligations each imposes. Full license texts are in
-[`THIRD_PARTY_LICENSES/`](THIRD_PARTY_LICENSES).
+Leaf (the application source) is a fork of **Chika** (by Chakra / batunii) and is licensed under the **Mozilla Public License 2.0 (MPL-2.0)** — see [`LICENSE`](LICENSE).
 
-## Summary of obligations
+This document details all third-party software libraries, native binaries, fonts, machine learning models, and datasets used by or bundled with Leaf across Android and iOS platforms. Full license texts are provided in [`THIRD_PARTY_LICENSES/`](THIRD_PARTY_LICENSES/).
 
-| Component | License | Bundled? | Key obligation |
-|---|---|---|---|
-| AndroidX / Jetpack Compose / Kotlin / Coroutines | Apache-2.0 | yes (in APK) | Keep license + NOTICE attribution |
-| Apache Commons Compress | Apache-2.0 | yes | Keep license + NOTICE |
-| TensorFlow Lite (`org.tensorflow:tensorflow-lite`) | Apache-2.0 | yes (native `.so`) | Keep license |
-| **7-Zip-JBinding-4Android** | **LGPL-2.1** (+ unRAR, BSD parts) | yes (native `.so`) | See LGPL note below |
-| Panel-detection model (`manga_panel_detector_int8.tflite`) | Apache-2.0 | yes (asset) | Disclose Manga109-s training data |
-| Anton font | OFL-1.1 | yes (asset) | Keep OFL text; don't sell font alone |
-| Archivo font | OFL-1.1 | yes (asset) | Keep OFL text; don't sell font alone |
+---
 
-MPL-2.0 (Chika) is compatible with all of the above, including the LGPL component (MPL-2.0 §3.3).
+## Summary of Direct Dependencies & Assets
 
-## Dependencies
+| Component / Dependency | License | Platforms | Bundled? | Key Obligations & Source |
+|---|---|---|---|---|
+| **AndroidX / Jetpack Compose / Room / Core / Activity / Lifecycle / Navigation / DocumentFile** | Apache-2.0 | Android | Yes (bytecode) | Retain license & NOTICE attribution. © The Android Open Source Project |
+| **Kotlin Standard Library & Coroutines** | Apache-2.0 | Android / iOS / Shared | Yes | Retain license notice. © JetBrains / Kotlin Foundation |
+| **Apache Commons Compress** (`org.apache.commons:commons-compress:1.27.1`) | Apache-2.0 | Android | Yes (bytecode) | Retain Apache 2.0 license & NOTICE. © The Apache Software Foundation |
+| **SMBJ** (`com.hierynomus:smbj:0.13.0`) | Apache-2.0 | Android | Yes (bytecode) | Retain Apache 2.0 license. © Jeroen van Erp (Hierynomus) |
+| **LiteRT / TensorFlow Lite** (`litert:1.4.2` / `TensorFlowLiteSwift:2.17.0`) | Apache-2.0 | Android / iOS | Yes (native `.so` / `.framework`) | Retain Apache 2.0 license. © The TensorFlow / LiteRT Authors |
+| **7-Zip-JBinding-4Android** (`Release-16.02-2.03`) | **GNU LGPL-2.1** (+ unRAR restriction, BSD) | Android ONLY | Yes (native `.so`) | Retain LGPL-2.1 notice & unRAR restriction; allow library replacement (§6). See LGPL section below. |
+| **ZIPFoundation** (`0.9.19`) | MIT | iOS ONLY | Yes (compiled) | Retain MIT copyright notice. © Thomas Weichselbaumer |
+| **libarchive** (`libarchive-for-swift:1.0.0`) | BSD 2-Clause / 3-Clause / Public Domain | iOS ONLY | Yes (compiled) | Retain BSD license notice. © Tim Kientzle et al. |
+| **Anton Font** (`Anton-Regular.ttf`) | OFL-1.1 | Android / iOS | Yes (asset) | Retain SIL OFL text; do not sell font standalone. © Vernon Adams |
+| **Archivo Font** (`Archivo-Variable.ttf`) | OFL-1.1 | Android / iOS | Yes (asset) | Retain SIL OFL text; do not sell font standalone. © Omnibus-Type |
+| **Panel Detection Model** (`manga_panel_detector_int8.tflite`) | **AGPL-3.0** (Derived from Ultralytics YOLO) | Android / iOS | Yes (asset) | Trained on Manga109-s + COMICS. Subject to AGPL-3.0 copyleft & Manga109 disclosure. See Model section below. |
+
+MPL-2.0 (Leaf) is compatible with combining larger works governed by the above licenses (MPL-2.0 §3.3).
+
+---
+
+## Detailed License Notices
 
 ### Apache License 2.0
 Full text: [`THIRD_PARTY_LICENSES/Apache-2.0.txt`](THIRD_PARTY_LICENSES/Apache-2.0.txt)
 
-- **Kotlin** standard library & coroutines — © JetBrains / Kotlin Foundation
-- **AndroidX / Jetpack**: `core-ktx`, `lifecycle-*`, `activity-compose`, Jetpack **Compose** (UI,
-  Material 3, Material Icons), `navigation-compose`, `documentfile`, **Room** — © The Android Open
-  Source Project
-- **Apache Commons Compress** `org.apache.commons:commons-compress` — © The Apache Software
-  Foundation (used for CBZ/ZIP reading)
-- **TensorFlow Lite** `org.tensorflow:tensorflow-lite:2.16.1` — © The TensorFlow Authors (on-device
-  panel-detection inference)
+- **Kotlin Standard Library & KotlinX Coroutines** (`1.9.0` / `2.2.10`) — © JetBrains s.r.o. and Kotlin Foundation contributors.
+- **AndroidX & Jetpack Libraries**: `core-ktx:1.15.0`, `lifecycle-*:2.8.7`, `activity-compose:1.9.3`, `compose-bom:2024.12.01`, `navigation-compose:2.8.5`, `documentfile:1.0.1`, `room-*:2.7.0-alpha13` — © The Android Open Source Project.
+- **Apache Commons Compress** (`1.27.1`) — © The Apache Software Foundation. Used for CBZ/ZIP archive reading on Android.
+- **SMBJ** (`0.13.0`) — © Jeroen van Erp (Hierynomus). Used for SMB network drive connectivity on Android.
+- **Google LiteRT / TensorFlow Lite**:
+  - Android: `com.google.ai.edge.litert:litert:1.4.2` — © Google LLC / The TensorFlow Authors.
+  - iOS: `TensorFlowLiteSwift` / `TensorFlowLiteC` (`2.17.0`) via CocoaPods — © Google LLC / The TensorFlow Authors.
 
-### GNU LGPL 2.1 — 7-Zip-JBinding-4Android
-Full text: [`THIRD_PARTY_LICENSES/LGPL-2.1.txt`](THIRD_PARTY_LICENSES/LGPL-2.1.txt)
-Source: https://github.com/omicronapps/7-Zip-JBinding-4Android (wraps 7-Zip, https://7-zip.org)
+### MIT License
+Full text: [`THIRD_PARTY_LICENSES/MIT-ZIPFoundation.txt`](THIRD_PARTY_LICENSES/MIT-ZIPFoundation.txt)
 
-`com.github.omicronapps:7-Zip-JBinding-4Android` is used to read **CBR (RAR/RAR5)** archives. It is
-licensed **GNU LGPL 2.1**, with a portion under **LGPL + the unRAR license restriction**, and some
-files under BSD.
+- **ZIPFoundation** (`0.9.19`) — © 2017-2024 Thomas Weichselbaumer. Used for CBZ/ZIP archive handling on iOS.
 
-- **unRAR restriction:** the unRAR source may not be used to *re-create the RAR compression
-  algorithm*. Chika only **decompresses/reads** RAR archives, which is permitted.
-- **LGPL compliance:** the library ships as a dynamically-loaded native library (`.so`) that a user
-  could replace, satisfying LGPL §6 even when combined with the MPL-licensed application. We retain
-  the LGPL text and this attribution, and point to the upstream source above. If you distribute a
-  build, keep this notice and the library replaceable.
+### BSD Licenses
+Full text: [`THIRD_PARTY_LICENSES/BSD-libarchive.txt`](THIRD_PARTY_LICENSES/BSD-libarchive.txt)
 
-### SIL Open Font License 1.1 — Fonts
-Full texts: [`THIRD_PARTY_LICENSES/OFL-1.1-Anton.txt`](THIRD_PARTY_LICENSES/OFL-1.1-Anton.txt),
-[`THIRD_PARTY_LICENSES/OFL-1.1-Archivo.txt`](THIRD_PARTY_LICENSES/OFL-1.1-Archivo.txt)
+- **libarchive** via `libarchive-for-swift` (`1.0.0`) — © 2003-2024 Tim Kientzle et al. Used for CBR/RAR archive decompression on iOS.
 
-- **Anton** (display) and **Archivo** (UI), bundled in `app/src/main/res/font/`. The OFL permits
-  bundling and redistribution within software; the fonts may not be sold on their own, and the
-  copyright/Reserved Font Name notices are retained in the OFL texts above.
+### SIL Open Font License 1.1 (OFL-1.1)
+Full texts: [`THIRD_PARTY_LICENSES/OFL-1.1-Anton.txt`](THIRD_PARTY_LICENSES/OFL-1.1-Anton.txt), [`THIRD_PARTY_LICENSES/OFL-1.1-Archivo.txt`](THIRD_PARTY_LICENSES/OFL-1.1-Archivo.txt)
 
-## Bundled model & training data
+- **Anton** (Display Font) — © 2011 Vernon Adams (`vernon@sansseries.fr`).
+- **Archivo** (UI Font) — © 2019 Omnibus-Type (`omnibus-type@omnibus-type.com`).
+- *Obligation:* Fonts are bundled as application assets. Copyright and OFL license texts are retained. Fonts are not sold on a standalone basis.
 
-- **`manga_panel_detector_int8.tflite`** — from
-  [`leoxs22/manga-panel-detector-yolo26n`](https://huggingface.co/leoxs22/manga-panel-detector-yolo26n),
-  released under **Apache-2.0**. It detects panels (class 0) and text balloons (class 1).
-- The model was **trained on the Manga109-s dataset**. Per the dataset terms, commercial use of the
-  model's outputs is permitted provided dataset usage is disclosed — **this notice constitutes that
-  disclosure**. See http://www.manga109.org/ for dataset terms.
-- The model was produced with Ultralytics YOLO tooling; the distributed weights are licensed
-  Apache-2.0 by their author, which is the basis on which Chika redistributes them.
-- **Licensing caveat (to resolve before any commercial release):** the upstream weights are labelled
-  Apache-2.0, but because they are **trained on Manga109-s** (an academic/research dataset), some
-  readings — e.g. the CoMix project's license, which labels Manga109-trained weights CC BY-NC-SA 4.0
-  (non-commercial) — consider such weights non-commercial. The Manga109-s terms (clause 5) do appear
-  to permit commercial use of a trained model's *outputs*, so this is likely fine for distribution,
-  but it is **genuinely ambiguous**. Any Manga109-derived replacement model inherits the same
-  caveat; a model trained only on permissively-licensed (e.g. CC-BY) panel datasets would remove it.
+---
 
-## Brand assets
+## GNU LGPL 2.1 — 7-Zip-JBinding-4Android (Android Only)
 
-The **Chika / Chitra Katha** name, logo, and wordmark are brand assets owned by the project owner
-(Chakra / Chalchitra Krida) and are **not** covered by the MPL-2.0 code license. Trademark/brand
-rights are reserved even where the surrounding source is open.
+Full text: [`THIRD_PARTY_LICENSES/LGPL-2.1.txt`](THIRD_PARTY_LICENSES/LGPL-2.1.txt)  
+Upstream Source: https://github.com/omicronapps/7-Zip-JBinding-4Android (wraps 7-Zip JBinding / 7-Zip, https://7-zip.org)
 
-## Distribution notes
+`com.github.omicronapps:7-Zip-JBinding-4Android:Release-16.02-2.03` is bundled as a dynamically loaded native library (`lib7-Zip-JBinding.so`) on Android to decode **CBR (RAR/RAR5)** archives.
 
-- **Google Play / Apple App Store:** MPL-2.0 is compatible with both stores. (A strong-copyleft
-  license such as GPL would not be App-Store compatible — one reason MPL-2.0 was chosen.)
-- **F-Droid:** Chika bundles **prebuilt** native libraries (7-Zip-JBinding, TensorFlow Lite) and a
-  **prebuilt model** asset, pulled from trusted Maven repos (JitPack / Google Maven). These are
-  free-licensed and permitted, though F-Droid may flag the prebuilt model blob.
+- **unRAR License Restriction:** Portions derived from unRAR carry the restriction that unRAR source code may not be used to re-create the RAR compression algorithm. Leaf uses the library strictly for decompression/reading, which is permitted.
+- **LGPL §6 Relinking / Replacement Compliance:**
+  1. **Source Code Availability:** Leaf is an open-source project. Complete source code and build scripts are publicly accessible at https://github.com/bclark/leaf-reader. Any user may modify or update the 7-Zip-JBinding dependency or build scripts and recompile the application.
+  2. **APK Binary Replacement:** Users receiving prebuilt APK binaries may replace `lib7-Zip-JBinding.so` directly:
+     - Unzip the APK archive (`unzip Leaf.apk -d /tmp/apk`).
+     - Replace `lib/<abi>/lib7-Zip-JBinding.so` with a custom-compiled version of the library.
+     - Re-align and re-sign the APK using `zipalign` and `apksigner`.
+- **Platform Scope:** iOS does **not** bundle 7-Zip-JBinding or any LGPL code; iOS uses `libarchive` (BSD-licensed) for RAR decompression.
+
+---
+
+## Bundled Panel-Detection Model & Training Data
+
+- **Model Asset:** `manga_panel_detector_int8.tflite` (bundled in `app/src/main/assets/` on Android and `iosApp/Sources/` on iOS).
+- **Provenance & Model License (AGPL-3.0):**
+  - Originates from [`leoxs22/manga-panel-detector-yolo26n`](https://huggingface.co/leoxs22/manga-panel-detector-yolo26n).
+  - The model was trained and exported using **Ultralytics YOLO** (`yolov8n` / `yolo11n`) software and pretrained weights.
+  - While originally labelled Apache-2.0 on HuggingFace, the upstream author explicitly corrected the license label to **GNU AGPL-3.0** because it derives from Ultralytics AGPL-3.0 pretrained weights.
+  - Full Python training, dataset conversion, and export scripts are located in `training/` within this repository (`train.py`, `export_tflite.py`, `manga109_to_yolo.py`, `comics_to_yolo.py`).
+  - *Evaluation Note:* Retaining an AGPL-3.0 model asset in an open-source App Store or Google Play release is under review. An alternative model trained from a permissively licensed base (e.g., RT-DETR or YOLOX) on public domain datasets is recommended for future releases.
+
+- **Training Data Disclosures (Manga109-s & COMICS):**
+  - **Manga109-s Dataset:** The model was trained in part on annotations from the **Manga109-s dataset** (developed by the University of Tokyo / Manga109 Consortium).
+  - *Clarification on Manga109-s Availability:* Manga109-s is a research dataset available to researchers upon approved application directly from the provider at http://www.manga109.org/en/download_s.html. **Manga109-s is NOT a freely redistributable dataset**; dataset images and annotations are not included in this repository.
+  - *Disclosure Requirement:* Per Manga109 terms, use of Manga109-s in model training requires explicit citation/disclosure — **this notice constitutes that disclosure**. Dataset usage permissions do not override underlying model software/weights licenses (such as AGPL-3.0).
+  - **COMICS / UMIACS Dataset:** Additional training data includes public domain panel annotations from the COMICS dataset.
+
+---
+
+## Brand Assets & Upstream Attribution
+
+- Leaf is a fork of **Chika** (created by Chakra / Chalchitra Krida). Upstream source is maintained at https://github.com/batunii/chika.
+- The **Leaf** name, logo, and wordmarks are brand assets of this project. Trademark and brand rights for Chika / Chitra Katha remain reserved by their respective owners and are not governed by the code license.
