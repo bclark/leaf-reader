@@ -2331,42 +2331,56 @@ private fun ReadingListCard(
                     .clip(RoundedCornerShape(4.dp))
                     .background(DeepInkSurface)
                     .border(width = borderWidth, color = Ochre, shape = RoundedCornerShape(4.dp)),
-                contentAlignment = Alignment.Center,
             ) {
                 if (topCover != null) {
                     Image(
                         topCover,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 0.22f },
+                        contentDescription = item.readingList.name,
+                        modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop,
                     )
+                } else {
+                    GeneratedCover(item.readingList.name, columns = columns)
                 }
 
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(14.dp),
+                // Top-left badge matching Series Stack style
+                Box(
+                    modifier = Modifier
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(Ink.copy(alpha = 0.85f))
+                        .border(1.dp, Ochre, RoundedCornerShape(3.dp))
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        Icons.Default.Menu,
-                        contentDescription = null,
-                        tint = Ochre,
-                        modifier = Modifier.size(32.dp),
-                    )
                     Text(
-                        item.readingList.name.uppercase(),
+                        text = "${item.itemCount} ${if (item.itemCount == 1) "ITEM" else "ITEMS"}",
                         fontFamily = Anton,
-                        fontSize = 14.sp,
+                        fontSize = 9.sp,
                         color = Cream,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center,
                     )
-                    OchreBadge("${item.itemCount} ${if (item.itemCount == 1) "ITEM" else "ITEMS"}")
                 }
             }
         }
-        Spacer(Modifier.height(18.dp))
+
+        Text(
+            item.readingList.name.uppercase(),
+            fontFamily = Archivo,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = if (columns >= 5) 10.sp else if (columns >= 4) 11.sp else 12.sp,
+            color = Cream,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp),
+        )
+        Text(
+            "${item.itemCount} ${if (item.itemCount == 1) "item" else "items"}",
+            fontFamily = Archivo,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = if (columns >= 4) 8.5.sp else 9.5.sp,
+            color = CreamMuted,
+            modifier = Modifier.padding(top = 2.dp),
+        )
     }
 }
 
