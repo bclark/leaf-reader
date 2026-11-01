@@ -59,6 +59,8 @@ import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -161,6 +163,9 @@ fun LibraryScreen(
     var pendingDelete by remember { mutableStateOf<ComicEntity?>(null) }
     var showBatchDeleteDialog by remember { mutableStateOf(false) }
     var showSourceDialog by remember { mutableStateOf(false) }
+    var showGroupDialog by remember { mutableStateOf(false) }
+    var seriesInput by remember(showGroupDialog) { mutableStateOf("") }
+    var volumeInput by remember(showGroupDialog) { mutableStateOf("") }
 
     var isSearchOpen by rememberSaveable { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
@@ -711,7 +716,7 @@ fun LibraryScreen(
                                 .comicShadow(offset = 3.dp, color = Color(0xB3000000))
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(DeepInkSurface)
-                                .border(2.dp, ComicRose, RoundedCornerShape(6.dp))
+                                .border(2.dp, Ochre, RoundedCornerShape(6.dp))
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {
                             Row(
@@ -719,7 +724,7 @@ fun LibraryScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Column {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                                     Text(
                                         text = "${selectedComicIds.size} ${if (selectedComicIds.size == 1) "COMIC" else "COMICS"} SELECTED",
                                         fontFamily = Anton,
@@ -727,26 +732,43 @@ fun LibraryScreen(
                                         color = PaperWhite,
                                     )
                                     Text(
-                                        text = "Tap delete to remove selected copies",
+                                        text = "Group into series stack or delete selected",
                                         fontFamily = Archivo,
                                         fontSize = 11.sp,
                                         color = PaperWhiteMuted,
                                     )
                                 }
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(ComicRose)
-                                        .clickable { showBatchDeleteDialog = true }
-                                        .padding(horizontal = 16.dp, vertical = 9.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        text = "DELETE (${selectedComicIds.size})",
-                                        fontFamily = Anton,
-                                        fontSize = 13.sp,
-                                        color = PaperWhite,
-                                    )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Ochre)
+                                            .clickable { showGroupDialog = true }
+                                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            text = "SET SERIES",
+                                            fontFamily = Anton,
+                                            fontSize = 12.sp,
+                                            color = Ink,
+                                        )
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(ComicRose)
+                                            .clickable { showBatchDeleteDialog = true }
+                                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            text = "DELETE",
+                                            fontFamily = Anton,
+                                            fontSize = 12.sp,
+                                            color = PaperWhite,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -820,6 +842,61 @@ fun LibraryScreen(
             confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { showSourceDialog = false }) { Text("CANCEL", color = PaperWhiteMuted) }
+            },
+            containerColor = DeepInkSurface,
+        )
+    }
+
+    if (showGroupDialog) {
+        AlertDialog(
+            onDismissRequest = { showGroupDialog = false },
+            title = { Text("Set Series Name", fontFamily = Anton, color = PaperWhite) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Comics with the same Series Name automatically group into a Series Stack in your library.",
+                        fontFamily = Archivo,
+                        fontSize = 12.sp,
+                        color = PaperWhiteMuted,
+                    )
+                    OutlinedTextField(
+                        value = seriesInput,
+                        onValueChange = { seriesInput = it },
+                        label = { Text("Series Name (e.g. Deadpool)", color = CreamMuted) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Ochre,
+                            unfocusedBorderColor = DeepInk,
+                            focusedTextColor = PaperWhite,
+                            unfocusedTextColor = PaperWhite,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = volumeInput,
+                        onValueChange = { volumeInput = it },
+                        label = { Text("Volume (Optional, e.g. Vol. 2)", color = CreamMuted) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Ochre,
+                            unfocusedBorderColor = DeepInk,
+                            focusedTextColor = PaperWhite,
+                            unfocusedTextColor = PaperWhite,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.updateComicsSeries(selectedComicIds.toList(), seriesInput, volumeInput)
+                    showGroupDialog = false
+                }) {
+                    Text("SAVE & GROUP", color = Ochre, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGroupDialog = false }) { Text("CANCEL", color = PaperWhiteMuted) }
             },
             containerColor = DeepInkSurface,
         )

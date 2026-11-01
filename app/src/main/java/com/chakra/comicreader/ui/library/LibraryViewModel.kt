@@ -442,6 +442,42 @@ class LibraryViewModel(
         }
     }
 
+    fun updateComicsSeries(ids: List<Long>, series: String?, volume: String?) {
+        val s = series?.trim()?.ifBlank { null }
+        val v = volume?.trim()?.ifBlank { null }
+        viewModelScope.launch {
+            for (id in ids) {
+                val comic = repository.getComic(id) ?: continue
+                repository.updateComicMetadata(id, s, v, comic.issueNumber)
+            }
+            _selectedComicIds.value = emptySet()
+            _isEditMode.value = false
+            _message.value = if (s != null) "Grouped ${ids.size} comics under \"$s\"" else "Cleared series for ${ids.size} comics"
+        }
+    }
+
+    fun createReadingList(name: String, onCreated: (Long) -> Unit = {}) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            val id = repository.createReadingList(name.trim())
+            if (id > 0) {
+                _message.value = "Created reading list \"${name.trim()}\""
+                onCreated(id)
+            }
+        }
+    }
+
+    fun addComicsToReadingList(listId: Long, comicIds: List<Long>) {
+        viewModelScope.launch {
+            for (id in comicIds) {
+                repository.addComicToReadingList(listId, id)
+            }
+            _selectedComicIds.value = emptySet()
+            _isEditMode.value = false
+            _message.value = "Added ${comicIds.size} comics to reading list"
+        }
+    }
+
     fun markSeriesRead(seriesName: String, volume: String?, read: Boolean) {
         viewModelScope.launch {
             val allComics = repository.comics.firstOrNull() ?: emptyList()
