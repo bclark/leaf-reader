@@ -1103,6 +1103,67 @@ fun LibraryScreen(
         )
     }
 
+    if (showCreateListDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showCreateListDialog = false
+                createListNameInput = ""
+            },
+            title = {
+                Text("Create Reading List", fontFamily = Anton, color = PaperWhite)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Enter a name for your new reading list.",
+                        fontFamily = Archivo,
+                        fontSize = 12.sp,
+                        color = PaperWhiteMuted,
+                    )
+                    OutlinedTextField(
+                        value = createListNameInput,
+                        onValueChange = { createListNameInput = it },
+                        label = { Text("List Name (e.g. Favorites)", color = CreamMuted) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Ochre,
+                            unfocusedBorderColor = DeepInk,
+                            focusedTextColor = PaperWhite,
+                            unfocusedTextColor = PaperWhite,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = {
+                        if (createListNameInput.isNotBlank()) {
+                            val listName = createListNameInput.trim()
+                            viewModel.createReadingList(listName) { newListId ->
+                                activeReadingList = ReadingListEntity(id = newListId, name = listName)
+                                showAddComicsToListDialog = true
+                            }
+                            showCreateListDialog = false
+                            createListNameInput = ""
+                        }
+                    }) {
+                        Text("CREATE & ADD COMICS", color = Ochre, fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showCreateListDialog = false
+                    createListNameInput = ""
+                }) {
+                    Text("CANCEL", color = PaperWhiteMuted)
+                }
+            },
+            containerColor = DeepInkSurface,
+        )
+    }
+
     activeReadingList?.let { list ->
         val comicsInList by viewModel.observeComicsForList(list.id).collectAsStateWithLifecycle(emptyList())
 
