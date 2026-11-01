@@ -460,70 +460,50 @@ fun LibraryScreen(
                             }
 
                             if (!isEditMode) {
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text(
-                                        "COLUMNS",
-                                        fontFamily = Archivo,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 7.sp,
-                                        color = CreamMuted,
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .padding(top = 1.dp)
-                                            .clip(RoundedCornerShape(3.dp))
-                                            .background(Ochre)
-                                            .border(1.dp, Ink, RoundedCornerShape(3.dp))
-                                            .clickable {
-                                                val idx = availableColumns.indexOf(actualColumns)
-                                                val next = availableColumns[(if (idx >= 0) idx + 1 else 0) % availableColumns.size]
-                                                viewModel.setLibraryColumns(next)
-                                            }
-                                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                                        ) {
-                                            ColumnDensityIcon(columns = actualColumns)
-                                            Text(
-                                                "$actualColumns",
-                                                fontFamily = Anton,
-                                                fontSize = 11.5.sp,
-                                                color = Ink,
-                                            )
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(Ochre)
+                                        .border(1.dp, Ink, RoundedCornerShape(3.dp))
+                                        .clickable {
+                                            val idx = availableColumns.indexOf(actualColumns)
+                                            val next = availableColumns[(if (idx >= 0) idx + 1 else 0) % availableColumns.size]
+                                            viewModel.setLibraryColumns(next)
                                         }
+                                        .padding(horizontal = 9.dp, vertical = 5.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    ) {
+                                        ColumnDensityIcon(columns = actualColumns)
+                                        Text(
+                                            "$actualColumns",
+                                            fontFamily = Anton,
+                                            fontSize = 11.sp,
+                                            color = Ink,
+                                        )
                                     }
                                 }
 
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text(
-                                        "READING DIRECTION",
-                                        fontFamily = Archivo,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 7.sp,
-                                        color = CreamMuted,
-                                    )
-                                    Box(
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(Ochre)
+                                        .border(1.dp, Ink, RoundedCornerShape(3.dp))
+                                        .clickable { viewModel.toggleDefaultDirection() }
+                                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = if (defaultRtl) "Reading Direction: RTL" else "Reading Direction: LTR",
+                                        tint = Ink,
                                         modifier = Modifier
-                                            .padding(top = 1.dp)
-                                            .clip(RoundedCornerShape(3.dp))
-                                            .background(Ochre)
-                                            .border(1.dp, Ink, RoundedCornerShape(3.dp))
-                                            .clickable { viewModel.toggleDefaultDirection() }
-                                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                            contentDescription = if (defaultRtl) "Reading Direction: RTL" else "Reading Direction: LTR",
-                                            tint = Ink,
-                                            modifier = Modifier
-                                                .size(16.dp)
-                                                .graphicsLayer { rotationY = rtlRotation },
-                                        )
-                                    }
+                                            .size(15.dp)
+                                            .graphicsLayer { rotationY = rtlRotation },
+                                    )
                                 }
                             }
                         }
