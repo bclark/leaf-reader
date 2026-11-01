@@ -90,9 +90,10 @@ class LibraryViewModel(
     val libraryItems: StateFlow<List<LibraryItem>> = combine(
         repository.comics,
         repository.readingLists,
+        repository.allReadingListItems,
         _searchQuery,
         _libraryFilter,
-    ) { allComics, lists, query, filter ->
+    ) { allComics, lists, allListItems, query, filter ->
         val filteredComics = if (query.isBlank()) {
             allComics
         } else {
@@ -181,11 +182,14 @@ class LibraryViewModel(
                 } else {
                     lists.filter { it.name.contains(query.trim(), ignoreCase = true) }
                 }
+                val comicMap = allComics.associateBy { it.id }
                 filteredLists.map { list ->
+                    val listItems = allListItems.filter { it.listId == list.id }.sortedBy { it.sortOrder }
+                    val listComics = listItems.mapNotNull { comicMap[it.comicId] }
                     LibraryItem.ReadingListItem(
                         readingList = list,
-                        previewComics = emptyList(),
-                        itemCount = 0,
+                        previewComics = listComics.take(4),
+                        itemCount = listComics.size,
                     )
                 }
             }

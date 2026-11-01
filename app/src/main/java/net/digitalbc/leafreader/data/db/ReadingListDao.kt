@@ -12,6 +12,9 @@ interface ReadingListDao {
     @Query("SELECT * FROM reading_lists ORDER BY updatedAt DESC")
     fun observeAll(): Flow<List<ReadingListEntity>>
 
+    @Query("SELECT * FROM reading_list_items")
+    fun observeAllItems(): Flow<List<ReadingListItemEntity>>
+
     @Query("SELECT * FROM reading_lists WHERE id = :id")
     suspend fun getById(id: Long): ReadingListEntity?
 

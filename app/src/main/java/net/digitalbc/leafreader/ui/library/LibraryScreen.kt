@@ -184,6 +184,10 @@ fun LibraryScreen(
     var activeReadingList by remember { mutableStateOf<ReadingListEntity?>(null) }
     var showRenameListDialog by remember { mutableStateOf(false) }
     var renameListInput by remember(showRenameListDialog) { mutableStateOf("") }
+    var showCreateListDialog by remember { mutableStateOf(false) }
+    var createListNameInput by remember(showCreateListDialog) { mutableStateOf("") }
+    var showAddComicsToListDialog by remember { mutableStateOf(false) }
+    var selectedComicsForList by remember(showAddComicsToListDialog) { mutableStateOf(emptySet<Long>()) }
 
     var isSearchOpen by rememberSaveable { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
@@ -668,6 +672,8 @@ fun LibraryScreen(
                     }
                 }
 
+                val isListsFilter = currentFilter == LibraryFilter.READING_LISTS
+
                 if (searchQuery.isBlank() && !isEditMode) {
                     item {
                         AddTile(
@@ -676,7 +682,13 @@ fun LibraryScreen(
                             status = importStatus,
                             detail = importDetail,
                             columns = actualColumns,
-                            onClick = { if (!importing) showSourceDialog = true },
+                            isListsFilter = isListsFilter,
+                            onClick = {
+                                if (!importing) {
+                                    if (isListsFilter) showCreateListDialog = true
+                                    else showSourceDialog = true
+                                }
+                            },
                             onCancel = { viewModel.cancelImport() },
                         )
                     }
@@ -684,8 +696,14 @@ fun LibraryScreen(
             }
 
             if (!isEditMode && !importing) {
+                val isListsFilter = currentFilter == LibraryFilter.READING_LISTS
                 ExtendedFloatingActionButton(
-                    onClick = { if (!importing) showSourceDialog = true },
+                    onClick = {
+                        if (!importing) {
+                            if (isListsFilter) showCreateListDialog = true
+                            else showSourceDialog = true
+                        }
+                    },
                     containerColor = LeafAccent,
                     contentColor = DeepInk,
                     shape = RoundedCornerShape(4.dp),
@@ -695,11 +713,11 @@ fun LibraryScreen(
                         .navigationBarsPadding()
                         .padding(20.dp),
                     icon = {
-                        Icon(Icons.Default.Add, contentDescription = "Add comic", tint = DeepInk)
+                        Icon(Icons.Default.Add, contentDescription = if (isListsFilter) "Create list" else "Add comic", tint = DeepInk)
                     },
                     text = {
                         Text(
-                            "ADD COMIC",
+                            text = if (isListsFilter) "CREATE LIST" else "ADD COMIC",
                             fontFamily = Anton,
                             fontSize = 14.sp,
                             color = DeepInk,
@@ -1941,6 +1959,7 @@ private fun AddTile(
     status: String? = null,
     detail: String? = null,
     columns: Int = 2,
+    isListsFilter: Boolean = false,
     onClick: () -> Unit,
     onCancel: () -> Unit = {},
 ) {
@@ -1989,7 +2008,7 @@ private fun AddTile(
                     if (status != null) "$pct% · $status".uppercase()
                     else if (progress > 0f) "LOADING $pct%"
                     else "LOADING…"
-                } else "LOAD COMIC",
+                } else if (isListsFilter) "CREATE LIST" else "LOAD COMIC",
                 fontFamily = Anton,
                 fontSize = fontSize,
                 color = PaperWhite,

@@ -48,6 +48,9 @@ class LibraryRepository(
     val readingLists: Flow<List<ReadingListEntity>> =
         readingListDao?.observeAll() ?: emptyFlow()
 
+    val allReadingListItems: Flow<List<ReadingListItemEntity>> =
+        readingListDao?.observeAllItems() ?: emptyFlow()
+
     fun observeComicsForList(listId: Long): Flow<List<ComicEntity>> =
         readingListDao?.observeComicsForList(listId) ?: emptyFlow()
 
