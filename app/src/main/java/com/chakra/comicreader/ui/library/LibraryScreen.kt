@@ -50,6 +50,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -57,6 +58,7 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -398,20 +400,21 @@ fun LibraryScreen(
                         } else if (searchQuery.isNotBlank()) {
                             OchreBadge("FOUND ${comics.size} ${if (comics.size == 1) "COMIC" else "COMICS"}")
                         } else {
-                            Spacer(Modifier.width(1.dp))
+                            OchreBadge("YOUR LIBRARY")
                         }
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             if (!isEditMode && comics.isNotEmpty()) {
                                 Box(
                                     modifier = Modifier
+                                        .height(30.dp)
                                         .clip(RoundedCornerShape(3.dp))
                                         .background(InkSoft)
                                         .border(1.dp, Ink, RoundedCornerShape(3.dp))
                                         .clickable { viewModel.setEditMode(true) }
-                                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                                        .padding(horizontal = 10.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
@@ -425,6 +428,7 @@ fun LibraryScreen(
                                 val allSelected = comics.isNotEmpty() && selectedComicIds.size == comics.size
                                 Box(
                                     modifier = Modifier
+                                        .height(30.dp)
                                         .clip(RoundedCornerShape(3.dp))
                                         .background(if (allSelected) Ochre else InkSoft)
                                         .border(1.dp, Ink, RoundedCornerShape(3.dp))
@@ -432,7 +436,7 @@ fun LibraryScreen(
                                             if (allSelected) viewModel.clearComicSelection()
                                             else viewModel.selectAllComics(comics.map { it.id })
                                         }
-                                        .padding(horizontal = 9.dp, vertical = 5.dp),
+                                        .padding(horizontal = 10.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
@@ -444,10 +448,11 @@ fun LibraryScreen(
                                 }
                                 Box(
                                     modifier = Modifier
+                                        .height(30.dp)
                                         .clip(RoundedCornerShape(3.dp))
                                         .background(Ochre)
                                         .clickable { viewModel.setEditMode(false) }
-                                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                                        .padding(horizontal = 10.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
@@ -462,6 +467,7 @@ fun LibraryScreen(
                             if (!isEditMode) {
                                 Box(
                                     modifier = Modifier
+                                        .height(30.dp)
                                         .clip(RoundedCornerShape(3.dp))
                                         .background(Ochre)
                                         .border(1.dp, Ink, RoundedCornerShape(3.dp))
@@ -470,7 +476,7 @@ fun LibraryScreen(
                                             val next = availableColumns[(if (idx >= 0) idx + 1 else 0) % availableColumns.size]
                                             viewModel.setLibraryColumns(next)
                                         }
-                                        .padding(horizontal = 9.dp, vertical = 5.dp),
+                                        .padding(horizontal = 9.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Row(
@@ -489,21 +495,32 @@ fun LibraryScreen(
 
                                 Box(
                                     modifier = Modifier
+                                        .height(30.dp)
                                         .clip(RoundedCornerShape(3.dp))
                                         .background(Ochre)
                                         .border(1.dp, Ink, RoundedCornerShape(3.dp))
                                         .clickable { viewModel.toggleDefaultDirection() }
-                                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                                        .padding(horizontal = 10.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                        contentDescription = if (defaultRtl) "Reading Direction: RTL" else "Reading Direction: LTR",
-                                        tint = Ink,
-                                        modifier = Modifier
-                                            .size(15.dp)
-                                            .graphicsLayer { rotationY = rtlRotation },
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.graphicsLayer { rotationY = rtlRotation },
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                                            contentDescription = null,
+                                            tint = Ink,
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                            contentDescription = if (defaultRtl) "Reading Direction: RTL" else "Reading Direction: LTR",
+                                            tint = Ink,
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                    }
                                 }
                             }
                         }
