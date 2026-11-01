@@ -13,6 +13,9 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -2139,6 +2142,41 @@ internal fun rememberCover(path: String?): ImageBitmap? {
     return state
 }
 
+private fun Modifier.twoPointerSwipeToFlip(
+    enabled: Boolean = true,
+    onFlipNext: () -> Unit,
+    onFlipPrev: () -> Unit,
+): Modifier = pointerInput(enabled) {
+    if (!enabled) return@pointerInput
+    awaitEachGesture {
+        var totalDragY = 0f
+        var isTwoPointers = false
+
+        while (true) {
+            val event = awaitPointerEvent()
+            if (event.changes.size >= 2) {
+                isTwoPointers = true
+                val dragAmount = event.changes[0].position.y - event.changes[0].previousPosition.y
+                totalDragY += dragAmount
+
+                event.changes.forEach { it.consume() }
+
+                if (totalDragY < -35f) {
+                    onFlipNext()
+                    totalDragY = 0f
+                } else if (totalDragY > 35f) {
+                    onFlipPrev()
+                    totalDragY = 0f
+                }
+            } else {
+                if (isTwoPointers && event.changes.all { !it.pressed }) {
+                    break
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ComicStackCard(
     stack: LibraryItem.SeriesStack,
@@ -2150,7 +2188,30 @@ private fun ComicStackCard(
     val shadowOffset = if (columns >= 4) 3.dp else 5.dp
     val progressHeight = if (columns >= 4) 5.dp else 7.dp
 
-    Column(Modifier.clickable(onClick = onClick)) {
+    var topIndex by remember(stack.issues) { mutableIntStateOf(0) }
+    val issueCount = stack.issues.size
+    val currentTopComic = remember(stack.issues, topIndex) {
+        if (issueCount > 0) stack.issues[(topIndex % issueCount + issueCount) % issueCount]
+        else stack.topCoverComic
+    }
+    val layer2Comic = remember(stack.issues, topIndex) {
+        if (issueCount >= 2) stack.issues[((topIndex + 1) % issueCount + issueCount) % issueCount]
+        else null
+    }
+    val layer3Comic = remember(stack.issues, topIndex) {
+        if (issueCount >= 3) stack.issues[((topIndex + 2) % issueCount + issueCount) % issueCount]
+        else null
+    }
+
+    Column(
+        Modifier
+            .twoPointerSwipeToFlip(
+                enabled = stack.totalIssues > 1,
+                onFlipNext = { topIndex++ },
+                onFlipPrev = { topIndex-- },
+            )
+            .clickable(onClick = onClick)
+    ) {
         Box(
             Modifier
                 .fillMaxWidth()
@@ -2159,6 +2220,7 @@ private fun ComicStackCard(
         ) {
             // Neat Stack Layer 3 (for 3+ issues) - highest top offset
             if (stack.totalIssues >= 3) {
+                val cover3 = rememberCover(layer3Comic?.coverPath)
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -2169,11 +2231,16 @@ private fun ComicStackCard(
                         .clip(RoundedCornerShape(4.dp))
                         .background(InkSoft)
                         .border(1.5.dp, LeafSecondary, RoundedCornerShape(4.dp))
-                )
+                ) {
+                    if (cover3 != null) {
+                        Image(cover3, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    }
+                }
             }
 
             // Neat Stack Layer 2 (for 2+ issues) - middle top offset
             if (stack.totalIssues >= 2) {
+                val cover2 = rememberCover(layer2Comic?.coverPath)
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -2184,7 +2251,11 @@ private fun ComicStackCard(
                         .clip(RoundedCornerShape(4.dp))
                         .background(DeepInkSurface)
                         .border(1.5.dp, Ochre, RoundedCornerShape(4.dp))
-                )
+                ) {
+                    if (cover2 != null) {
+                        Image(cover2, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    }
+                }
             }
 
             // Front Layer (Main cover)
@@ -2196,9 +2267,9 @@ private fun ComicStackCard(
                     .background(InkSoft)
                     .border(width = borderWidth, color = Ink, shape = RoundedCornerShape(4.dp)),
             ) {
-                val cover = rememberCover(stack.topCoverComic.coverPath)
-                if (cover != null) {
-                    Image(cover, stack.seriesName, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                val cover1 = rememberCover(currentTopComic.coverPath)
+                if (cover1 != null) {
+                    Image(cover1, stack.seriesName, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 } else {
                     GeneratedCover(stack.seriesName, columns = columns)
                 }
@@ -2212,8 +2283,9 @@ private fun ComicStackCard(
                         .padding(horizontal = 6.dp, vertical = 3.dp),
                     contentAlignment = Alignment.Center,
                 ) {
+                    val currentIssueNum = if (issueCount > 0) (topIndex % issueCount + issueCount) % issueCount + 1 else 1
                     Text(
-                        text = if (stack.volume != null) "${stack.seriesName.uppercase()} · ${stack.volume.uppercase()}" else "${stack.totalIssues} ISSUES",
+                        text = if (stack.totalIssues > 1) "ISSUE $currentIssueNum OF ${stack.totalIssues}" else if (stack.volume != null) "${stack.seriesName.uppercase()} · ${stack.volume.uppercase()}" else "1 ISSUE",
                         fontFamily = Anton,
                         fontSize = 9.sp,
                         color = Cream,
@@ -2255,7 +2327,30 @@ private fun ReadingListCard(
     val borderWidth = if (columns >= 4) 2.dp else 3.dp
     val shadowOffset = if (columns >= 4) 3.dp else 5.dp
 
-    Column(Modifier.clickable(onClick = onClick)) {
+    var topIndex by remember(item.previewComics) { mutableIntStateOf(0) }
+    val totalCount = item.previewComics.size
+    val currentTopComic = remember(item.previewComics, topIndex) {
+        if (totalCount > 0) item.previewComics[(topIndex % totalCount + totalCount) % totalCount]
+        else null
+    }
+    val layer2Comic = remember(item.previewComics, topIndex) {
+        if (totalCount >= 2) item.previewComics[((topIndex + 1) % totalCount + totalCount) % totalCount]
+        else null
+    }
+    val layer3Comic = remember(item.previewComics, topIndex) {
+        if (totalCount >= 3) item.previewComics[((topIndex + 2) % totalCount + totalCount) % totalCount]
+        else null
+    }
+
+    Column(
+        Modifier
+            .twoPointerSwipeToFlip(
+                enabled = item.itemCount > 1,
+                onFlipNext = { topIndex++ },
+                onFlipPrev = { topIndex-- },
+            )
+            .clickable(onClick = onClick)
+    ) {
         Box(
             Modifier
                 .fillMaxWidth()
@@ -2267,8 +2362,7 @@ private fun ReadingListCard(
         ) {
             // Messy Layer 3 (Rotated Left) - for 3+ items
             if (item.itemCount >= 3) {
-                val backCoverPath = item.previewComics.getOrNull(2)?.coverPath
-                val backCover = rememberCover(backCoverPath)
+                val backCover = rememberCover(layer3Comic?.coverPath)
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -2295,8 +2389,7 @@ private fun ReadingListCard(
 
             // Messy Layer 2 (Rotated Right) - for 2+ items
             if (item.itemCount >= 2) {
-                val midCoverPath = item.previewComics.getOrNull(1)?.coverPath
-                val midCover = rememberCover(midCoverPath)
+                val midCover = rememberCover(layer2Comic?.coverPath)
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -2322,8 +2415,7 @@ private fun ReadingListCard(
             }
 
             // Front Main List Card
-            val topCoverPath = item.previewComics.firstOrNull()?.coverPath
-            val topCover = rememberCover(topCoverPath)
+            val topCover = rememberCover(currentTopComic?.coverPath)
             Box(
                 Modifier
                     .fillMaxSize()
@@ -2353,8 +2445,9 @@ private fun ReadingListCard(
                         .padding(horizontal = 6.dp, vertical = 3.dp),
                     contentAlignment = Alignment.Center,
                 ) {
+                    val currentItemNum = if (totalCount > 0) (topIndex % totalCount + totalCount) % totalCount + 1 else 1
                     Text(
-                        text = "${item.itemCount} ${if (item.itemCount == 1) "ITEM" else "ITEMS"}",
+                        text = if (item.itemCount > 1) "ITEM $currentItemNum OF ${item.itemCount}" else "${item.itemCount} ${if (item.itemCount == 1) "ITEM" else "ITEMS"}",
                         fontFamily = Anton,
                         fontSize = 9.sp,
                         color = Cream,
