@@ -58,6 +58,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
@@ -190,6 +192,7 @@ fun LibraryScreen(
     var createListNameInput by remember(showCreateListDialog) { mutableStateOf("") }
     var showAddComicsToListDialog by remember { mutableStateOf(false) }
     var selectedComicsForList by remember(showAddComicsToListDialog) { mutableStateOf(emptySet<Long>()) }
+    var comicOptionsTarget by remember { mutableStateOf<ComicEntity?>(null) }
 
     var isSearchOpen by rememberSaveable { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
@@ -645,11 +648,10 @@ fun LibraryScreen(
                                     }
                                 },
                                 onLongClick = {
-                                    if (!isEditMode) {
-                                        viewModel.setEditMode(true)
+                                    if (isEditMode) {
                                         viewModel.toggleComicSelection(item.comic.id)
                                     } else {
-                                        pendingDelete = item.comic
+                                        comicOptionsTarget = item.comic
                                     }
                                 },
                             )
@@ -1283,6 +1285,140 @@ fun LibraryScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showBatchDeleteDialog = false }) { Text("CANCEL", color = PaperWhiteMuted) }
+            },
+            containerColor = DeepInkSurface,
+        )
+    }
+
+    comicOptionsTarget?.let { comic ->
+        val isRead = comic.pageCount > 0 && comic.lastPage >= comic.pageCount - 1
+        AlertDialog(
+            onDismissRequest = { comicOptionsTarget = null },
+            title = {
+                Text(
+                    text = comic.title.uppercase(),
+                    fontFamily = Anton,
+                    color = PaperWhite,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = "COMIC ACTIONS",
+                        fontFamily = Archivo,
+                        fontSize = 11.5.sp,
+                        color = LeafAccent,
+                    )
+
+                    // Option 1: ADD TO READING LIST
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(LeafAccent)
+                            .clickable {
+                                val target = comicOptionsTarget
+                                comicOptionsTarget = null
+                                if (target != null) {
+                                    viewModel.setSelectedComicIds(setOf(target.id))
+                                    showAddToListDialog = true
+                                }
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, tint = DeepInk, modifier = Modifier.size(18.dp))
+                        Text("ADD TO READING LIST", fontFamily = Anton, fontSize = 13.sp, color = DeepInk)
+                    }
+
+                    // Option 2: SET SERIES
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(DeepInk)
+                            .border(1.dp, Ochre, RoundedCornerShape(4.dp))
+                            .clickable {
+                                val target = comicOptionsTarget
+                                comicOptionsTarget = null
+                                if (target != null) {
+                                    seriesInput = target.series.orEmpty()
+                                    volumeInput = target.volume.orEmpty()
+                                    viewModel.setSelectedComicIds(setOf(target.id))
+                                    showGroupDialog = true
+                                }
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, tint = Ochre, modifier = Modifier.size(18.dp))
+                        Text("SET SERIES NAME", fontFamily = Anton, fontSize = 13.sp, color = PaperWhite)
+                    }
+
+                    // Option 3: MARK AS READ / UNREAD
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(DeepInk)
+                            .border(1.dp, LeafSecondary.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                            .clickable {
+                                val target = comicOptionsTarget
+                                comicOptionsTarget = null
+                                if (target != null) {
+                                    viewModel.markComicRead(target.id, !isRead)
+                                }
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(
+                            if (isRead) Icons.Default.Close else Icons.Default.Check,
+                            contentDescription = null,
+                            tint = Ochre,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            if (isRead) "MARK AS UNREAD" else "MARK AS READ",
+                            fontFamily = Anton,
+                            fontSize = 13.sp,
+                            color = PaperWhite,
+                        )
+                    }
+
+                    // Option 4: DELETE COMIC
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(ComicRose.copy(alpha = 0.15f))
+                            .border(1.dp, ComicRose, RoundedCornerShape(4.dp))
+                            .clickable {
+                                val target = comicOptionsTarget
+                                comicOptionsTarget = null
+                                pendingDelete = target
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, tint = ComicRose, modifier = Modifier.size(18.dp))
+                        Text("DELETE COMIC", fontFamily = Anton, fontSize = 13.sp, color = ComicRose)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { comicOptionsTarget = null }) {
+                    Text("CLOSE", color = PaperWhiteMuted)
+                }
             },
             containerColor = DeepInkSurface,
         )

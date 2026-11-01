@@ -430,6 +430,10 @@ class LibraryViewModel(
         _selectedComicIds.value = ids.toSet()
     }
 
+    fun setSelectedComicIds(ids: Set<Long>) {
+        _selectedComicIds.value = ids
+    }
+
     fun clearComicSelection() {
         _selectedComicIds.value = emptySet()
     }
@@ -504,6 +508,15 @@ class LibraryViewModel(
     fun removeComicFromReadingList(listId: Long, comicId: Long) {
         viewModelScope.launch {
             repository.removeComicFromReadingList(listId, comicId)
+        }
+    }
+
+    fun markComicRead(comicId: Long, read: Boolean) {
+        viewModelScope.launch {
+            val comic = repository.getComic(comicId) ?: return@launch
+            val newPage = if (read) (comic.pageCount - 1).coerceAtLeast(0) else 0
+            repository.saveProgress(comic.id, newPage, 0)
+            _message.value = if (read) "Marked \"${comic.title}\" as read" else "Marked \"${comic.title}\" as unread"
         }
     }
 
