@@ -7,17 +7,29 @@ import com.hierynomus.msfscc.FileAttributes
 import com.hierynomus.mssmb2.SMB2CreateDisposition
 import com.hierynomus.mssmb2.SMB2ShareAccess
 import com.hierynomus.protocol.commons.EnumWithValue
+import com.hierynomus.mssmb2.SMB2Dialect
 import com.hierynomus.smbj.SMBClient
+import com.hierynomus.smbj.SmbConfig
 import com.hierynomus.smbj.auth.AuthenticationContext
 import com.hierynomus.smbj.share.DiskShare
+import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.util.EnumSet
+import java.util.concurrent.TimeUnit
 
 data class SmbEntry(
     val name: String,
     val path: String,
     val isDirectory: Boolean,
     val sizeBytes: Long = 0L,
+)
+
+data class SmbTransferProgress(
+    val fraction: Float,
+    val bytesTransferred: Long,
+    val totalBytes: Long,
+    val bytesPerSec: Long,
 )
 
 object SmbClient {
@@ -64,8 +76,8 @@ object SmbClient {
         settings: AppSettings,
         entry: SmbEntry,
         dest: File,
-        isActive: () -> Boolean = { true },
-        onProgress: (Float) -> Unit = {},
+        onProgress: (SmbTransferProgress) -> Unit = {},
+        isCancelled: () -> Boolean = { false },
     ) {
         withShare(settings) { share, basePath ->
             val fullPath = joinPath(basePath, entry.path)
@@ -78,22 +90,42 @@ object SmbClient {
                 null,
             ).use { remoteFile ->
                 val total = entry.sizeBytes.takeIf { it > 0L }
-                    ?: runCatching { remoteFile.fileInformation.standardInformation.endOfFile }.getOrDefault(0L)
+                    ?: runCatching { remoteFile.fileInformation.standardInformation.endOfFile }.getOrNull()?.takeIf { it > 0L }
+                    ?: runCatching { share.getFileInformation(fullPath).standardInformation.endOfFile }.getOrDefault(0L)
                 remoteFile.inputStream.use { input ->
-                    dest.outputStream().use { output ->
-                        val buf = ByteArray(64 * 1024)
+                    BufferedOutputStream(FileOutputStream(dest), 1024 * 1024).use { output ->
+                        val buf = ByteArray(1024 * 1024)
                         var copied = 0L
-                        var read: Int
-                        while (input.read(buf).also { read = it } >= 0) {
-                            if (!isActive()) {
-                                throw java.util.concurrent.CancellationException("Download cancelled")
+                        var read = 0
+                        var lastReportTime = System.currentTimeMillis()
+                        var lastReportBytes = 0L
+                        var currentSpeed = 0L
+
+                        // Initial report
+                        onProgress(SmbTransferProgress(0f, 0L, total, 0L))
+
+                        while (!isCancelled() && input.read(buf).also { read = it } >= 0) {
+                            if (isCancelled()) {
+                                throw kotlinx.coroutines.CancellationException("Transfer cancelled")
                             }
                             output.write(buf, 0, read)
                             copied += read
-                            if (total > 0L) {
-                                onProgress((copied.toFloat() / total).coerceIn(0f, 1f))
+                            val now = System.currentTimeMillis()
+                            val elapsed = now - lastReportTime
+                            if (elapsed >= 150) {
+                                val bytesDelta = copied - lastReportBytes
+                                currentSpeed = (bytesDelta * 1000L) / elapsed
+                                lastReportTime = now
+                                lastReportBytes = copied
+                                val fraction = if (total > 0L) (copied.toFloat() / total).coerceIn(0f, 1f) else 0f
+                                onProgress(SmbTransferProgress(fraction, copied, total, currentSpeed))
                             }
                         }
+                        if (isCancelled()) {
+                            throw kotlinx.coroutines.CancellationException("Transfer cancelled")
+                        }
+                        val finalFraction = if (total > 0L) 1f else 0f
+                        onProgress(SmbTransferProgress(finalFraction, copied, total, currentSpeed))
                     }
                 }
             }
@@ -117,7 +149,24 @@ object SmbClient {
             AuthenticationContext(user, settings.smbPassword.toCharArray(), domain)
         }
 
-        SMBClient().use { client ->
+        val config = SmbConfig.builder()
+            .withDialects(
+                SMB2Dialect.SMB_3_1_1,
+                SMB2Dialect.SMB_3_0_2,
+                SMB2Dialect.SMB_3_0,
+                SMB2Dialect.SMB_2_1,
+                SMB2Dialect.SMB_2_0_2,
+            )
+            .withReadBufferSize(1024 * 1024)
+            .withBufferSize(1024 * 1024)
+            .withTimeout(60, TimeUnit.SECONDS)
+            .withReadTimeout(60, TimeUnit.SECONDS)
+            .withMultiProtocolNegotiate(true)
+            .withSigningRequired(false)
+            .withDfsEnabled(false)
+            .build()
+
+        SMBClient(config).use { client ->
             val connection = if (port != null) client.connect(host, port) else client.connect(host)
             connection.use { conn ->
                 conn.authenticate(auth).use { session ->

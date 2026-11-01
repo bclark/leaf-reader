@@ -1,4 +1,4 @@
-# AGENTS.md — Chika (`com.chakra.comicreader`)
+# AGENTS.md — Leaf (`com.chakra.comicreader`)
 
 Instructions and architectural context for AI coding agents working in this repository.
 
@@ -6,7 +6,7 @@ Instructions and architectural context for AI coding agents working in this repo
 
 ## 1. Project Overview
 
-**Leaf** is an offline, panel-by-panel comic and manga reader for **Android** and **iOS**.
+**Leaf** (forked from Chika / Chitra Katha) is an offline, panel-by-panel comic and manga reader for **Android** and **iOS**.
 When a user opens a `.cbz` (ZIP) or `.cbr` (RAR/RAR5) archive, an on-device YOLO TFLite/LiteRT model (`manga_panel_detector_int8.tflite`) detects panel and speech-balloon bounding boxes. A shared Kotlin Multiplatform pipeline fills coverage gaps, orders panels in reading direction (LTR for Western comics, RTL for manga), merges tiny adjacent panels, divides oversized/spread panels along speech-balloon gaps, and frames each region with smooth camera transitions.
 
 - **License:** Mozilla Public License 2.0 (`LICENSE`), with third-party notices in `THIRD_PARTY_NOTICES.md` (notably LGPL-2.1 for `7-Zip-JBinding-4Android` and Manga109-s dataset disclosure for the bundled model).

@@ -1,4 +1,4 @@
-# Releasing Chika
+# Releasing Leaf
 
 Pushing a version tag (`v*`) triggers [`.github/workflows/release.yml`](.github/workflows/release.yml),
 which builds a **signed release AAB + APK** and publishes them on a GitHub Release. The AAB is what

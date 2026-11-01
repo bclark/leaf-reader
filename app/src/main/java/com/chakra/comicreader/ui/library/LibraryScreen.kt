@@ -47,6 +47,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
@@ -125,13 +126,12 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
-private fun formatBytes(bytes: Long): String {
-    return when {
-        bytes < 1024L -> "$bytes B"
-        bytes < 1024L * 1024L -> String.format(Locale.US, "%.1f KB", bytes / 1024.0)
-        bytes < 1024L * 1024L * 1024L -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
-        else -> String.format(Locale.US, "%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0))
-    }
+private fun formatFileSize(bytes: Long): String = when {
+    bytes <= 0L -> ""
+    bytes >= 1024L * 1024L * 1024L -> String.format(Locale.US, "%.1f GB", bytes / (1024f * 1024f * 1024f))
+    bytes >= 1024L * 1024L -> String.format(Locale.US, "%.1f MB", bytes / (1024f * 1024f))
+    bytes >= 1024L -> String.format(Locale.US, "%.0f KB", bytes / 1024f)
+    else -> "$bytes B"
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -144,10 +144,13 @@ fun LibraryScreen(
     onOpenDrive: () -> Unit,
 ) {
     val comics by viewModel.comics.collectAsStateWithLifecycle()
+    val libraryItems by viewModel.libraryItems.collectAsStateWithLifecycle()
+    val currentFilter by viewModel.libraryFilter.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
     val importStatus by viewModel.importStatus.collectAsStateWithLifecycle()
+    val importDetail by viewModel.importDetail.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val defaultRtl by viewModel.defaultRightToLeft.collectAsStateWithLifecycle()
     val libraryColumns by viewModel.libraryColumns.collectAsStateWithLifecycle()
@@ -166,6 +169,10 @@ fun LibraryScreen(
 
     BackHandler(enabled = isEditMode) {
         viewModel.setEditMode(false)
+    }
+
+    BackHandler(enabled = importing) {
+        viewModel.cancelImport()
     }
 
     BackHandler(enabled = isSearchOpen && !isEditMode) {
@@ -211,7 +218,6 @@ fun LibraryScreen(
     val verticalSpacing = if (actualColumns >= 4) 14.dp else 18.dp
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        // App Bar & Toolbars: leaf_primary (#1C3A27) anchors the brand at the top of the screen
         Surface(
             color = LeafPrimary,
             modifier = Modifier.fillMaxWidth(),
@@ -352,11 +358,126 @@ fun LibraryScreen(
                         }
                     }
                 }
+
+                AnimatedVisibility(
+                    visible = importing,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically(),
+                ) {
+                    val pct = (importProgress * 100).toInt().coerceIn(0, 100)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp, bottom = 4.dp)
+                            .comicShadow(offset = 3.dp, color = Color(0xB3000000))
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(DeepInkSurface)
+                            .border(2.dp, LeafAccent, RoundedCornerShape(6.dp))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                CircularProgressIndicator(
+                                    color = LeafAccent,
+                                    strokeWidth = 2.5.dp,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Text(
+                                    text = importStatus?.uppercase() ?: "DOWNLOADING COMIC…",
+                                    fontFamily = Anton,
+                                    fontSize = 13.sp,
+                                    color = PaperWhite,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .padding(start = 8.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(LeafPrimary)
+                                    .border(1.dp, LeafAccent, RoundedCornerShape(3.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            ) {
+                                Text(
+                                    text = "$pct%",
+                                    fontFamily = Anton,
+                                    fontSize = 13.sp,
+                                    color = LeafAccent,
+                                    letterSpacing = 0.5.sp,
+                                )
+                            }
+                        }
+
+                        LinearProgressIndicator(
+                            progress = { if (importProgress > 0f) importProgress else 0.05f },
+                            color = LeafAccent,
+                            trackColor = DeepInk,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(7.dp)
+                                .clip(RoundedCornerShape(3.5.dp)),
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = importDetail ?: if (importProgress > 0f) "$pct% completed" else "Connecting…",
+                                fontFamily = Archivo,
+                                fontSize = 11.5.sp,
+                                color = PaperWhiteMuted,
+                                modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(DeepInk)
+                                    .border(1.dp, ComicRose, RoundedCornerShape(4.dp))
+                                    .clickable { viewModel.cancelImport() }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Cancel import",
+                                        tint = ComicRose,
+                                        modifier = Modifier.size(12.dp),
+                                    )
+                                    Text(
+                                        text = "CANCEL",
+                                        fontFamily = Anton,
+                                        fontSize = 11.sp,
+                                        color = ComicRose,
+                                        letterSpacing = 0.5.sp,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
         Box(Modifier.fillMaxWidth().weight(1f)) {
-            // Subtle full-bleed halftone wash
             Box(Modifier.matchParentSize().halftone(LeafSecondary, alpha = 0.05f))
 
             LazyVerticalGrid(
@@ -440,7 +561,6 @@ fun LibraryScreen(
                             }
 
                             if (!isEditMode) {
-                                // Columns / Density toggle
                                 Column(horizontalAlignment = Alignment.End) {
                                     Text(
                                         "COLUMNS",
@@ -480,7 +600,6 @@ fun LibraryScreen(
                                     }
                                 }
 
-                                // Global default direction for new comics
                                 Column(horizontalAlignment = Alignment.End) {
                                     Text(
                                         "NEW COMICS OPEN",
@@ -507,7 +626,39 @@ fun LibraryScreen(
                         }
                     }
                 }
-                if (comics.isEmpty()) {
+
+                if (screenWidthDp >= 600.dp && !isEditMode) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            LibraryFilter.entries.forEach { filter ->
+                                val isSelected = currentFilter == filter
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(if (isSelected) Ochre else InkSoft)
+                                        .border(1.dp, Ink, RoundedCornerShape(4.dp))
+                                        .clickable { viewModel.setLibraryFilter(filter) }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = filter.label,
+                                        fontFamily = Anton,
+                                        fontSize = 12.sp,
+                                        color = if (isSelected) Ink else CreamMuted,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (libraryItems.isEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         if (searchQuery.isNotBlank()) {
                             Column(
@@ -524,7 +675,7 @@ fun LibraryScreen(
                                     color = Cream,
                                 )
                                 Text(
-                                    "No comics found matching \"$searchQuery\"",
+                                    "No items found matching \"$searchQuery\"",
                                     fontFamily = Archivo,
                                     fontSize = 13.sp,
                                     color = CreamMuted,
@@ -556,35 +707,66 @@ fun LibraryScreen(
                         }
                     }
                 }
-                items(comics, key = { it.id }) { comic ->
-                    ComicCard(
-                        comic = comic,
-                        columns = actualColumns,
-                        isEditMode = isEditMode,
-                        isSelected = comic.id in selectedComicIds,
-                        onClick = {
-                            if (isEditMode) {
-                                viewModel.toggleComicSelection(comic.id)
-                            } else {
-                                onOpenComic(comic.id)
-                            }
-                        },
-                        onLongClick = {
-                            if (!isEditMode) {
-                                viewModel.setEditMode(true)
-                                viewModel.toggleComicSelection(comic.id)
-                            } else {
-                                pendingDelete = comic
-                            }
-                        },
-                    )
+
+                items(libraryItems, key = { item ->
+                    when (item) {
+                        is LibraryItem.SingleComic -> "comic-${item.comic.id}"
+                        is LibraryItem.SeriesStack -> "series-${item.seriesName}-${item.volume.orEmpty()}"
+                        is LibraryItem.ReadingListItem -> "list-${item.readingList.id}"
+                    }
+                }) { item ->
+                    when (item) {
+                        is LibraryItem.SingleComic -> {
+                            ComicCard(
+                                comic = item.comic,
+                                columns = actualColumns,
+                                isEditMode = isEditMode,
+                                isSelected = item.comic.id in selectedComicIds,
+                                onClick = {
+                                    if (isEditMode) {
+                                        viewModel.toggleComicSelection(item.comic.id)
+                                    } else {
+                                        onOpenComic(item.comic.id)
+                                    }
+                                },
+                                onLongClick = {
+                                    if (!isEditMode) {
+                                        viewModel.setEditMode(true)
+                                        viewModel.toggleComicSelection(item.comic.id)
+                                    } else {
+                                        pendingDelete = item.comic
+                                    }
+                                },
+                            )
+                        }
+                        is LibraryItem.SeriesStack -> {
+                            ComicStackCard(
+                                stack = item,
+                                columns = actualColumns,
+                                onClick = {
+                                    onOpenSeries(item.seriesName, item.volume)
+                                },
+                            )
+                        }
+                        is LibraryItem.ReadingListItem -> {
+                            ReadingListCard(
+                                item = item,
+                                columns = actualColumns,
+                                onClick = {
+                                    // Reading list open
+                                },
+                            )
+                        }
+                    }
                 }
+
                 if (searchQuery.isBlank() && !isEditMode) {
                     item {
                         AddTile(
                             importing = importing,
                             progress = importProgress,
                             status = importStatus,
+                            detail = importDetail,
                             columns = actualColumns,
                             onClick = { if (!importing) showSourceDialog = true },
                             onCancel = { viewModel.cancelImport() },
@@ -804,6 +986,11 @@ private fun ComicCard(
     val shadowOffset = if (columns >= 4) 3.dp else 5.dp
     val progressHeight = if (columns >= 4) 5.dp else 7.dp
 
+    val fileSize = remember(comic.filePath) {
+        runCatching { File(comic.filePath).length() }.getOrDefault(0L)
+    }
+    val sizeText = formatFileSize(fileSize)
+
     Column(Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
         Box(
             Modifier
@@ -824,6 +1011,7 @@ private fun ComicCard(
             } else {
                 GeneratedCover(comic.title, columns = columns)
             }
+
             if (isEditMode) {
                 Box(
                     modifier = Modifier
@@ -844,7 +1032,38 @@ private fun ComicCard(
                         )
                     }
                 }
-            } else {
+            } else if (comic.source == "smb") {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(if (columns >= 4) 4.dp else 6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(DeepInk.copy(alpha = 0.88f))
+                        .border(1.dp, LeafAccent, RoundedCornerShape(3.dp))
+                        .padding(horizontal = if (columns >= 4) 4.dp else 5.dp, vertical = 2.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Cloud,
+                            contentDescription = "From SMB Drive",
+                            tint = LeafAccent,
+                            modifier = Modifier.size(if (columns >= 4) 9.dp else 11.dp),
+                        )
+                        Text(
+                            text = "SMB",
+                            fontFamily = Anton,
+                            fontSize = if (columns >= 4) 8.sp else 9.5.sp,
+                            color = PaperWhite,
+                            letterSpacing = 0.5.sp,
+                        )
+                    }
+                }
+            }
+
+            if (!isEditMode) {
                 Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(progressHeight).background(Ink)) {
                     Box(Modifier.fillMaxWidth(pct).fillMaxHeight().background(Ochre))
                 }
@@ -861,8 +1080,8 @@ private fun ComicCard(
             modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp),
         )
         Text(
-            if (started) "${(pct * 100).toInt()}% · pg ${comic.lastPage + 1}/${comic.pageCount}"
-            else "${comic.pageCount} pages",
+            if (started) "${(pct * 100).toInt()}% · pg ${comic.lastPage + 1}/${comic.pageCount}${if (sizeText.isNotEmpty()) " · $sizeText" else ""}"
+            else "${comic.pageCount} pages${if (sizeText.isNotEmpty()) " · $sizeText" else ""}",
             fontFamily = Archivo,
             fontWeight = FontWeight.SemiBold,
             fontSize = if (columns >= 4) 8.5.sp else 9.5.sp,
@@ -888,6 +1107,109 @@ internal fun GeneratedCover(title: String, columns: Int = 2) {
 }
 
 @Composable
+private fun AddTile(
+    importing: Boolean,
+    progress: Float,
+    status: String? = null,
+    detail: String? = null,
+    columns: Int = 2,
+    onClick: () -> Unit,
+    onCancel: () -> Unit = {},
+) {
+    val starburstSize = if (columns >= 5) 42.dp else if (columns >= 4) 50.dp else 64.dp
+    val iconSize = if (columns >= 5) 18.dp else if (columns >= 4) 22.dp else 26.dp
+    val fontSize = if (columns >= 5) 11.sp else if (columns >= 4) 12.5.sp else 14.sp
+    val spacing = if (columns >= 4) 6.dp else 10.dp
+    val contentPadding = if (columns >= 4) 8.dp else 16.dp
+    val strokeWidth = if (columns >= 4) 2.dp else 3.dp
+    val pct = (progress * 100).toInt().coerceIn(0, 100)
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .aspectRatio(0.7f)
+            .clip(RoundedCornerShape(4.dp))
+            .background(DeepInkSurface)
+            .drawBehind {
+                val p = PathEffect.dashPathEffect(floatArrayOf(16f, 12f), 0f)
+                drawRoundRect(
+                    color = LeafAccent,
+                    style = Stroke(width = strokeWidth.toPx(), pathEffect = p),
+                    cornerRadius = CornerRadius(4.dp.toPx()),
+                )
+            }
+            .clickable(onClick = onClick)
+            .padding(contentPadding),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(spacing),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(starburstSize)
+                    .clip(LeafShape)
+                    .background(LeafAccent),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (importing) CircularProgressIndicator(modifier = Modifier.size(iconSize), color = DeepInk, strokeWidth = 3.dp)
+                else Icon(Icons.Default.Add, contentDescription = "Load comic", tint = DeepInk, modifier = Modifier.size(iconSize))
+            }
+            Text(
+                if (importing) {
+                    if (status != null) "$pct% · $status".uppercase()
+                    else if (progress > 0f) "LOADING $pct%"
+                    else "LOADING…"
+                } else "LOAD COMIC",
+                fontFamily = Anton,
+                fontSize = fontSize,
+                color = PaperWhite,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+            if (importing) {
+                LinearProgressIndicator(
+                    progress = { if (progress > 0f) progress else 0.05f },
+                    color = LeafAccent,
+                    trackColor = DeepInk,
+                    modifier = Modifier.fillMaxWidth().height(if (columns >= 4) 4.dp else 6.dp).clip(RoundedCornerShape(3.dp)),
+                )
+                if (detail != null) {
+                    Text(
+                        detail,
+                        fontFamily = Archivo,
+                        fontSize = if (columns >= 4) 8.sp else 9.5.sp,
+                        color = PaperWhiteMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(DeepInk)
+                        .border(1.dp, ComicRose, RoundedCornerShape(3.dp))
+                        .clickable { onCancel() }
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "CANCEL",
+                        fontFamily = Anton,
+                        fontSize = if (columns >= 4) 9.sp else 10.5.sp,
+                        color = ComicRose,
+                        letterSpacing = 0.5.sp,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun SmbDriveScreen(
     viewModel: LibraryViewModel,
     onBack: () -> Unit,
@@ -898,6 +1220,7 @@ fun SmbDriveScreen(
     val importing by viewModel.importing.collectAsStateWithLifecycle()
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
     val importStatus by viewModel.importStatus.collectAsStateWithLifecycle()
+    val importDetail by viewModel.importDetail.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -910,7 +1233,11 @@ fun SmbDriveScreen(
         fileEntries.filter { it.path in selectedPaths }.sumOf { it.sizeBytes }
     }
 
-    BackHandler(enabled = selectedCount > 0 && !importing) {
+    BackHandler(enabled = importing) {
+        viewModel.cancelImport()
+    }
+
+    BackHandler(enabled = !importing && selectedCount > 0) {
         selectedPaths = emptySet()
     }
 
@@ -922,7 +1249,6 @@ fun SmbDriveScreen(
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        // App Bar & Toolbars: leaf_primary (#1C3A27) anchors the brand at the top of the screen
         Surface(
             color = LeafPrimary,
             modifier = Modifier.fillMaxWidth(),
@@ -941,7 +1267,9 @@ fun SmbDriveScreen(
                         .clip(CircleShape)
                         .background(PaperWhite.copy(alpha = 0.14f))
                         .clickable {
-                            if (selectedCount > 0) {
+                            if (importing) {
+                                viewModel.cancelImport()
+                            } else if (selectedCount > 0) {
                                 selectedPaths = emptySet()
                             } else if (path.isNotEmpty()) {
                                 viewModel.loadSmbDirectory(path.substringBeforeLast('\\', ""))
@@ -993,7 +1321,7 @@ fun SmbDriveScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = if (selectedCount > 0) "$selectedCount SELECTED (${formatBytes(totalSelectedBytes)})" else "$totalFiles ${if (totalFiles == 1) "COMIC" else "COMICS"}",
+                            text = if (selectedCount > 0) "$selectedCount SELECTED (${formatFileSize(totalSelectedBytes)})" else "$totalFiles ${if (totalFiles == 1) "COMIC" else "COMICS"}",
                             fontFamily = Archivo,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.5.sp,
@@ -1014,9 +1342,9 @@ fun SmbDriveScreen(
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
-                                        "CLEAR",
+                                        "DESELECT ALL",
                                         fontFamily = Anton,
-                                        fontSize = 11.sp,
+                                        fontSize = 10.5.sp,
                                         color = PaperWhiteMuted,
                                     )
                                 }
@@ -1024,21 +1352,18 @@ fun SmbDriveScreen(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(3.dp))
-                                    .background(if (allSelected) LeafAccent else PaperWhite.copy(alpha = 0.14f))
+                                    .background(if (allSelected) Ochre else DeepInkSurface)
+                                    .border(1.dp, if (allSelected) Ochre else DeepInk, RoundedCornerShape(3.dp))
                                     .clickable {
-                                        selectedPaths = if (allSelected) {
-                                            emptySet()
-                                        } else {
-                                            fileEntries.map { it.path }.toSet()
-                                        }
+                                        selectedPaths = if (allSelected) emptySet() else fileEntries.map { it.path }.toSet()
                                     }
-                                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
-                                    text = if (allSelected) "DESELECT ALL" else "SELECT ALL",
+                                    if (allSelected) "DESELECT ALL" else "SELECT ALL",
                                     fontFamily = Anton,
-                                    fontSize = 11.sp,
+                                    fontSize = 10.5.sp,
                                     color = if (allSelected) DeepInk else PaperWhite,
                                 )
                             }
@@ -1046,124 +1371,37 @@ fun SmbDriveScreen(
                     }
                 }
 
-                Spacer(Modifier.size(12.dp))
-
-                if (importing) {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(DeepInkSurface)
-                            .border(2.dp, LeafAccent, RoundedCornerShape(6.dp))
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                CircularProgressIndicator(
-                                    color = LeafAccent,
-                                    strokeWidth = 2.5.dp,
-                                    modifier = Modifier.size(20.dp),
-                                )
-                                Text(
-                                    text = importStatus?.uppercase()
-                                        ?: if (importProgress > 0f) "DOWNLOADING… ${(importProgress * 100).toInt()}%"
-                                        else "DOWNLOADING…",
-                                    fontFamily = Anton,
-                                    fontSize = 13.sp,
-                                    color = PaperWhite,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(ComicRose.copy(alpha = 0.2f))
-                                    .border(1.dp, ComicRose, RoundedCornerShape(4.dp))
-                                    .clickable { viewModel.cancelImport() }
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    "CANCEL",
-                                    fontFamily = Anton,
-                                    fontSize = 11.sp,
-                                    color = ComicRose,
-                                )
-                            }
-                        }
-                        LinearProgressIndicator(
-                            progress = { if (importProgress > 0f) importProgress else 0.05f },
-                            color = LeafAccent,
-                            trackColor = DeepInk,
-                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                        )
-                    }
-                    Spacer(Modifier.size(12.dp))
-                }
-
-                Box(Modifier.weight(1f).fillMaxWidth()) {
+                Box(Modifier.fillMaxWidth().weight(1f)) {
                     if (loading) {
                         CircularProgressIndicator(
-                            color = LeafAccent,
+                            color = Ochre,
+                            modifier = Modifier.align(Alignment.Center),
+                        )
+                    } else if (entries.isEmpty()) {
+                        Text(
+                            "No folders or comics found here.",
+                            fontFamily = Archivo,
+                            fontSize = 13.sp,
+                            color = PaperWhiteMuted,
                             modifier = Modifier.align(Alignment.Center),
                         )
                     } else {
                         LazyColumn(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
-                            contentPadding = PaddingValues(bottom = 24.dp),
+                            contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp),
                         ) {
-                            if (path.isNotEmpty()) {
-                                item {
-                                    val parent = path.substringBeforeLast('\\', "")
-                                    SmbRow(
-                                        name = ".. (Up)",
-                                        isDirectory = true,
-                                        sizeBytes = 0L,
-                                        onClick = {
-                                            selectedPaths = emptySet()
-                                            viewModel.loadSmbDirectory(parent)
-                                        },
-                                    )
-                                }
-                            }
-                            if (entries.isEmpty()) {
-                                item {
-                                    Text(
-                                        "No folders or comics found here.",
-                                        fontFamily = Archivo,
-                                        fontSize = 13.sp,
-                                        color = PaperWhiteMuted,
-                                        modifier = Modifier.padding(vertical = 12.dp),
-                                    )
-                                }
-                            }
                             items(entries, key = { it.path }) { entry ->
                                 val isSelected = entry.path in selectedPaths
-                                SmbRow(
+                                SmbEntryRow(
                                     name = entry.name,
                                     isDirectory = entry.isDirectory,
                                     sizeBytes = entry.sizeBytes,
                                     isSelected = isSelected,
                                     onClick = {
                                         if (entry.isDirectory) {
-                                            selectedPaths = emptySet()
                                             viewModel.loadSmbDirectory(entry.path)
-                                        } else if (!importing) {
-                                            selectedPaths = if (isSelected) {
-                                                selectedPaths - entry.path
-                                            } else {
-                                                selectedPaths + entry.path
-                                            }
+                                        } else {
+                                            selectedPaths = if (isSelected) selectedPaths - entry.path else selectedPaths + entry.path
                                         }
                                     },
                                 )
@@ -1172,15 +1410,11 @@ fun SmbDriveScreen(
                     }
                 }
 
-                AnimatedVisibility(
-                    visible = selectedCount > 0 && !importing,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically(),
-                ) {
+                if (selectedCount > 0) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 10.dp)
+                            .padding(top = 8.dp)
                             .comicShadow(offset = 3.dp, color = Color(0xB3000000))
                             .clip(RoundedCornerShape(6.dp))
                             .background(DeepInkSurface)
@@ -1200,10 +1434,10 @@ fun SmbDriveScreen(
                                     color = PaperWhite,
                                 )
                                 Text(
-                                    text = "Total size: ${formatBytes(totalSelectedBytes)}",
+                                    text = formatFileSize(totalSelectedBytes),
                                     fontFamily = Archivo,
-                                    fontSize = 11.sp,
-                                    color = PaperWhiteMuted,
+                                    fontSize = 11.5.sp,
+                                    color = LeafAccent,
                                 )
                             }
                             Box(
@@ -1213,14 +1447,14 @@ fun SmbDriveScreen(
                                     .clickable {
                                         val toImport = fileEntries.filter { it.path in selectedPaths }
                                         viewModel.importSmbComics(toImport) {
-                                            onBack()
+                                            selectedPaths = emptySet()
                                         }
                                     }
                                     .padding(horizontal = 16.dp, vertical = 9.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
-                                    text = if (selectedCount == 1) "IMPORT COMIC" else "IMPORT ALL ($selectedCount)",
+                                    text = "IMPORT ($selectedCount)",
                                     fontFamily = Anton,
                                     fontSize = 13.sp,
                                     color = DeepInk,
@@ -1239,112 +1473,16 @@ fun SmbDriveScreen(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AddTile(
-    importing: Boolean,
-    progress: Float,
-    status: String? = null,
-    columns: Int = 2,
-    onClick: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    val starburstSize = if (columns >= 5) 42.dp else if (columns >= 4) 50.dp else 64.dp
-    val iconSize = if (columns >= 5) 18.dp else if (columns >= 4) 22.dp else 26.dp
-    val fontSize = if (columns >= 5) 11.sp else if (columns >= 4) 12.sp else 14.sp
-    val spacing = if (columns >= 4) 6.dp else 10.dp
-    val contentPadding = if (columns >= 4) 8.dp else 16.dp
-    val strokeWidth = if (columns >= 4) 2.dp else 3.dp
-
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .aspectRatio(0.7f)
-            .clip(RoundedCornerShape(4.dp))
-            .combinedClickable(onClick = { if (!importing) onClick() }, onLongClick = {})
-            .drawBehind {
-                drawRoundRect(
-                    color = PaperWhiteMuted.copy(alpha = 0.5f),
-                    style = Stroke(
-                        width = strokeWidth.toPx(),
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f)),
-                    ),
-                    cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
-                )
-            }
-            .halftone(LeafAccent, alpha = 0.10f),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = contentPadding),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(spacing),
-        ) {
-            Box(
-                Modifier.size(starburstSize).clip(LeafShape).background(LeafAccent),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (importing) CircularProgressIndicator(color = DeepInk, modifier = Modifier.size(iconSize))
-                else Icon(Icons.Default.Add, contentDescription = "Load comic", tint = DeepInk, modifier = Modifier.size(iconSize))
-            }
-            Text(
-                if (importing && status != null) status.uppercase()
-                else if (importing && progress > 0f) "LOADING ${(progress * 100).toInt()}%"
-                else if (importing) "LOADING…"
-                else "LOAD COMIC",
-                fontFamily = Anton,
-                fontSize = fontSize,
-                color = PaperWhite,
-                maxLines = 2,
-                textAlign = TextAlign.Center,
-            )
-            if (importing) {
-                if (progress > 0f) {
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        color = LeafAccent,
-                        trackColor = DeepInk,
-                        modifier = Modifier.fillMaxWidth().height(if (columns >= 4) 4.dp else 6.dp).clip(RoundedCornerShape(3.dp)),
-                    )
-                } else {
-                    LinearProgressIndicator(
-                        color = LeafAccent,
-                        trackColor = DeepInk,
-                        modifier = Modifier.fillMaxWidth().height(if (columns >= 4) 4.dp else 6.dp).clip(RoundedCornerShape(3.dp)),
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .padding(top = 2.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(ComicRose.copy(alpha = 0.25f))
-                        .border(1.dp, ComicRose, RoundedCornerShape(3.dp))
-                        .clickable(onClick = onCancel)
-                        .padding(horizontal = 10.dp, vertical = 3.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        "CANCEL",
-                        fontFamily = Anton,
-                        fontSize = 10.sp,
-                        color = ComicRose,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SmbRow(
+private fun SmbEntryRow(
     name: String,
     isDirectory: Boolean,
-    sizeBytes: Long = 0L,
+    sizeBytes: Long,
     isSelected: Boolean = false,
     onClick: () -> Unit,
 ) {
-    val borderColor = if (isSelected) LeafAccent else DeepInk
-    val bgColor = if (isSelected) LeafAccent.copy(alpha = 0.18f) else DeepInkSurface
+    val bgColor = if (isSelected) DeepInkSurface else DeepInk
+    val borderColor = if (isSelected) LeafAccent else LeafSecondary.copy(alpha = 0.4f)
 
     Row(
         Modifier
@@ -1382,7 +1520,7 @@ private fun SmbRow(
             )
             if (!isDirectory && sizeBytes > 0L) {
                 Text(
-                    formatBytes(sizeBytes),
+                    formatFileSize(sizeBytes),
                     fontFamily = Archivo,
                     fontSize = 11.sp,
                     color = PaperWhiteMuted,
@@ -1399,7 +1537,6 @@ private fun SmbRow(
                     .graphicsLayer(rotationZ = 180f),
             )
         } else {
-            // Retro comic checkbox
             Box(
                 modifier = Modifier
                     .size(20.dp)
@@ -1436,4 +1573,138 @@ internal fun rememberCover(path: String?): ImageBitmap? {
         }
     }
     return state
+}
+
+@Composable
+private fun ComicStackCard(
+    stack: LibraryItem.SeriesStack,
+    columns: Int = 2,
+    onClick: () -> Unit,
+) {
+    val pct = stack.progressFraction
+    val borderWidth = if (columns >= 4) 2.dp else 3.dp
+    val shadowOffset = if (columns >= 4) 3.dp else 5.dp
+    val progressHeight = if (columns >= 4) 5.dp else 7.dp
+
+    Column(Modifier.clickable(onClick = onClick)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(0.7f)
+        ) {
+            if (stack.totalIssues > 1) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .graphicsLayer {
+                            rotationZ = 3f
+                            translationX = 6.dp.toPx()
+                            translationY = 4.dp.toPx()
+                        }
+                        .comicShadow(offset = 1.dp, color = Color(0x80000000))
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(InkSoft)
+                        .border(1.dp, Ink, RoundedCornerShape(4.dp))
+                )
+            }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .comicShadow(offset = shadowOffset, color = Color(0xB3000000))
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(InkSoft)
+                    .border(width = borderWidth, color = Ink, shape = RoundedCornerShape(4.dp)),
+            ) {
+                val cover = rememberCover(stack.topCoverComic.coverPath)
+                if (cover != null) {
+                    Image(cover, stack.seriesName, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                } else {
+                    GeneratedCover(stack.seriesName, columns = columns)
+                }
+
+                Box(
+                    modifier = Modifier
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(Ink.copy(alpha = 0.85f))
+                        .border(1.dp, Ochre, RoundedCornerShape(3.dp))
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (stack.volume != null) "${stack.seriesName.uppercase()} · ${stack.volume.uppercase()}" else "${stack.totalIssues} ISSUES",
+                        fontFamily = Anton,
+                        fontSize = 9.sp,
+                        color = Cream,
+                    )
+                }
+
+                Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(progressHeight).background(Ink)) {
+                    Box(Modifier.fillMaxWidth(pct).fillMaxHeight().background(Ochre))
+                }
+            }
+        }
+        Text(
+            stack.seriesName.uppercase(),
+            fontFamily = Archivo,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = if (columns >= 5) 10.sp else if (columns >= 4) 11.sp else 12.sp,
+            color = Cream,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp),
+        )
+        Text(
+            "${stack.totalIssues} issues ${if (stack.unreadIssues > 0) "· ${stack.unreadIssues} unread" else "· read"}",
+            fontFamily = Archivo,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = if (columns >= 4) 8.5.sp else 9.5.sp,
+            color = CreamMuted,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun ReadingListCard(
+    item: LibraryItem.ReadingListItem,
+    columns: Int = 2,
+    onClick: () -> Unit,
+) {
+    val borderWidth = if (columns >= 4) 2.dp else 3.dp
+    val shadowOffset = if (columns >= 4) 3.dp else 5.dp
+
+    Column(Modifier.clickable(onClick = onClick)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(0.7f)
+                .comicShadow(offset = shadowOffset, color = Color(0xB3000000))
+                .clip(RoundedCornerShape(4.dp))
+                .background(DeepInkSurface)
+                .border(width = borderWidth, color = Ochre, shape = RoundedCornerShape(4.dp))
+                .padding(16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(
+                    Icons.Default.Menu,
+                    contentDescription = null,
+                    tint = Ochre,
+                    modifier = Modifier.size(32.dp),
+                )
+                Text(
+                    item.readingList.name.uppercase(),
+                    fontFamily = Anton,
+                    fontSize = 14.sp,
+                    color = Cream,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+                OchreBadge("${item.itemCount} ITEMS")
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+    }
 }

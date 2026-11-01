@@ -1,6 +1,6 @@
-# Distributing Chika (free / FOSS channels)
+# Distributing Leaf (free / FOSS channels)
 
-Chika is built to be distributable through FOSS app repositories without a paid developer account.
+Leaf is built to be distributable through FOSS app repositories without a paid developer account.
 It already meets the core requirements:
 
 - **License:** Mozilla Public License 2.0 (FOSS) — see [`LICENSE`](LICENSE).

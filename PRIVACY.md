@@ -1,18 +1,18 @@
-# Chika Privacy Policy
+# Leaf Privacy Policy
 
-_Last updated: 26 August 2026_
+_Last updated: 31 October 2026_
 
-Chika is a comic reader that runs entirely on your device.
+Leaf is a comic reader that runs entirely on your device.
 
 ## Data we collect
 
-**None.** Chika collects, stores, transmits, and shares **no personal data whatsoever**.
+**None.** Leaf collects, stores, transmits, and shares **no personal data whatsoever**.
 
-- Chika has **no network access**. The Android app declares no `INTERNET` permission; the iOS app makes no network requests. Nothing you do in the app ever leaves your device.
-- Comics you import are copied into the app's private storage on your device and are readable only by Chika.
+- Leaf has no telemetry, tracking, or cloud sync. The Android app only uses network access if you connect to your own local SMB/Samba network share; the iOS app makes no external network requests.
+- Comics you import are copied into the app's private storage on your device and are readable only by Leaf.
 - Reading progress, library metadata, and settings are stored locally on your device only.
 - Panel detection runs entirely on-device using a bundled machine-learning model. No page images or derived data are ever uploaded anywhere.
-- Chika contains no analytics, no crash reporting, no advertising, and no third-party tracking SDKs.
+- Leaf contains no analytics, no crash reporting, no advertising, and no third-party tracking SDKs.
 
 ## Data sharing
 
@@ -20,7 +20,7 @@ We share no data with anyone, because we have none.
 
 ## Data deletion
 
-Uninstalling the app deletes everything Chika stores: imported comic copies, covers, reading progress, and settings.
+Uninstalling the app deletes everything Leaf stores: imported comic copies, covers, reading progress, and settings.
 
 ## External links
 
