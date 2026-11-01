@@ -19,6 +19,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -539,11 +541,12 @@ fun LibraryScreen(
                     }
                 }
 
-                if (screenWidthDp >= 600.dp && !isEditMode) {
+                if (!isEditMode) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
                                 .padding(bottom = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
@@ -553,16 +556,16 @@ fun LibraryScreen(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(4.dp))
                                         .background(if (isSelected) Ochre else InkSoft)
-                                        .border(1.dp, Ink, RoundedCornerShape(4.dp))
+                                        .border(1.dp, if (isSelected) Ochre else Ink, RoundedCornerShape(4.dp))
                                         .clickable { viewModel.setLibraryFilter(filter) }
-                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                        .padding(horizontal = 14.dp, vertical = 7.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
                                         text = filter.label,
                                         fontFamily = Anton,
                                         fontSize = 12.sp,
-                                        color = if (isSelected) Ink else CreamMuted,
+                                        color = if (isSelected) Ink else Cream,
                                     )
                                 }
                             }
