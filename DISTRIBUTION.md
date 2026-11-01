@@ -50,15 +50,15 @@ Things to handle for the main repo:
   generally acceptable, but F-Droid reviewers may ask that it be fetched at build time or flagged.
 - Dependencies from JitPack (7-Zip-JBinding) and Maven are allowed as free binaries.
 
-A ready-to-submit recipe is in [`fdroid/com.chakra.comicreader.yml`](fdroid/com.chakra.comicreader.yml)
-— copy it to `metadata/com.chakra.comicreader.yml` in your `fdroiddata` fork and open the MR.
+A ready-to-submit recipe is in [`fdroid/net.digitalbc.leafreader.yml`](fdroid/net.digitalbc.leafreader.yml)
+— copy it to `metadata/net.digitalbc.leafreader.yml` in your `fdroiddata` fork and open the MR.
 
 ## Submission materials
 
 **IzzyOnDroid request** — open an issue at https://codeberg.org/IzzyOnDroid/repodata/issues with:
 
 > **App:** Leaf (forked from Chika)
-> **Package:** `com.chakra.comicreader`
+> **Package:** `net.digitalbc.leafreader`
 > **Source:** https://github.com/bclark/leaf-reader
 > **Upstream:** https://github.com/batunii/chika
 > **License:** MPL-2.0 (FOSS)

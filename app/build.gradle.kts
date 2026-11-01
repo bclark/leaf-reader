@@ -6,12 +6,12 @@ plugins {
 }
 
 android {
-    namespace = "com.chakra.comicreader"
+    namespace = "net.digitalbc.leafreader"
     compileSdk = 36
     buildToolsVersion = "36.1.0"
 
     defaultConfig {
-        applicationId = "net.digitalbc.leaf"
+        applicationId = "net.digitalbc.leafreader"
         minSdk = 26
         targetSdk = 36
         versionName = "0.3.2"
