@@ -1,0 +1,1 @@
+Initial release of Leaf Reader: panel-by-panel CBZ/CBR reader with on-device panel detection, smart series stacking, reading lists, SMB network drive support, and interactive page flip.

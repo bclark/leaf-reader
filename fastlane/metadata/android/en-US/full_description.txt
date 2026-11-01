@@ -14,6 +14,6 @@ Features:
   scrubber, a "show whole page" button, and a left-to-right / right-to-left (manga) toggle.
 * Library — import comics from your device, cover thumbnails, and resume exactly where you left off
   (page and panel).
-* No accounts, no ads, no trackers, no network access.
+* Privacy-focused — no accounts, no ads, no telemetry or tracking. Network permission is used exclusively for optional user-configured SMB local network drive connections.
 
 Leaf is free and open source (Mozilla Public License 2.0), forked from Chika.

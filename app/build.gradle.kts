@@ -14,18 +14,8 @@ android {
         applicationId = "com.chakra.comicreader"
         minSdk = 26
         targetSdk = 36
-        // versionName comes from the git tag in CI (VERSION_NAME), else this default.
-        // versionCode is derived deterministically from MAJOR*10000 + MINOR*100 + PATCH so it is
-        // reproducible and monotonically increasing across all channels (Play, F-Droid, sideload)
-        // — F-Droid builds from source and requires a stable, increasing versionCode. A pre-release
-        // suffix is ignored per component (e.g. "0.2.1-beta" → 0.2.1 → 20100... → 201).
-        val appVersionName = System.getenv("VERSION_NAME") ?: "0.3.2"
-        versionName = appVersionName
-        versionCode = appVersionName.split('.').map { part ->
-            part.takeWhile { it.isDigit() }.toIntOrNull() ?: 0
-        }.let { p ->
-            (p.getOrElse(0) { 0 } * 10000) + (p.getOrElse(1) { 0 } * 100) + p.getOrElse(2) { 0 }
-        }
+        versionName = "0.3.2"
+        versionCode = 30200
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
@@ -48,15 +38,19 @@ android {
 
     buildTypes {
         release {
-            // R8 strips the large amount of dead code in the dex (notably the unused
-            // material-icons-extended set); resource shrinking drops unreferenced resources.
+            // R8 strips dead code; resource shrinking drops unreferenced resources.
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            // Sign only if release signingConfig is configured via secrets;
+            // otherwise, leave unsigned for clean F-Droid builds.
+            val releaseConfig = signingConfigs.findByName("release")
+            if (releaseConfig != null) {
+                signingConfig = releaseConfig
+            }
         }
     }
 
