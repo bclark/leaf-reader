@@ -1,6 +1,6 @@
 import Foundation
 import UniformTypeIdentifiers
-import ChikaShared
+import LeafShared
 
 /// Comics live as plain .cbz files in Documents/Comics. Importing a CBZ/ZIP copies it in; importing
 /// a CBR/RAR converts it to CBZ first (see CbrConverter) so the reader only handles ZIP. The list
@@ -93,6 +93,14 @@ final class LibraryStore: ObservableObject {
     func delete(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
         ReadingProgress.clear(url)
+        refresh()
+    }
+
+    func deleteBatch(_ urls: Set<URL>) {
+        for url in urls {
+            try? FileManager.default.removeItem(at: url)
+            ReadingProgress.clear(url)
+        }
         refresh()
     }
 

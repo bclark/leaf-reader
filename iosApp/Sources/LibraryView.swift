@@ -6,36 +6,61 @@ private struct OpenComic: Identifiable {
     var id: String { url.absoluteString }
 }
 
-/// The Chika library — pulp-comic identity matching the Android design: ink ground with a halftone
-/// wash, the three-panel mark + CHI·KA wordmark, an ochre "YOUR LIBRARY" badge, and a two-column
+/// The Leaf library — pulp-comic identity matching the Android design: ink ground with a halftone
+/// wash, the three-panel mark + CHI·KA wordmark, an ochre "YOUR LIBRARY" badge, and a configurable
 /// grid of comic cards with issue tags and Anton titles.
 struct LibraryView: View {
-    @EnvironmentObject private var settings: ChikaSettings
+    @EnvironmentObject private var settings: LeafSettings
     @StateObject private var library = LibraryStore()
     @State private var showPicker = false
     @State private var showMenu = false
-    // Comic awaiting delete confirmation (Android shows a "Remove comic?" dialog before deleting).
+    // Comic awaiting single-delete confirmation from context menu.
     @State private var pendingDelete: URL?
+    // Batch edit mode & selection.
+    @State private var isEditMode = false
+    @State private var selectedComics: Set<URL> = []
+    @State private var showBatchDeleteAlert = false
+    // Search mode & query.
+    @State private var isSearchOpen = false
+    @State private var searchQuery = ""
     // Resume snapshot keyed by filename, refreshed on appear and when returning from the reader so
     // cards show fresh progress without resetting scroll position.
     @State private var progress: [String: Progress] = [:]
-    // The comic being read, presented as a full-screen cover (Android's reader is an immersive
-    // full-window activity; a fullScreenCover is the iOS equivalent, unlike a NavigationStack push
-    // which reserves a nav/safe-area inset that mis-frames the page).
+    // The comic being read, presented as a full-screen cover.
     @State private var openComic: OpenComic?
-    // Global default reading direction for comics not yet opened (the global half of the
-    // per-comic + default behaviour). Mirrors ReadingPrefs so the pill redraws on toggle.
+    // Global default reading direction for comics not yet opened.
     @State private var defaultRTL = ReadingPrefs.defaultRightToLeft
 
-    private let columns = [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
+    private var filteredComics: [URL] {
+        let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return library.comics }
+        return library.comics.filter {
+            $0.deletingPathExtension().lastPathComponent.lowercased().contains(q)
+        }
+    }
+
+    private func availableColumns(for width: CGFloat) -> [Int] {
+        if width >= 600 {
+            return [2, 3, 4, 6]
+        } else if width >= 380 {
+            return [2, 3, 4]
+        } else {
+            return [2, 3]
+        }
+    }
+
+    private func actualColumns(for width: CGFloat) -> Int {
+        let avail = availableColumns(for: width)
+        return min(max(settings.libraryColumns, 2), avail.last ?? 2)
+    }
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .bottom) {
                 settings.ground.ignoresSafeArea()
-                Halftone(color: Chika.crimson, alpha: 0.05).ignoresSafeArea()
+                Halftone(color: Leaf.crimson, alpha: 0.05).ignoresSafeArea()
                 // Decorative action-burst behind the header (Android LibraryScreen).
-                StarburstShape().fill(Chika.crimson.opacity(0.14))
+                StarburstShape().fill(Leaf.crimson.opacity(0.14))
                     .frame(width: 180, height: 180)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     .padding(.top, 10)
@@ -43,8 +68,14 @@ struct LibraryView: View {
                     .allowsHitTesting(false)
 
                 VStack(spacing: 0) {
-                    header
-                    content
+                    appBar
+                    GeometryReader { geo in
+                        content(for: geo.size.width)
+                    }
+                }
+
+                if isEditMode {
+                    editActionBar
                 }
             }
             .navigationBarHidden(true)
@@ -86,16 +117,26 @@ struct LibraryView: View {
             } message: {
                 Text("This removes the imported copy. The original file is untouched.")
             }
-            // refresh() re-sorts by recency so a just-read comic jumps to the top (Android parity).
+            .alert("Delete \(selectedComics.count) \(selectedComics.count == 1 ? "comic" : "comics")?", isPresented: $showBatchDeleteAlert) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    withAnimation {
+                        library.deleteBatch(selectedComics)
+                        selectedComics.removeAll()
+                        isEditMode = false
+                    }
+                }
+            } message: {
+                Text("This will remove the imported copies from your device. Your original files are unaffected.")
+            }
             .onAppear { library.refresh(); reloadProgress(); autoOpenIfDebug() }
         }
     }
 
-    /// QA hook: when launched with the CHIKA_DEBUG_OPEN env var (an index or filename substring),
-    /// open that comic's reader. Never set in production, so this is a no-op there.
+    /// QA hook: when launched with the LEAF_DEBUG_OPEN env var, auto-open that comic.
     private func autoOpenIfDebug() {
         guard openComic == nil,
-              let target = ChikaDebug.env("CHIKA_DEBUG_OPEN"),
+              let target = LeafDebug.env("LEAF_DEBUG_OPEN"),
               !library.comics.isEmpty else { return }
         let match = Int(target).flatMap { library.comics.indices.contains($0) ? library.comics[$0] : nil }
             ?? library.comics.first { $0.lastPathComponent.localizedCaseInsensitiveContains(target) }
@@ -109,80 +150,347 @@ struct LibraryView: View {
         progress = map
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                ChikaWordmark()
+    // Top App Bar with Leaf brand primary color, search button, and menu button.
+    private var appBar: some View {
+        VStack(spacing: 10) {
+            HStack(alignment: .center) {
+                LeafWordmark()
                 Spacer()
-                Button { showMenu = true } label: {
-                    Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(Chika.cream)
-                        .frame(width: 36, height: 36)
-                        .background(Chika.cream.opacity(0.10))
-                        .clipShape(Circle())
+                HStack(spacing: 8) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isSearchOpen.toggle()
+                            if !isSearchOpen {
+                                searchQuery = ""
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(isSearchOpen ? Leaf.ink : Leaf.paperWhite)
+                            .frame(width: 36, height: 36)
+                            .background(isSearchOpen ? Leaf.ochre : Leaf.paperWhite.opacity(0.14))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button { showMenu = true } label: {
+                        Image(systemName: "line.3.horizontal")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(Leaf.paperWhite)
+                            .frame(width: 36, height: 36)
+                            .background(Leaf.paperWhite.opacity(0.14))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            HStack(alignment: .center) {
+
+            if isSearchOpen {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(searchQuery.isEmpty ? Leaf.creamMuted : Leaf.ochre)
+                    TextField("SEARCH COMICS BY TITLE…", text: $searchQuery)
+                        .font(.archivo(13, weight: 600))
+                        .foregroundColor(Leaf.paperWhite)
+                        .tint(Leaf.ochre)
+                        .textInputAutocapitalization(.characters)
+                        .disableAutocorrection(true)
+                    if !searchQuery.isEmpty {
+                        Button { searchQuery = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(Leaf.paperWhite.opacity(0.6))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(Leaf.deepInkSurface)
+                .clipShape(RoundedCornerShape(cornerRadius: 6))
+                .overlay(
+                    RoundedCornerShape(cornerRadius: 6)
+                        .stroke(!searchQuery.isEmpty ? Leaf.ochre : Leaf.deepInk, lineWidth: 2)
+                )
+                .comicShadow(offset: 3, color: .black.opacity(0.70), corner: 6)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .frame(maxWidth: .infinity)
+        .background(Color.clear)
+    }
+
+    // Subheader row: badge on left, Edit / Columns / Reading Direction toggles on right.
+    private func subheader(for width: CGFloat) -> some View {
+        HStack(alignment: .center) {
+            if isEditMode {
+                OchreBadge(text: "\(selectedComics.count) SELECTED")
+            } else if !searchQuery.isEmpty {
+                OchreBadge(text: "FOUND \(filteredComics.count) \(filteredComics.count == 1 ? "COMIC" : "COMICS")")
+            } else {
                 OchreBadge(text: "Your Library")
-                Spacer()
-                // Global default direction for new comics; each comic remembers its own once opened.
-                Button {
-                    defaultRTL.toggle()
-                    ReadingPrefs.defaultRightToLeft = defaultRTL
-                } label: {
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text("NEW COMICS OPEN").font(.archivo(7)).foregroundColor(Chika.creamMuted)
-                        Text(defaultRTL ? "RTL" : "LTR")
-                            .font(.archivo(12, weight: 700)).foregroundColor(Chika.ink)
-                            .padding(.horizontal, 10).padding(.vertical, 4)
-                            .background(Chika.ochre)
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                if !isEditMode && !library.comics.isEmpty {
+                    Button {
+                        withAnimation { isEditMode = true }
+                    } label: {
+                        Text("EDIT")
+                            .font(.anton(11))
+                            .foregroundColor(Leaf.cream)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Leaf.inkSoft)
+                            .clipShape(RoundedCornerShape(cornerRadius: 3))
+                            .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.ink, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                } else if isEditMode {
+                    let allSelected = !filteredComics.isEmpty && selectedComics.count == filteredComics.count
+                    Button {
+                        withAnimation {
+                            if allSelected {
+                                selectedComics.removeAll()
+                            } else {
+                                selectedComics = Set(filteredComics)
+                            }
+                        }
+                    } label: {
+                        Text(allSelected ? "DESELECT ALL" : "SELECT ALL")
+                            .font(.anton(11))
+                            .foregroundColor(allSelected ? Leaf.ink : Leaf.cream)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(allSelected ? Leaf.ochre : Leaf.inkSoft)
+                            .clipShape(RoundedCornerShape(cornerRadius: 3))
+                            .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.ink, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        withAnimation {
+                            isEditMode = false
+                            selectedComics.removeAll()
+                        }
+                    } label: {
+                        Text("DONE")
+                            .font(.anton(11))
+                            .foregroundColor(Leaf.ink)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Leaf.ochre)
                             .clipShape(RoundedCornerShape(cornerRadius: 3))
                     }
+                    .buttonStyle(.plain)
+                }
+
+                if !isEditMode {
+                    // Columns / Density toggle
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("COLUMNS")
+                            .font(.archivo(7, weight: 600))
+                            .foregroundColor(Leaf.creamMuted)
+                        HStack(spacing: 1) {
+                            ForEach(availableColumns(for: width), id: \.self) { count in
+                                let isSelected = actualColumns(for: width) == count
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        settings.libraryColumns = count
+                                    }
+                                } label: {
+                                    Text("\(count)")
+                                        .font(.archivo(11.5, weight: 700))
+                                        .foregroundColor(isSelected ? Leaf.ink : Leaf.creamMuted)
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 3.5)
+                                        .background(isSelected ? Leaf.ochre : Color.clear)
+                                        .clipShape(RoundedCornerShape(cornerRadius: 2))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(1)
+                        .background(Leaf.inkSoft)
+                        .clipShape(RoundedCornerShape(cornerRadius: 3))
+                        .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.ink, lineWidth: 1))
+                    }
+
+                    // Global default direction for new comics
+                    Button {
+                        defaultRTL.toggle()
+                        ReadingPrefs.defaultRightToLeft = defaultRTL
+                    } label: {
+                        VStack(alignment: .trailing, spacing: 1) {
+                            Text("NEW COMICS OPEN")
+                                .font(.archivo(7, weight: 600))
+                                .foregroundColor(Leaf.creamMuted)
+                            Text(defaultRTL ? "RTL" : "LTR")
+                                .font(.archivo(12, weight: 700))
+                                .foregroundColor(Leaf.ink)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(Leaf.ochre)
+                                .clipShape(RoundedCornerShape(cornerRadius: 3))
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
         .padding(.horizontal, 18)
-        .padding(.top, 40)
+        .padding(.top, 14)
         .padding(.bottom, 6)
     }
 
-    // Grid of comic cards followed by the "LOAD COMIC" tile, matching Android's single grid (the
-    // empty-library line renders above the tile when there are no comics).
-    private var content: some View {
-        ScrollView {
-            if library.comics.isEmpty {
-                Text("No comics yet. Tap LOAD COMIC to add a CBZ, CBR, or PDF.")
-                    .font(.archivo(13)).foregroundColor(Chika.creamMuted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 18).padding(.vertical, 12)
-            }
-            LazyVGrid(columns: columns, spacing: 18) {
-                ForEach(library.comics, id: \.self) { url in
-                    Button { openComic = OpenComic(url: url) } label: {
-                        ComicCard(url: url, progress: progress[url.lastPathComponent] ?? nil)
+    // Grid of comic cards followed by the "LOAD COMIC" tile.
+    private func content(for width: CGFloat) -> some View {
+        let cols = actualColumns(for: width)
+        let spacing: CGFloat = cols >= 4 ? 12 : 16
+        let gridColumns = Array(repeating: GridItem(.flexible(), spacing: spacing), count: cols)
+
+        return ScrollView {
+            VStack(spacing: 0) {
+                subheader(for: width)
+
+                if !searchQuery.isEmpty && filteredComics.isEmpty {
+                    VStack(spacing: 12) {
+                        Text("No comics matching “\(searchQuery)”")
+                            .font(.archivo(13))
+                            .foregroundColor(Leaf.creamMuted)
+                            .padding(.top, 36)
+                        Button {
+                            searchQuery = ""
+                        } label: {
+                            Text("CLEAR SEARCH")
+                                .font(.anton(12))
+                                .foregroundColor(Leaf.ink)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 6)
+                                .background(Leaf.ochre)
+                                .clipShape(RoundedCornerShape(cornerRadius: 3))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button(role: .destructive) { pendingDelete = url } label: {
-                            Label("Remove", systemImage: "trash")
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 20)
+                } else if library.comics.isEmpty {
+                    Text("No comics yet. Tap LOAD COMIC to add a CBZ, CBR, or PDF.")
+                        .font(.archivo(13)).foregroundColor(Leaf.creamMuted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 18).padding(.vertical, 12)
+                }
+
+                LazyVGrid(columns: gridColumns, spacing: cols >= 4 ? 14 : 18) {
+                    ForEach(filteredComics, id: \.self) { url in
+                        Button {
+                            if isEditMode {
+                                if selectedComics.contains(url) {
+                                    selectedComics.remove(url)
+                                } else {
+                                    selectedComics.insert(url)
+                                }
+                            } else {
+                                openComic = OpenComic(url: url)
+                            }
+                        } label: {
+                            ComicCard(
+                                url: url,
+                                progress: progress[url.lastPathComponent] ?? nil,
+                                columns: cols,
+                                isEditMode: isEditMode,
+                                isSelected: selectedComics.contains(url)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .simultaneousGesture(
+                            LongPressGesture().onEnded { _ in
+                                if !isEditMode {
+                                    isEditMode = true
+                                    selectedComics.insert(url)
+                                }
+                            }
+                        )
+                        .contextMenu {
+                            if !isEditMode {
+                                Button {
+                                    isEditMode = true
+                                    selectedComics.insert(url)
+                                } label: {
+                                    Label("Select", systemImage: "checkmark.circle")
+                                }
+                                Button(role: .destructive) { pendingDelete = url } label: {
+                                    Label("Remove", systemImage: "trash")
+                                }
+                            }
                         }
                     }
+
+                    if !isEditMode && searchQuery.isEmpty {
+                        AddTile(importing: library.importing, columns: cols) { showPicker = true }
+                    }
                 }
-                AddTile(importing: library.importing) { showPicker = true }
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
+                .padding(.bottom, isEditMode ? 96 : 48)
             }
-            .padding(.horizontal, 18)
-            .padding(.bottom, 48)
         }
+    }
+
+    // Floating batch edit action bar at the bottom.
+    private var editActionBar: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(selectedComics.count) \(selectedComics.count == 1 ? "COMIC" : "COMICS") SELECTED")
+                    .font(.anton(15))
+                    .foregroundColor(Leaf.paperWhite)
+                Text("Tap delete to remove selected copies")
+                    .font(.archivo(11))
+                    .foregroundColor(Leaf.creamMuted)
+            }
+            Spacer()
+            Button {
+                showBatchDeleteAlert = true
+            } label: {
+                Text("DELETE (\(selectedComics.count))")
+                    .font(.anton(13))
+                    .foregroundColor(Leaf.paperWhite)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 9)
+                    .background(selectedComics.isEmpty ? Leaf.crimson.opacity(0.5) : Leaf.crimson)
+                    .clipShape(RoundedCornerShape(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .disabled(selectedComics.isEmpty)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .background(Leaf.deepInkSurface.ignoresSafeArea(edges: [.bottom, .horizontal]))
+        .overlay(
+            Rectangle().frame(height: 1).foregroundColor(Leaf.ink),
+            alignment: .top
+        )
+        .shadow(color: .black.opacity(0.4), radius: 6, y: -2)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }
 
 /// A single comic in the grid, matching Android: a 0.7-aspect cover under a hard comic shadow with
 /// a full-width progress bar along its bottom edge, the title in Archivo below the cover, and a
-/// progress/page-count line. The whole card is a strict port of Android's ComicCard.
+/// progress/page-count line.
 struct ComicCard: View {
     let url: URL
     let progress: Progress?
+    var columns: Int = 2
+    var isEditMode: Bool = false
+    var isSelected: Bool = false
     @State private var cover: UIImage?
     @State private var pages = 0
 
@@ -200,36 +508,57 @@ struct ComicCard: View {
                     if let cover {
                         Image(uiImage: cover).resizable().scaledToFill()
                     } else {
-                        GeneratedCover(title: title)
+                        GeneratedCover(title: title, columns: columns)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
 
+                // Edit mode selection checkbox in top right
+                if isEditMode {
+                    ZStack {
+                        Circle()
+                            .fill(isSelected ? Leaf.ochre : Leaf.deepInk.opacity(0.80))
+                            .frame(width: 24, height: 24)
+                            .overlay(Circle().stroke(isSelected ? Leaf.ink : Leaf.paperWhite, lineWidth: 1.5))
+                        if isSelected {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(Leaf.ink)
+                        }
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                }
+
                 // Progress bar inside the cover's bottom edge — always shown (0% when unstarted).
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        Chika.ink
-                        Chika.ochre.frame(width: geo.size.width * CGFloat(pct))
+                        Leaf.ink
+                        Leaf.ochre.frame(width: geo.size.width * CGFloat(pct))
                     }
                 }
-                .frame(height: 7)
+                .frame(height: columns >= 4 ? 5 : 7)
             }
             .aspectRatio(0.7, contentMode: .fit)
-            .background(Chika.inkSoft)
+            .frame(maxHeight: 430)
+            .background(Leaf.inkSoft)
             .clipShape(RoundedCornerShape(cornerRadius: 4))
-            .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Chika.ink, lineWidth: 3))
-            .comicShadow(offset: 5, color: .black.opacity(0.70), corner: 4)
+            .overlay(
+                RoundedCornerShape(cornerRadius: 4)
+                    .stroke(isSelected ? Leaf.ochre : Leaf.ink, lineWidth: isSelected ? 3 : (columns >= 4 ? 2 : 3))
+            )
+            .comicShadow(offset: columns >= 4 ? 3 : 5, color: .black.opacity(0.70), corner: 4)
 
             Text(title)
-                .font(.archivo(12, weight: 800)).foregroundColor(Chika.cream)
+                .font(.archivo(columns >= 4 ? 10 : 12, weight: 800)).foregroundColor(Leaf.cream)
                 .lineLimit(2).multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 9)
+                .padding(.top, columns >= 4 ? 6 : 9)
             Text(started
                  ? "\(Int(pct * 100))% · pg \(lastPage + 1)/\(pageCount)"
                  : "\(pageCount) pages")
-                .font(.archivo(9.5)).foregroundColor(Chika.creamMuted)
+                .font(.archivo(columns >= 4 ? 8.5 : 9.5)).foregroundColor(Leaf.creamMuted)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 2)
         }
@@ -245,40 +574,56 @@ struct ComicCard: View {
 /// and the title in Anton bottom-left — Android's GeneratedCover.
 struct GeneratedCover: View {
     let title: String
+    var columns: Int = 2
+
+    private var fontSize: CGFloat {
+        if columns >= 5 { return 13 }
+        if columns >= 4 { return 15 }
+        if columns == 3 { return 18 }
+        return 22
+    }
+
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            Chika.inkSoft
-            Halftone(color: Chika.crimson, alpha: 0.18)
-            Text(title).font(.anton(22)).foregroundColor(Chika.cream).padding(12)
+            Leaf.inkSoft
+            Halftone(color: Leaf.leafPrimary, alpha: 0.18)
+            Text(title).font(.anton(fontSize)).foregroundColor(Leaf.cream).padding(columns >= 4 ? 8 : 12)
         }
     }
 }
 
-/// The in-grid "LOAD COMIC" tile: a dashed-border cell with an ochre halftone and a crimson
-/// starburst holding a + (or a spinner while importing) — Android's AddTile.
+/// The in-grid "LOAD COMIC" tile: a dashed-border cell with an ochre halftone and an upright gold leaf
+/// holding a + (or a spinner while importing) — matching Android's updated AddTile.
 struct AddTile: View {
     let importing: Bool
+    var columns: Int = 2
     let onTap: () -> Void
+
+    private var leafSize: CGFloat { columns >= 4 ? 48 : 64 }
+    private var iconSize: CGFloat { columns >= 4 ? 18 : 22 }
+    private var titleSize: CGFloat { columns >= 4 ? 12 : 14 }
+    private var strokeWidth: CGFloat { columns >= 4 ? 2 : 3 }
 
     var body: some View {
         Button(action: onTap) {
-            VStack(spacing: 12) {
+            VStack(spacing: columns >= 4 ? 8 : 12) {
                 ZStack {
-                    LeafShape().fill(Chika.crimson).frame(width: 64, height: 64)
+                    LeafShape().fill(Leaf.ochre).frame(width: leafSize, height: leafSize)
                     if importing {
-                        ProgressView().tint(Chika.cream)
+                        ProgressView().tint(Leaf.ink)
                     } else {
-                        Image(systemName: "plus").font(.system(size: 22, weight: .bold)).foregroundColor(Chika.cream)
+                        Image(systemName: "plus").font(.system(size: iconSize, weight: .bold)).foregroundColor(Leaf.ink)
                     }
                 }
-                Text("LOAD COMIC").font(.anton(14)).foregroundColor(Chika.cream)
+                Text("LOAD COMIC").font(.anton(titleSize)).foregroundColor(Leaf.cream)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .aspectRatio(0.7, contentMode: .fit)
-            .halftone(color: Chika.ochre, alpha: 0.10)
+            .frame(maxHeight: 430)
+            .halftone(color: Leaf.ochre, alpha: 0.10)
             .overlay(
                 RoundedCornerShape(cornerRadius: 4)
-                    .stroke(Chika.creamMuted, style: StrokeStyle(lineWidth: 3, dash: [14, 10]))
+                    .stroke(Leaf.creamMuted, style: StrokeStyle(lineWidth: strokeWidth, dash: [14, 10]))
             )
             .clipShape(RoundedCornerShape(cornerRadius: 4))
         }

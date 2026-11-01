@@ -2,7 +2,7 @@ import Foundation
 import PDFKit
 import UIKit
 import ZIPFoundation
-import ChikaShared
+import LeafShared
 
 /// iOS comic container implementation (CBZ/ZIP and PDF). Entry filtering (isImageEntry) and page
 /// ordering (NaturalOrderComparator) come from the shared Kotlin core so iOS and Android agree on

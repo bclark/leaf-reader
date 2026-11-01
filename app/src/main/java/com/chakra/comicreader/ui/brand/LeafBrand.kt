@@ -163,10 +163,6 @@ fun LeafWordmark(modifier: Modifier = Modifier) {
     }
 }
 
-/** Backward-compatible alias for [LeafWordmark]. */
-@Composable
-fun ChikaWordmark(modifier: Modifier = Modifier) = LeafWordmark(modifier)
-
 /** The rotated ochre "kicker" banner (e.g. YOUR LIBRARY) with ink frame + hard shadow. */
 @Composable
 fun OchreBadge(text: String, modifier: Modifier = Modifier) {

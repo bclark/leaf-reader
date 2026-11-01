@@ -1,10 +1,10 @@
 import SwiftUI
 
-// MARK: - Signature texture & motifs (ported from ChikaBrand.kt)
+// MARK: - Signature texture & motifs (ported from LeafBrand.kt)
 
 /// Low-opacity halftone dot wash drawn behind content. Keep alpha subtle (0.05–0.22).
 struct Halftone: View {
-    var color: Color = Chika.ink
+    var color: Color = Leaf.ink
     var alpha: Double = 0.06
     var spacing: CGFloat = 9
     var radius: CGFloat = 1.6
@@ -28,7 +28,7 @@ struct Halftone: View {
 
 extension View {
     /// Halftone dot wash layered behind the view.
-    func halftone(color: Color = Chika.ink, alpha: Double = 0.06) -> some View {
+    func halftone(color: Color = Leaf.ink, alpha: Double = 0.06) -> some View {
         background(Halftone(color: color, alpha: alpha))
     }
 
@@ -89,7 +89,7 @@ struct LeafShape: Shape {
 
 /// Four L-shaped reticle corner brackets, drawn as an overlay.
 struct Reticle: View {
-    var color: Color = Chika.cream
+    var color: Color = Leaf.cream
     var inset: CGFloat = 8
     var length: CGFloat = 14
     var stroke: CGFloat = 2.5
@@ -112,11 +112,11 @@ struct Reticle: View {
 
 // MARK: - Logo system
 
-/// The Chika three-panel "C" mark on its maroon ground, with a hard drop shadow.
-struct ChikaMark: View {
+/// The Leaf mark with a hard drop shadow.
+struct LeafMark: View {
     var size: CGFloat
     var body: some View {
-        Image("ChikaMark")
+        Image("LeafMark")
             .resizable()
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
@@ -125,16 +125,16 @@ struct ChikaMark: View {
 }
 
 /// "LEAF" lockup (cream Anton with Leaf icon).
-struct ChikaWordmark: View {
+struct LeafWordmark: View {
     var body: some View {
         HStack(spacing: 8) {
-            Image("ChikaMark")
+            Image("LeafMark")
                 .resizable()
                 .frame(width: 32, height: 32)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             Text("LEAF")
                 .font(.anton(28))
-                .foregroundColor(Chika.cream)
+                .foregroundColor(Leaf.cream)
         }
     }
 }
@@ -146,11 +146,11 @@ struct OchreBadge: View {
         Text(text.uppercased())
             .font(.anton(15))
             .tracking(0.6)
-            .foregroundColor(Chika.ink)
+            .foregroundColor(Leaf.ink)
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
-            .background(Chika.ochre)
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Chika.ink, lineWidth: 2.5))
+            .background(Leaf.ochre)
+            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Leaf.ink, lineWidth: 2.5))
             .clipShape(RoundedRectangle(cornerRadius: 3))
             .comicShadow(offset: 3, color: .black.opacity(0.6), corner: 3)
             .rotationEffect(.degrees(-1.5))
@@ -193,13 +193,13 @@ struct PageCoin: View {
         HStack(spacing: 6) {
             Text("\(page)")
                 .font(.archivo(15, weight: 500))
-                .foregroundColor(Chika.ink)
+                .foregroundColor(Leaf.ink)
             Text("/")
                 .font(.archivo(13, weight: 400))
-                .foregroundColor(Chika.ink.opacity(0.55))
+                .foregroundColor(Leaf.ink.opacity(0.55))
             Text("\(total)")
                 .font(.archivo(14, weight: 400))
-                .foregroundColor(Chika.ink.opacity(0.85))
+                .foregroundColor(Leaf.ink.opacity(0.85))
         }
         .padding(.leading, 11)
         .padding(.trailing, 15)
@@ -207,10 +207,10 @@ struct PageCoin: View {
         .background(
             ZStack {
                 PageCurlBadgeShape(corner: 10).fill(Color.black.opacity(0.4)).offset(x: 2.5, y: 2.5)
-                PageCurlBadgeShape(corner: 10).fill(Chika.ochre)
+                PageCurlBadgeShape(corner: 10).fill(Leaf.ochre)
                 PageCurlFoldShape(corner: 10).fill(Color(red: 0.71, green: 0.57, blue: 0.16))
-                PageCurlBadgeShape(corner: 10).stroke(Chika.ink, lineWidth: 2)
-                PageCurlFoldShape(corner: 10).stroke(Chika.ink, lineWidth: 1.5)
+                PageCurlBadgeShape(corner: 10).stroke(Leaf.ink, lineWidth: 2)
+                PageCurlFoldShape(corner: 10).stroke(Leaf.ink, lineWidth: 1.5)
             }
         )
     }

@@ -17,6 +17,9 @@ interface ComicArchive : AutoCloseable {
 
     /** The archive entry name for [index], useful for debugging/logging. */
     fun pageName(index: Int): String
+
+    /** Reads optional ComicInfo.xml metadata file from the archive root if present. */
+    fun readComicInfoXml(): String? = null
 }
 
 /** File extensions we treat as comic page images. */

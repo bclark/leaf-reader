@@ -2,18 +2,32 @@ import SwiftUI
 import UIKit
 import CoreText
 
-/// Chika · Chitra Katha brand palette — kept in sync with the Android theme (Color.kt).
-enum Chika {
-    static let ink = Color(hex: 0x17100E)
-    static let inkSoft = Color(hex: 0x2A201C)
-    static let crimson = Color(hex: 0xD11F2D)
-    static let crimsonBright = Color(hex: 0xE62534)
-    static let maroon = Color(hex: 0x7C1620)
-    static let maroonDeep = Color(hex: 0x5C0F18)
-    static let cream = Color(hex: 0xF3E9D6)
-    static let paper = Color(hex: 0xFAF3E4)
-    static let ochre = Color(hex: 0xE0A22B)
-    static let creamMuted = Color(hex: 0xF3E9D6).opacity(0.55)
+/// Leaf brand palette — kept in sync with the Android theme (Color.kt).
+enum Leaf {
+    // Leaf Brand Primary & Secondary
+    static let leafPrimary = Color(hex: 0x1C3A27)      // Forest Primary
+    static let leafPrimaryDark = Color(hex: 0x122519)  // Deep Forest
+    static let leafSecondary = Color(hex: 0x4A7C59)    // Sage Secondary
+    static let leafAccent = Color(hex: 0xD4AF37)       // Accent Gold
+
+    // Interface and Support
+    static let comicRose = Color(hex: 0x935B6D)        // Warm accent / label
+    static let paperWhite = Color(hex: 0xF9F9FB)       // Light BG / Text
+    static let deepInk = Color(hex: 0x14191C)          // Dark Mode BG
+    static let deepInkSurface = Color(hex: 0x1E2529)   // Cards / bars in Dark Mode
+
+    // Compatibility aliases for existing design components
+    static let ink = deepInk
+    static let inkSoft = deepInkSurface
+    static let crimson = leafPrimary
+    static let crimsonBright = leafSecondary
+    static let maroon = leafPrimaryDark
+    static let maroonDeep = Color(hex: 0x0E1D13)
+    static let cream = paperWhite
+    static let paper = paperWhite
+    static let ochre = leafAccent
+    static let ochreBright = Color(hex: 0xE5C158)
+    static let creamMuted = paperWhite.opacity(0.55)
 }
 
 /// Brand type: Anton (display — wordmark, titles, page numbers) and Archivo (UI labels, body).
@@ -52,8 +66,8 @@ extension Color {
 struct KickerText: View {
     let text: String
     var size: CGFloat = 11
-    var color: Color = Chika.creamMuted
-    init(_ text: String, size: CGFloat = 11, color: Color = Chika.creamMuted) {
+    var color: Color = Leaf.creamMuted
+    init(_ text: String, size: CGFloat = 11, color: Color = Leaf.creamMuted) {
         self.text = text; self.size = size; self.color = color
     }
     var body: some View {

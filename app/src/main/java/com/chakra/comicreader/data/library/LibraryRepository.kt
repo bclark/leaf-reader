@@ -10,9 +10,13 @@ import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import com.chakra.comicreader.data.archive.ComicArchiveFactory
 import com.chakra.comicreader.data.archive.ComicFormat
+import com.chakra.comicreader.data.archive.ComicMetadataParser
 import com.chakra.comicreader.data.archive.UnsupportedComicException
 import com.chakra.comicreader.data.db.ComicDao
 import com.chakra.comicreader.data.db.ComicEntity
+import com.chakra.comicreader.data.db.ReadingListDao
+import com.chakra.comicreader.data.db.ReadingListEntity
+import com.chakra.comicreader.data.db.ReadingListItemEntity
 import com.chakra.comicreader.data.settings.AppSettings
 import com.chakra.comicreader.data.smb.SmbClient
 import com.chakra.comicreader.data.smb.SmbEntry
@@ -20,6 +24,7 @@ import com.chakra.comicreader.data.smb.SmbTransferProgress
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
@@ -36,8 +41,53 @@ class LibraryRepository(
     private val context: Context,
     private val dao: ComicDao,
     private val settings: AppSettings,
+    private val readingListDao: ReadingListDao? = null,
 ) {
     val comics: Flow<List<ComicEntity>> = dao.observeAll()
+
+    val readingLists: Flow<List<ReadingListEntity>> =
+        readingListDao?.observeAll() ?: emptyFlow()
+
+    fun observeComicsForList(listId: Long): Flow<List<ComicEntity>> =
+        readingListDao?.observeComicsForList(listId) ?: emptyFlow()
+
+    fun observeListCount(listId: Long): Flow<Int> =
+        readingListDao?.observeItemCount(listId) ?: emptyFlow()
+
+    suspend fun createReadingList(name: String): Long = withContext(Dispatchers.IO) {
+        readingListDao?.insertList(ReadingListEntity(name = name.trim())) ?: -1L
+    }
+
+    suspend fun renameReadingList(id: Long, name: String) = withContext(Dispatchers.IO) {
+        readingListDao?.updateName(id, name.trim())
+    }
+
+    suspend fun deleteReadingList(id: Long) = withContext(Dispatchers.IO) {
+        readingListDao?.clearItems(id)
+        readingListDao?.deleteList(id)
+    }
+
+    suspend fun addComicToReadingList(listId: Long, comicId: Long, sortOrder: Int = 0) = withContext(Dispatchers.IO) {
+        readingListDao?.insertItem(ReadingListItemEntity(listId, comicId, sortOrder))
+    }
+
+    suspend fun removeComicFromReadingList(listId: Long, comicId: Long) = withContext(Dispatchers.IO) {
+        readingListDao?.removeItem(listId, comicId)
+    }
+
+    suspend fun updateComicMetadata(id: Long, series: String?, volume: String?, issueNumber: Float?) = withContext(Dispatchers.IO) {
+        dao.updateMetadata(id, series, volume, issueNumber)
+    }
+
+    suspend fun backfillMetadataIfNeeded() = withContext(Dispatchers.IO) {
+        val missing = dao.getComicsWithoutSeries()
+        for (comic in missing) {
+            val meta = ComicMetadataParser.parseFilename(comic.title)
+            if (meta.series != null || meta.issueNumber != null || meta.volume != null) {
+                dao.updateMetadata(comic.id, meta.series, meta.volume, meta.issueNumber)
+            }
+        }
+    }
 
     suspend fun getComic(id: Long): ComicEntity? = dao.getById(id)
 
@@ -152,13 +202,19 @@ class LibraryRepository(
             )
         }
 
-        val (pageCount, coverPath) = ComicArchiveFactory.open(dest).use { archive ->
+        val (pageCount, coverPath, parsedMeta) = ComicArchiveFactory.open(dest).use { archive ->
             val count = archive.pageCount
-            if (count == 0) return@use 0 to null
+            if (count == 0) return@use Triple(0, null, null)
             val coverFile = File(coversDir, "$token.jpg")
             val saved = runCatching { saveCover(archive.readPage(0), coverFile) }
                 .getOrDefault(false)
-            count to coverFile.absolutePath.takeIf { saved }
+            val xml = archive.readComicInfoXml()
+            val meta = if (xml != null) {
+                ComicMetadataParser.parseComicInfoXml(xml)
+            } else {
+                ComicMetadataParser.parseFilename(title)
+            }
+            Triple(count, coverFile.absolutePath.takeIf { saved }, meta)
         }
 
         if (pageCount == 0) {
@@ -177,6 +233,9 @@ class LibraryRepository(
                 format = format.name,
                 pageCount = pageCount,
                 rightToLeft = settings.defaultRightToLeft,
+                series = parsedMeta?.series,
+                volume = parsedMeta?.volume,
+                issueNumber = parsedMeta?.issueNumber,
                 dateAdded = now,
                 lastOpened = now,
                 source = source,

@@ -20,7 +20,10 @@ data class ComicEntity(
     val rightToLeft: Boolean = false,
     val lastPage: Int = 0,
     val lastSlot: Int = 0,
+    val source: String = "local",
+    val series: String? = null,
+    val volume: String? = null,
+    val issueNumber: Float? = null,
     val dateAdded: Long,
     val lastOpened: Long,
-    val source: String = "local",
 )

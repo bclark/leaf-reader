@@ -10,7 +10,24 @@ import android.content.Context
  * half of "remembered per comic + a global default", matching the iOS app's ReadingPrefs.
  */
 class AppSettings(context: Context) {
-    private val prefs = context.getSharedPreferences("leaf.settings", Context.MODE_PRIVATE)
+    private val prefs = run {
+        val leafPrefs = context.getSharedPreferences("leaf.settings", Context.MODE_PRIVATE)
+        val chikaPrefs = context.getSharedPreferences("chika.settings", Context.MODE_PRIVATE)
+        if (leafPrefs.all.isEmpty() && chikaPrefs.all.isNotEmpty()) {
+            val editor = leafPrefs.edit()
+            for ((key, value) in chikaPrefs.all) {
+                when (value) {
+                    is Boolean -> editor.putBoolean(key, value)
+                    is Int -> editor.putInt(key, value)
+                    is Long -> editor.putLong(key, value)
+                    is Float -> editor.putFloat(key, value)
+                    is String -> editor.putString(key, value)
+                }
+            }
+            editor.apply()
+        }
+        leafPrefs
+    }
 
     var defaultRightToLeft: Boolean
         get() = prefs.getBoolean(KEY_DEFAULT_RTL, false)

@@ -1,5 +1,6 @@
 package com.chakra.comicreader.ui.nav
 
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -13,6 +14,7 @@ import androidx.navigation.navArgument
 import com.chakra.comicreader.ComicReaderApp
 import com.chakra.comicreader.ui.library.LibraryScreen
 import com.chakra.comicreader.ui.library.LibraryViewModel
+import com.chakra.comicreader.ui.library.SeriesDetailScreen
 import com.chakra.comicreader.ui.library.SmbDriveScreen
 import com.chakra.comicreader.ui.menu.MenuScreen
 import com.chakra.comicreader.ui.reader.ReaderScreen
@@ -23,7 +25,9 @@ private object Routes {
     const val DRIVE = "drive"
     const val READER = "reader/{comicId}"
     const val MENU = "menu"
+    const val SERIES = "series/{seriesName}?volume={volume}"
     fun reader(comicId: Long) = "reader/$comicId"
+    fun series(seriesName: String, volume: String?) = "series/${Uri.encode(seriesName)}${if (!volume.isNullOrBlank()) "?volume=${Uri.encode(volume)}" else ""}"
 }
 
 @Composable
@@ -37,11 +41,29 @@ fun AppNavHost() {
             LibraryScreen(
                 viewModel = libraryVm,
                 onOpenComic = { id -> navController.navigate(Routes.reader(id)) },
+                onOpenSeries = { name, vol -> navController.navigate(Routes.series(name, vol)) },
                 onOpenMenu = { navController.navigate(Routes.MENU) },
                 onOpenDrive = {
                     libraryVm.loadSmbDirectory("")
                     navController.navigate(Routes.DRIVE)
                 },
+            )
+        }
+        composable(
+            route = Routes.SERIES,
+            arguments = listOf(
+                navArgument("seriesName") { type = NavType.StringType },
+                navArgument("volume") { type = NavType.StringType; nullable = true; defaultValue = null },
+            ),
+        ) { entry ->
+            val seriesName = Uri.decode(entry.arguments?.getString("seriesName") ?: "")
+            val volume = entry.arguments?.getString("volume")?.let { Uri.decode(it) }
+            SeriesDetailScreen(
+                seriesName = seriesName,
+                volume = volume,
+                viewModel = libraryVm,
+                onOpenComic = { id -> navController.navigate(Routes.reader(id)) },
+                onBack = { navController.popBackStack() },
             )
         }
         composable(Routes.DRIVE) {

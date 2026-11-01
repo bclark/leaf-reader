@@ -1,8 +1,8 @@
-# XcodeGen spec for the Chika iOS app. The Xcode project is generated, not committed:
+# XcodeGen spec for the Leaf iOS app. The Xcode project is generated, not committed:
 #   xcodegen generate --spec iosApp/project.yml --project iosApp
 # The Kotlin :shared framework is built by a pre-build script phase (and explicitly in CI), so
 # opening the generated project in Xcode "just works" as long as a JDK is on PATH.
-name: Chika
+name: Leaf
 options:
   bundleIdPrefix: com.chakra
   deploymentTarget:
@@ -14,7 +14,7 @@ settings:
     # App Store versioning: CI overrides these per release (see release-ios workflow); the
     # defaults keep local archives valid. CURRENT_PROJECT_VERSION must increase monotonically
     # per App Store Connect upload.
-    MARKETING_VERSION: "0.2.1"
+    MARKETING_VERSION: "0.3.2"
     CURRENT_PROJECT_VERSION: "1"
     # Automatic signing. Set your Apple Developer Team ID here (Xcode → Settings → Accounts),
     # or override with xcodebuild DEVELOPMENT_TEAM=XXXXXXXXXX for CI/App Store archives.
@@ -33,7 +33,7 @@ packages:
     exactVersion: "1.0.0"
 
 targets:
-  Chika:
+  Leaf:
     type: application
     platform: iOS
     sources:
@@ -45,7 +45,7 @@ targets:
     info:
       path: Sources/Info.plist
       properties:
-        CFBundleDisplayName: Chika
+        CFBundleDisplayName: Leaf
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # The app uses no encryption beyond what the OS provides — declares export compliance so
@@ -110,7 +110,7 @@ targets:
         OTHER_LDFLAGS:
           - "$(inherited)"
           - "-framework"
-          - "ChikaShared"
+          - "LeafShared"
     preBuildScripts:
       - name: Build Kotlin shared framework
         script: |
@@ -123,10 +123,10 @@ targets:
         basedOnDependencyAnalysis: false
 
 schemes:
-  Chika:
+  Leaf:
     build:
       targets:
-        Chika: all
+        Leaf: all
     run:
       config: Debug
     archive:

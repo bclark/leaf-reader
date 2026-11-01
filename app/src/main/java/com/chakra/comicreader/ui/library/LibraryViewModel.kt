@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.chakra.comicreader.ComicReaderApp
 import com.chakra.comicreader.data.db.ComicEntity
+import com.chakra.comicreader.data.db.ReadingListEntity
 import com.chakra.comicreader.data.library.LibraryRepository
 import com.chakra.comicreader.data.settings.AppSettings
 import com.chakra.comicreader.data.smb.SmbEntry
@@ -17,18 +18,61 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+enum class LibraryFilter(val label: String) {
+    ALL("ALL"),
+    SERIES("SERIES"),
+    READING_LISTS("LISTS"),
+    UNREAD("UNREAD"),
+}
+
+sealed interface LibraryItem {
+    data class SingleComic(val comic: ComicEntity) : LibraryItem
+
+    data class SeriesStack(
+        val seriesName: String,
+        val volume: String?,
+        val issues: List<ComicEntity>,
+        val topCoverComic: ComicEntity,
+        val totalIssues: Int,
+        val unreadIssues: Int,
+        val progressFraction: Float,
+    ) : LibraryItem
+
+    data class ReadingListItem(
+        val readingList: ReadingListEntity,
+        val previewComics: List<ComicEntity>,
+        val itemCount: Int,
+    ) : LibraryItem
+}
 
 class LibraryViewModel(
     private val repository: LibraryRepository,
     private val settings: AppSettings,
 ) : ViewModel() {
 
+    init {
+        viewModelScope.launch {
+            repository.backfillMetadataIfNeeded()
+        }
+    }
+
+    private var importJob: Job? = null
+
     /** Search query for filtering comics in the library. */
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _libraryFilter = MutableStateFlow(LibraryFilter.ALL)
+    val libraryFilter: StateFlow<LibraryFilter> = _libraryFilter.asStateFlow()
+
+    fun setLibraryFilter(filter: LibraryFilter) {
+        _libraryFilter.value = filter
+    }
 
     val comics: StateFlow<List<ComicEntity>> = combine(repository.comics, _searchQuery) { list, query ->
         if (query.isBlank()) {
@@ -39,6 +83,118 @@ class LibraryViewModel(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val readingLists: StateFlow<List<ReadingListEntity>> =
+        repository.readingLists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val libraryItems: StateFlow<List<LibraryItem>> = combine(
+        repository.comics,
+        repository.readingLists,
+        _searchQuery,
+        _libraryFilter,
+    ) { allComics, lists, query, filter ->
+        val filteredComics = if (query.isBlank()) {
+            allComics
+        } else {
+            val q = query.trim()
+            allComics.filter {
+                it.title.contains(q, ignoreCase = true) ||
+                (it.series?.contains(q, ignoreCase = true) == true)
+            }
+        }
+
+        when (filter) {
+            LibraryFilter.ALL -> {
+                val seriesGroups = filteredComics
+                    .filter { !it.series.isNullOrBlank() }
+                    .groupBy { "${it.series}__${it.volume.orEmpty()}".lowercase() }
+
+                val handledComicIds = mutableSetOf<Long>()
+                val items = mutableListOf<LibraryItem>()
+
+                for (comic in filteredComics) {
+                    if (comic.id in handledComicIds) continue
+
+                    val seriesKey = if (!comic.series.isNullOrBlank()) {
+                        "${comic.series}__${comic.volume.orEmpty()}".lowercase()
+                    } else null
+
+                    val group = if (seriesKey != null) seriesGroups[seriesKey] else null
+                    if (group != null && group.size >= 2) {
+                        val sortedIssues = group.sortedWith(
+                            compareBy<ComicEntity> { it.issueNumber ?: Float.MAX_VALUE }
+                                .thenBy { it.title }
+                        )
+                        val nextIssue = sortedIssues.firstOrNull { it.pageCount > 0 && it.lastPage < it.pageCount - 1 }
+                            ?: sortedIssues.first()
+                        val completedCount = sortedIssues.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
+                        val unreadCount = sortedIssues.count { it.lastPage == 0 }
+
+                        items.add(
+                            LibraryItem.SeriesStack(
+                                seriesName = group.first().series ?: "Series",
+                                volume = group.first().volume,
+                                issues = sortedIssues,
+                                topCoverComic = nextIssue,
+                                totalIssues = sortedIssues.size,
+                                unreadIssues = unreadCount,
+                                progressFraction = if (sortedIssues.isNotEmpty()) completedCount.toFloat() / sortedIssues.size else 0f,
+                            )
+                        )
+                        for (c in group) handledComicIds.add(c.id)
+                    } else {
+                        items.add(LibraryItem.SingleComic(comic))
+                        handledComicIds.add(comic.id)
+                    }
+                }
+                items
+            }
+            LibraryFilter.SERIES -> {
+                val seriesGroups = filteredComics
+                    .filter { !it.series.isNullOrBlank() }
+                    .groupBy { "${it.series}__${it.volume.orEmpty()}".lowercase() }
+
+                seriesGroups.values.map { group ->
+                    val sortedIssues = group.sortedWith(
+                        compareBy<ComicEntity> { it.issueNumber ?: Float.MAX_VALUE }
+                            .thenBy { it.title }
+                    )
+                    val nextIssue = sortedIssues.firstOrNull { it.pageCount > 0 && it.lastPage < it.pageCount - 1 }
+                        ?: sortedIssues.first()
+                    val completedCount = sortedIssues.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
+                    val unreadCount = sortedIssues.count { it.lastPage == 0 }
+
+                    LibraryItem.SeriesStack(
+                        seriesName = group.first().series ?: "Series",
+                        volume = group.first().volume,
+                        issues = sortedIssues,
+                        topCoverComic = nextIssue,
+                        totalIssues = sortedIssues.size,
+                        unreadIssues = unreadCount,
+                        progressFraction = if (sortedIssues.isNotEmpty()) completedCount.toFloat() / sortedIssues.size else 0f,
+                    )
+                }.sortedBy { it.seriesName.lowercase() }
+            }
+            LibraryFilter.READING_LISTS -> {
+                val filteredLists = if (query.isBlank()) {
+                    lists
+                } else {
+                    lists.filter { it.name.contains(query.trim(), ignoreCase = true) }
+                }
+                filteredLists.map { list ->
+                    LibraryItem.ReadingListItem(
+                        readingList = list,
+                        previewComics = emptyList(),
+                        itemCount = 0,
+                    )
+                }
+            }
+            LibraryFilter.UNREAD -> {
+                val unreadComics = filteredComics.filter { it.lastPage == 0 }
+                unreadComics.map { LibraryItem.SingleComic(it) }
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     /** Global default reading direction applied to newly imported comics. */
     private val _defaultRightToLeft = MutableStateFlow(settings.defaultRightToLeft)
     val defaultRightToLeft: StateFlow<Boolean> = _defaultRightToLeft.asStateFlow()
@@ -46,8 +202,6 @@ class LibraryViewModel(
     /** Number of columns displayed in the library grid. */
     private val _libraryColumns = MutableStateFlow(settings.libraryColumns)
     val libraryColumns: StateFlow<Int> = _libraryColumns.asStateFlow()
-
-    private var importJob: Job? = null
 
     private val _importing = MutableStateFlow(false)
     val importing: StateFlow<Boolean> = _importing.asStateFlow()
@@ -72,6 +226,12 @@ class LibraryViewModel(
 
     private val _smbLoading = MutableStateFlow(false)
     val smbLoading: StateFlow<Boolean> = _smbLoading.asStateFlow()
+
+    private val _isEditMode = MutableStateFlow(false)
+    val isEditMode: StateFlow<Boolean> = _isEditMode.asStateFlow()
+
+    private val _selectedComicIds = MutableStateFlow(emptySet<Long>())
+    val selectedComicIds: StateFlow<Set<Long>> = _selectedComicIds.asStateFlow()
 
     val hasSmbConfig: Boolean get() = settings.hasSmbConfig
 
@@ -247,6 +407,54 @@ class LibraryViewModel(
 
     fun deleteComic(id: Long) {
         viewModelScope.launch { repository.deleteComic(id) }
+    }
+
+    fun setEditMode(enabled: Boolean) {
+        _isEditMode.value = enabled
+        if (!enabled) {
+            _selectedComicIds.value = emptySet()
+        }
+    }
+
+    fun toggleComicSelection(id: Long) {
+        val current = _selectedComicIds.value
+        _selectedComicIds.value = if (id in current) current - id else current + id
+    }
+
+    fun selectAllComics(ids: List<Long>) {
+        _selectedComicIds.value = ids.toSet()
+    }
+
+    fun clearComicSelection() {
+        _selectedComicIds.value = emptySet()
+    }
+
+    fun deleteSelectedComics() {
+        val ids = _selectedComicIds.value.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            ids.forEach { id ->
+                repository.deleteComic(id)
+            }
+            _selectedComicIds.value = emptySet()
+            _isEditMode.value = false
+            _message.value = "Deleted ${ids.size} comics."
+        }
+    }
+
+    fun markSeriesRead(seriesName: String, volume: String?, read: Boolean) {
+        viewModelScope.launch {
+            val allComics = repository.comics.firstOrNull() ?: emptyList()
+            val matching = allComics.filter {
+                it.series.equals(seriesName, ignoreCase = true) &&
+                (volume.isNullOrBlank() || it.volume.equals(volume, ignoreCase = true))
+            }
+            for (comic in matching) {
+                val newPage = if (read) (comic.pageCount - 1).coerceAtLeast(0) else 0
+                repository.saveProgress(comic.id, newPage, 0)
+            }
+            _message.value = if (read) "Marked $seriesName as completed" else "Marked $seriesName as unread"
+        }
     }
 
     /** Flips the global default reading direction for comics imported from now on. */
