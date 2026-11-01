@@ -171,10 +171,6 @@ fun LibraryScreen(
         viewModel.setEditMode(false)
     }
 
-    BackHandler(enabled = importing) {
-        viewModel.cancelImport()
-    }
-
     BackHandler(enabled = isSearchOpen && !isEditMode) {
         isSearchOpen = false
         viewModel.clearSearch()
@@ -358,122 +354,6 @@ fun LibraryScreen(
                         }
                     }
                 }
-
-                AnimatedVisibility(
-                    visible = importing,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically(),
-                ) {
-                    val pct = (importProgress * 100).toInt().coerceIn(0, 100)
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 10.dp, bottom = 4.dp)
-                            .comicShadow(offset = 3.dp, color = Color(0xB3000000))
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(DeepInkSurface)
-                            .border(2.dp, LeafAccent, RoundedCornerShape(6.dp))
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                CircularProgressIndicator(
-                                    color = LeafAccent,
-                                    strokeWidth = 2.5.dp,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                                Text(
-                                    text = importStatus?.uppercase() ?: "DOWNLOADING COMIC…",
-                                    fontFamily = Anton,
-                                    fontSize = 13.sp,
-                                    color = PaperWhite,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .padding(start = 8.dp)
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(LeafPrimary)
-                                    .border(1.dp, LeafAccent, RoundedCornerShape(3.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                            ) {
-                                Text(
-                                    text = "$pct%",
-                                    fontFamily = Anton,
-                                    fontSize = 13.sp,
-                                    color = LeafAccent,
-                                    letterSpacing = 0.5.sp,
-                                )
-                            }
-                        }
-
-                        LinearProgressIndicator(
-                            progress = { if (importProgress > 0f) importProgress else 0.05f },
-                            color = LeafAccent,
-                            trackColor = DeepInk,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(7.dp)
-                                .clip(RoundedCornerShape(3.5.dp)),
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = importDetail ?: if (importProgress > 0f) "$pct% completed" else "Connecting…",
-                                fontFamily = Archivo,
-                                fontSize = 11.5.sp,
-                                color = PaperWhiteMuted,
-                                modifier = Modifier.weight(1f).padding(end = 8.dp),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(DeepInk)
-                                    .border(1.dp, ComicRose, RoundedCornerShape(4.dp))
-                                    .clickable { viewModel.cancelImport() }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                ) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = "Cancel import",
-                                        tint = ComicRose,
-                                        modifier = Modifier.size(12.dp),
-                                    )
-                                    Text(
-                                        text = "CANCEL",
-                                        fontFamily = Anton,
-                                        fontSize = 11.sp,
-                                        color = ComicRose,
-                                        letterSpacing = 0.5.sp,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
             }
         }
 
@@ -484,7 +364,7 @@ fun LibraryScreen(
                 columns = GridCells.Fixed(actualColumns),
                 state = gridState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 96.dp),
+                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 120.dp),
                 horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
                 verticalArrangement = Arrangement.spacedBy(verticalSpacing),
             ) {
@@ -775,7 +655,7 @@ fun LibraryScreen(
                 }
             }
 
-            if (!isEditMode) {
+            if (!isEditMode && !importing) {
                 ExtendedFloatingActionButton(
                     onClick = { if (!importing) showSourceDialog = true },
                     containerColor = LeafAccent,
@@ -804,10 +684,21 @@ fun LibraryScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(20.dp)
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
                     .fillMaxWidth(),
             ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ImportProgressBanner(
+                        importing = importing,
+                        progress = importProgress,
+                        status = importStatus,
+                        detail = importDetail,
+                        onCancel = { viewModel.cancelImport() },
+                    )
+
                     AnimatedVisibility(
                         visible = isEditMode && selectedComicIds.isNotEmpty(),
                         enter = fadeIn() + expandVertically(),
@@ -1107,109 +998,6 @@ internal fun GeneratedCover(title: String, columns: Int = 2) {
 }
 
 @Composable
-private fun AddTile(
-    importing: Boolean,
-    progress: Float,
-    status: String? = null,
-    detail: String? = null,
-    columns: Int = 2,
-    onClick: () -> Unit,
-    onCancel: () -> Unit = {},
-) {
-    val starburstSize = if (columns >= 5) 42.dp else if (columns >= 4) 50.dp else 64.dp
-    val iconSize = if (columns >= 5) 18.dp else if (columns >= 4) 22.dp else 26.dp
-    val fontSize = if (columns >= 5) 11.sp else if (columns >= 4) 12.5.sp else 14.sp
-    val spacing = if (columns >= 4) 6.dp else 10.dp
-    val contentPadding = if (columns >= 4) 8.dp else 16.dp
-    val strokeWidth = if (columns >= 4) 2.dp else 3.dp
-    val pct = (progress * 100).toInt().coerceIn(0, 100)
-
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .aspectRatio(0.7f)
-            .clip(RoundedCornerShape(4.dp))
-            .background(DeepInkSurface)
-            .drawBehind {
-                val p = PathEffect.dashPathEffect(floatArrayOf(16f, 12f), 0f)
-                drawRoundRect(
-                    color = LeafAccent,
-                    style = Stroke(width = strokeWidth.toPx(), pathEffect = p),
-                    cornerRadius = CornerRadius(4.dp.toPx()),
-                )
-            }
-            .clickable(onClick = onClick)
-            .padding(contentPadding),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(spacing),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(starburstSize)
-                    .clip(LeafShape)
-                    .background(LeafAccent),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (importing) CircularProgressIndicator(modifier = Modifier.size(iconSize), color = DeepInk, strokeWidth = 3.dp)
-                else Icon(Icons.Default.Add, contentDescription = "Load comic", tint = DeepInk, modifier = Modifier.size(iconSize))
-            }
-            Text(
-                if (importing) {
-                    if (status != null) "$pct% · $status".uppercase()
-                    else if (progress > 0f) "LOADING $pct%"
-                    else "LOADING…"
-                } else "LOAD COMIC",
-                fontFamily = Anton,
-                fontSize = fontSize,
-                color = PaperWhite,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-            )
-            if (importing) {
-                LinearProgressIndicator(
-                    progress = { if (progress > 0f) progress else 0.05f },
-                    color = LeafAccent,
-                    trackColor = DeepInk,
-                    modifier = Modifier.fillMaxWidth().height(if (columns >= 4) 4.dp else 6.dp).clip(RoundedCornerShape(3.dp)),
-                )
-                if (detail != null) {
-                    Text(
-                        detail,
-                        fontFamily = Archivo,
-                        fontSize = if (columns >= 4) 8.sp else 9.5.sp,
-                        color = PaperWhiteMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(DeepInk)
-                        .border(1.dp, ComicRose, RoundedCornerShape(3.dp))
-                        .clickable { onCancel() }
-                        .padding(horizontal = 8.dp, vertical = 3.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        "CANCEL",
-                        fontFamily = Anton,
-                        fontSize = if (columns >= 4) 9.sp else 10.5.sp,
-                        color = ComicRose,
-                        letterSpacing = 0.5.sp,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
 fun SmbDriveScreen(
     viewModel: LibraryViewModel,
     onBack: () -> Unit,
@@ -1231,10 +1019,6 @@ fun SmbDriveScreen(
     val allSelected = totalFiles > 0 && selectedCount == totalFiles
     val totalSelectedBytes = remember(selectedPaths, fileEntries) {
         fileEntries.filter { it.path in selectedPaths }.sumOf { it.sizeBytes }
-    }
-
-    BackHandler(enabled = importing) {
-        viewModel.cancelImport()
     }
 
     BackHandler(enabled = !importing && selectedCount > 0) {
@@ -1267,9 +1051,7 @@ fun SmbDriveScreen(
                         .clip(CircleShape)
                         .background(PaperWhite.copy(alpha = 0.14f))
                         .clickable {
-                            if (importing) {
-                                viewModel.cancelImport()
-                            } else if (selectedCount > 0) {
+                            if (selectedCount > 0) {
                                 selectedPaths = emptySet()
                             } else if (path.isNotEmpty()) {
                                 viewModel.loadSmbDirectory(path.substringBeforeLast('\\', ""))
@@ -1297,122 +1079,6 @@ fun SmbDriveScreen(
                             color = PaperWhiteMuted,
                             modifier = Modifier.padding(top = 4.dp),
                         )
-                    }
-                }
-            }
-
-            AnimatedVisibility(
-                visible = importing,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically(),
-            ) {
-                val pct = (importProgress * 100).toInt().coerceIn(0, 100)
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 10.dp, bottom = 4.dp)
-                        .comicShadow(offset = 3.dp, color = Color(0xB3000000))
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(DeepInkSurface)
-                        .border(2.dp, LeafAccent, RoundedCornerShape(6.dp))
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            CircularProgressIndicator(
-                                color = LeafAccent,
-                                strokeWidth = 2.5.dp,
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Text(
-                                text = importStatus?.uppercase() ?: "DOWNLOADING COMIC…",
-                                fontFamily = Anton,
-                                fontSize = 13.sp,
-                                color = PaperWhite,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .padding(start = 8.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(LeafPrimary)
-                                .border(1.dp, LeafAccent, RoundedCornerShape(3.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
-                        ) {
-                            Text(
-                                text = "$pct%",
-                                fontFamily = Anton,
-                                fontSize = 13.sp,
-                                color = LeafAccent,
-                                letterSpacing = 0.5.sp,
-                            )
-                        }
-                    }
-
-                    LinearProgressIndicator(
-                        progress = { if (importProgress > 0f) importProgress else 0.05f },
-                        color = LeafAccent,
-                        trackColor = DeepInk,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(7.dp)
-                            .clip(RoundedCornerShape(3.5.dp)),
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = importDetail ?: if (importProgress > 0f) "$pct% completed" else "Connecting…",
-                            fontFamily = Archivo,
-                            fontSize = 11.5.sp,
-                            color = PaperWhiteMuted,
-                            modifier = Modifier.weight(1f).padding(end = 8.dp),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(DeepInk)
-                                .border(1.dp, ComicRose, RoundedCornerShape(4.dp))
-                                .clickable { viewModel.cancelImport() }
-                                .padding(horizontal = 10.dp, vertical = 5.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "Cancel import",
-                                    tint = ComicRose,
-                                    modifier = Modifier.size(12.dp),
-                                )
-                                Text(
-                                    text = "CANCEL",
-                                    fontFamily = Anton,
-                                    fontSize = 11.sp,
-                                    color = ComicRose,
-                                    letterSpacing = 0.5.sp,
-                                )
-                            }
-                        }
                     }
                 }
             }
@@ -1525,56 +1191,77 @@ fun SmbDriveScreen(
                         }
                     }
                 }
+            }
 
-                if (selectedCount > 0) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp)
-                            .comicShadow(offset = 3.dp, color = Color(0xB3000000))
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(DeepInkSurface)
-                            .border(2.dp, LeafAccent, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .fillMaxWidth(),
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ImportProgressBanner(
+                        importing = importing,
+                        progress = importProgress,
+                        status = importStatus,
+                        detail = importDetail,
+                        onCancel = { viewModel.cancelImport() },
+                    )
+
+                    if (selectedCount > 0 && !importing) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .comicShadow(offset = 3.dp, color = Color(0xB3000000))
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(DeepInkSurface)
+                                .border(2.dp, LeafAccent, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {
-                            Column {
-                                Text(
-                                    text = "$selectedCount ${if (selectedCount == 1) "COMIC" else "COMICS"} SELECTED",
-                                    fontFamily = Anton,
-                                    fontSize = 15.sp,
-                                    color = PaperWhite,
-                                )
-                                Text(
-                                    text = formatFileSize(totalSelectedBytes),
-                                    fontFamily = Archivo,
-                                    fontSize = 11.5.sp,
-                                    color = LeafAccent,
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(LeafAccent)
-                                    .clickable {
-                                        val toImport = fileEntries.filter { it.path in selectedPaths }
-                                        viewModel.importSmbComics(toImport) {
-                                            selectedPaths = emptySet()
-                                        }
-                                    }
-                                    .padding(horizontal = 16.dp, vertical = 9.dp),
-                                contentAlignment = Alignment.Center,
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(
-                                    text = "IMPORT ($selectedCount)",
-                                    fontFamily = Anton,
-                                    fontSize = 13.sp,
-                                    color = DeepInk,
-                                )
+                                Column {
+                                    Text(
+                                        text = "$selectedCount ${if (selectedCount == 1) "COMIC" else "COMICS"} SELECTED",
+                                        fontFamily = Anton,
+                                        fontSize = 15.sp,
+                                        color = PaperWhite,
+                                    )
+                                    Text(
+                                        text = formatFileSize(totalSelectedBytes),
+                                        fontFamily = Archivo,
+                                        fontSize = 11.5.sp,
+                                        color = LeafAccent,
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(LeafAccent)
+                                        .clickable {
+                                            val toImport = fileEntries.filter { it.path in selectedPaths }
+                                            viewModel.importSmbComics(toImport) {
+                                                selectedPaths = emptySet()
+                                            }
+                                            onBack()
+                                        }
+                                        .padding(horizontal = 16.dp, vertical = 9.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = "IMPORT ($selectedCount)",
+                                        fontFamily = Anton,
+                                        fontSize = 13.sp,
+                                        color = DeepInk,
+                                    )
+                                }
                             }
                         }
                     }
@@ -1822,5 +1509,235 @@ private fun ReadingListCard(
             }
         }
         Spacer(Modifier.height(18.dp))
+    }
+}
+
+@Composable
+private fun AddTile(
+    importing: Boolean,
+    progress: Float,
+    status: String? = null,
+    detail: String? = null,
+    columns: Int = 2,
+    onClick: () -> Unit,
+    onCancel: () -> Unit = {},
+) {
+    val starburstSize = if (columns >= 5) 42.dp else if (columns >= 4) 50.dp else 64.dp
+    val iconSize = if (columns >= 5) 18.dp else if (columns >= 4) 22.dp else 26.dp
+    val fontSize = if (columns >= 5) 11.sp else if (columns >= 4) 12.5.sp else 14.sp
+    val spacing = if (columns >= 4) 6.dp else 10.dp
+    val contentPadding = if (columns >= 4) 8.dp else 16.dp
+    val strokeWidth = if (columns >= 4) 2.dp else 3.dp
+    val pct = (progress * 100).toInt().coerceIn(0, 100)
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .aspectRatio(0.7f)
+            .clip(RoundedCornerShape(4.dp))
+            .background(DeepInkSurface)
+            .drawBehind {
+                val p = PathEffect.dashPathEffect(floatArrayOf(16f, 12f), 0f)
+                drawRoundRect(
+                    color = LeafAccent,
+                    style = Stroke(width = strokeWidth.toPx(), pathEffect = p),
+                    cornerRadius = CornerRadius(4.dp.toPx()),
+                )
+            }
+            .clickable(onClick = onClick)
+            .padding(contentPadding),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(spacing),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(starburstSize)
+                    .clip(LeafShape)
+                    .background(LeafAccent),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (importing) CircularProgressIndicator(modifier = Modifier.size(iconSize), color = DeepInk, strokeWidth = 3.dp)
+                else Icon(Icons.Default.Add, contentDescription = "Load comic", tint = DeepInk, modifier = Modifier.size(iconSize))
+            }
+            Text(
+                if (importing) {
+                    if (status != null) "$pct% · $status".uppercase()
+                    else if (progress > 0f) "LOADING $pct%"
+                    else "LOADING…"
+                } else "LOAD COMIC",
+                fontFamily = Anton,
+                fontSize = fontSize,
+                color = PaperWhite,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+            if (importing) {
+                LinearProgressIndicator(
+                    progress = { if (progress > 0f) progress else 0.05f },
+                    color = LeafAccent,
+                    trackColor = DeepInk,
+                    modifier = Modifier.fillMaxWidth().height(if (columns >= 4) 4.dp else 6.dp).clip(RoundedCornerShape(3.dp)),
+                )
+                if (detail != null) {
+                    Text(
+                        detail,
+                        fontFamily = Archivo,
+                        fontSize = if (columns >= 4) 8.sp else 9.5.sp,
+                        color = PaperWhiteMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(DeepInk)
+                        .border(1.dp, ComicRose, RoundedCornerShape(3.dp))
+                        .clickable { onCancel() }
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "CANCEL",
+                        fontFamily = Anton,
+                        fontSize = if (columns >= 4) 9.sp else 10.5.sp,
+                        color = ComicRose,
+                        letterSpacing = 0.5.sp,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImportProgressBanner(
+    importing: Boolean,
+    progress: Float,
+    status: String?,
+    detail: String?,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AnimatedVisibility(
+        visible = importing,
+        enter = fadeIn() + expandVertically(),
+        exit = fadeOut() + shrinkVertically(),
+        modifier = modifier,
+    ) {
+        val pct = (progress * 100).toInt().coerceIn(0, 100)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .comicShadow(offset = 4.dp, color = Color(0xB3000000))
+                .clip(RoundedCornerShape(8.dp))
+                .background(DeepInkSurface)
+                .border(2.dp, LeafAccent, RoundedCornerShape(8.dp))
+                .padding(12.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        CircularProgressIndicator(
+                            color = LeafAccent,
+                            strokeWidth = 2.5.dp,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = status?.uppercase() ?: "DOWNLOADING COMIC…",
+                            fontFamily = Anton,
+                            fontSize = 13.sp,
+                            color = PaperWhite,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(LeafPrimary)
+                            .border(1.dp, LeafAccent, RoundedCornerShape(3.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            text = "$pct%",
+                            fontFamily = Anton,
+                            fontSize = 13.sp,
+                            color = LeafAccent,
+                            letterSpacing = 0.5.sp,
+                        )
+                    }
+                }
+
+                LinearProgressIndicator(
+                    progress = { if (progress > 0f) progress else 0.05f },
+                    color = LeafAccent,
+                    trackColor = DeepInk,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(7.dp)
+                        .clip(RoundedCornerShape(3.5.dp)),
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = detail ?: if (progress > 0f) "$pct% completed" else "Connecting…",
+                        fontFamily = Archivo,
+                        fontSize = 11.5.sp,
+                        color = PaperWhiteMuted,
+                        modifier = Modifier.weight(1f).padding(end = 8.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(DeepInk)
+                            .border(1.dp, ComicRose, RoundedCornerShape(4.dp))
+                            .clickable { onCancel() }
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Cancel import",
+                                tint = ComicRose,
+                                modifier = Modifier.size(12.dp),
+                            )
+                            Text(
+                                text = "CANCEL",
+                                fontFamily = Anton,
+                                fontSize = 11.sp,
+                                color = ComicRose,
+                                letterSpacing = 0.5.sp,
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
