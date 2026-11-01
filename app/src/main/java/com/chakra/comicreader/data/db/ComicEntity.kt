@@ -22,4 +22,5 @@ data class ComicEntity(
     val lastSlot: Int = 0,
     val dateAdded: Long,
     val lastOpened: Long,
+    val source: String = "local",
 )

@@ -16,6 +16,8 @@ import com.chakra.comicreader.data.db.ComicEntity
 import com.chakra.comicreader.data.settings.AppSettings
 import com.chakra.comicreader.data.smb.SmbClient
 import com.chakra.comicreader.data.smb.SmbEntry
+import com.chakra.comicreader.data.smb.SmbTransferProgress
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -60,6 +62,7 @@ class LibraryRepository(
     suspend fun importComic(
         uri: Uri,
         onProgress: (Float) -> Unit = {},
+        isCancelled: () -> Boolean = { false },
     ): Result<Long> = withContext(Dispatchers.IO) {
         val token = UUID.randomUUID().toString()
         val comicsDir = File(context.filesDir, "comics").apply { mkdirs() }
@@ -76,8 +79,9 @@ class LibraryRepository(
                 dest.outputStream().use { output ->
                     val buf = ByteArray(64 * 1024)
                     var copied = 0L
-                    var read: Int
-                    while (input.read(buf).also { read = it } >= 0) {
+                    var read = 0
+                    while (!isCancelled() && input.read(buf).also { read = it } >= 0) {
+                        if (isCancelled()) break
                         output.write(buf, 0, read)
                         copied += read
                         if (totalBytes > 0L) {
@@ -88,10 +92,15 @@ class LibraryRepository(
             } ?: return@withContext Result.failure(
                 UnsupportedComicException("Could not open the selected file."),
             )
-            indexCopiedFile(dest, coversDir, token, title)
+            if (isCancelled()) {
+                dest.delete()
+                return@withContext Result.failure(CancellationException("Import cancelled"))
+            }
+            indexCopiedFile(dest, coversDir, token, title, source = "local")
         } catch (t: Throwable) {
-            Log.e(TAG, "Import failed", t)
             dest.delete()
+            if (t is CancellationException) throw t
+            Log.e(TAG, "Import failed", t)
             Result.failure(t)
         }
     }
@@ -103,7 +112,8 @@ class LibraryRepository(
 
     suspend fun importSmbComic(
         entry: SmbEntry,
-        onProgress: (Float) -> Unit = {},
+        onProgress: (SmbTransferProgress) -> Unit = {},
+        isCancelled: () -> Boolean = { false },
     ): Result<Long> = withContext(Dispatchers.IO) {
         val token = UUID.randomUUID().toString()
         val comicsDir = File(context.filesDir, "comics").apply { mkdirs() }
@@ -113,11 +123,16 @@ class LibraryRepository(
         val dest = File(comicsDir, "$token.$ext")
 
         try {
-            SmbClient.downloadToFile(settings, entry, dest, onProgress)
-            indexCopiedFile(dest, coversDir, token, title)
+            SmbClient.downloadToFile(settings, entry, dest, onProgress, isCancelled)
+            if (isCancelled()) {
+                dest.delete()
+                return@withContext Result.failure(CancellationException("SMB import cancelled"))
+            }
+            indexCopiedFile(dest, coversDir, token, title, source = "smb")
         } catch (t: Throwable) {
-            Log.e(TAG, "SMB import failed", t)
             dest.delete()
+            if (t is CancellationException) throw t
+            Log.e(TAG, "SMB import failed", t)
             Result.failure(t)
         }
     }
@@ -127,6 +142,7 @@ class LibraryRepository(
         coversDir: File,
         token: String,
         title: String,
+        source: String = "local",
     ): Result<Long> {
         val format = ComicArchiveFactory.detectFormat(dest)
         if (format == ComicFormat.UNKNOWN) {
@@ -163,6 +179,7 @@ class LibraryRepository(
                 rightToLeft = settings.defaultRightToLeft,
                 dateAdded = now,
                 lastOpened = now,
+                source = source,
             ),
         )
         return Result.success(id)
