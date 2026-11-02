@@ -10,6 +10,7 @@ import net.digitalbc.leafreader.data.library.LibraryRepository
 import net.digitalbc.leafreader.data.page.PageLoader
 import net.digitalbc.leafreader.detection.Panel
 import net.digitalbc.leafreader.detection.PanelSource
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -293,11 +294,16 @@ class ReaderViewModel(
                 if (isSpread) {
                     prefetch(resolvedPage + 2)
                     prefetch(resolvedPage + 3)
+                    if (resolvedPage > 2) {
+                        prefetch(resolvedPage - 2)
+                        prefetch(resolvedPage - 1)
+                    }
                 } else {
                     prefetch(resolvedPage + 1)
+                    if (resolvedPage > 0) prefetch(resolvedPage - 1)
                 }
-                if (resolvedPage > 0) prefetch(resolvedPage - 1)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 _state.update {
                     it.copy(loading = false, detecting = false, error = "Failed to load page ${resolvedPage + 1}: ${t.message}")
                 }

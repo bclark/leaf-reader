@@ -74,6 +74,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
@@ -166,10 +167,59 @@ fun ReaderScreen(
         }
     }
 
+    val nextSpreadP1Bitmap by produceState<Bitmap?>(
+        initialValue = viewModel.getCachedPageBitmap(pageIndex + 2),
+        key1 = pageIndex,
+    ) {
+        if (isSpread && pageIndex + 2 < pageCount) {
+            value = viewModel.getCachedPageBitmap(pageIndex + 2) ?: viewModel.loadPageBitmap(pageIndex + 2)
+        }
+    }
+    val nextSpreadP2Bitmap by produceState<Bitmap?>(
+        initialValue = viewModel.getCachedPageBitmap(pageIndex + 3),
+        key1 = pageIndex,
+    ) {
+        if (isSpread && pageIndex + 3 < pageCount) {
+            value = viewModel.getCachedPageBitmap(pageIndex + 3) ?: viewModel.loadPageBitmap(pageIndex + 3)
+        }
+    }
+    val prevSpreadP1Index = if (pageIndex % 2 == 1) (pageIndex - 2).coerceAtLeast(0) else pageIndex - 1
+    val prevSpreadP1Bitmap by produceState<Bitmap?>(
+        initialValue = if (pageIndex > 0) viewModel.getCachedPageBitmap(prevSpreadP1Index) else null,
+        key1 = pageIndex,
+    ) {
+        if (isSpread && pageIndex > 0 && prevSpreadP1Index >= 0) {
+            value = viewModel.getCachedPageBitmap(prevSpreadP1Index) ?: viewModel.loadPageBitmap(prevSpreadP1Index)
+        }
+    }
+    val prevSpreadP2Index = if (prevSpreadP1Index > 0 && prevSpreadP1Index + 1 < pageIndex) prevSpreadP1Index + 1 else null
+    val prevSpreadP2Bitmap by produceState<Bitmap?>(
+        initialValue = prevSpreadP2Index?.let { viewModel.getCachedPageBitmap(it) },
+        key1 = pageIndex,
+    ) {
+        if (isSpread && prevSpreadP2Index != null) {
+            value = viewModel.getCachedPageBitmap(prevSpreadP2Index) ?: viewModel.loadPageBitmap(prevSpreadP2Index)
+        }
+    }
+
+    val getPageBitmap: (Int?) -> Bitmap? = { docIndex ->
+        when (docIndex) {
+            null -> null
+            pageIndex -> state.page
+            pageIndex + 1 -> if (state.secondPage != null) state.secondPage else (nextBitmap ?: viewModel.getCachedPageBitmap(docIndex))
+            pageIndex - 1 -> prevBitmap ?: viewModel.getCachedPageBitmap(docIndex)
+            pageIndex + 2 -> nextSpreadP1Bitmap ?: viewModel.getCachedPageBitmap(docIndex)
+            pageIndex + 3 -> nextSpreadP2Bitmap ?: viewModel.getCachedPageBitmap(docIndex)
+            prevSpreadP1Index -> prevSpreadP1Bitmap ?: viewModel.getCachedPageBitmap(docIndex)
+            prevSpreadP2Index -> prevSpreadP2Bitmap ?: viewModel.getCachedPageBitmap(docIndex)
+            else -> viewModel.getCachedPageBitmap(docIndex)
+        }
+    }
+
     var curlDirection by remember { mutableStateOf<CurlDirection?>(null) }
     var curlProgress by remember { mutableFloatStateOf(0f) }
 
-    val canTurnForward = if (isSpread) pageIndex + 1 < pageCount - 1 else pageIndex < pageCount - 1
+    val canTurnForward = if (isSpread) pageIndex + 2 < pageCount else pageIndex < pageCount - 1
     val canTurnBackward = pageIndex > 0
 
     val turnForward: () -> Unit = {
@@ -244,6 +294,7 @@ fun ReaderScreen(
                 fitMode = fitMode,
                 nextBitmap = nextBitmap,
                 prevBitmap = prevBitmap,
+                getPageBitmap = getPageBitmap,
                 curlDirection = curlDirection,
                 curlProgress = curlProgress,
                 onUpdateCurl = { dir, prog ->
@@ -741,12 +792,330 @@ private fun DrawScope.drawCurlTurn(
     }
 }
 
+/**
+ * Renders an open-book physical two-page spread curl turn.
+ *
+ * One physical sheet curls around the center spine:
+ * - The front face displays the turning page (lifts and curls away).
+ * - The reverse face displays the incoming page (settles upright and un-mirrored).
+ * - The static page stays in place on its side until covered by the turning sheet.
+ * - The underneath page is revealed on the active side as the turning sheet lifts away.
+ */
+private fun DrawScope.drawSpreadCurlTurn(
+    spread: SpreadDraw,
+    staticBitmap: Bitmap,
+    movingFrontBitmap: Bitmap,
+    movingBackBitmap: Bitmap?,
+    underneathBitmap: Bitmap?,
+    mapping: SpreadTurnMapping,
+    progress: Float,
+    userScale: Float,
+    userPanX: Float,
+    userPanY: Float,
+    vertsFront: FloatArray,
+    vertsBack: FloatArray,
+    meshPaint: Paint,
+) {
+    if (staticBitmap.isRecycled || movingFrontBitmap.isRecycled) return
+    val cx = size.width / 2f
+    val cy = size.height / 2f
+
+    val l1 = cx + (spread.left1 - cx) * userScale + userPanX
+    val t1 = cy + (spread.top1 - cy) * userScale + userPanY
+    val w1 = spread.width1 * userScale
+    val h1 = spread.height1 * userScale
+
+    val l2 = cx + (spread.left2 - cx) * userScale + userPanX
+    val t2 = cy + (spread.top2 - cy) * userScale + userPanY
+    val w2 = spread.width2 * userScale
+    val h2 = spread.height2 * userScale
+
+    val spineX = l2
+    val t = progress.coerceIn(0.001f, 0.999f)
+
+    if (mapping.isPeelingFromRight) {
+        val w = w2
+        val h = h2
+        val maxR = w * 0.16f
+        val r = (maxR * kotlin.math.sin(t * Math.PI.toFloat())).coerceAtLeast(2.dp.toPx())
+        val sFold = w * (1f - t)
+        val xFold = spineX + sFold
+        val xApex = xFold + r
+
+        // 1. Static page on the left: stays in place until covered
+        val staticSrc = Rect(0, 0, staticBitmap.width, staticBitmap.height)
+        val staticDst = Rect(l1.roundToInt(), t1.roundToInt(), (l1 + w1).roundToInt(), (t1 + h1).roundToInt())
+        drawIntoCanvas { canvas ->
+            canvas.nativeCanvas.drawBitmap(staticBitmap, staticSrc, staticDst, meshPaint)
+        }
+
+        // 2. Underneath page revealed on the right as the sheet lifts
+        if (underneathBitmap != null && !underneathBitmap.isRecycled) {
+            val underSrc = Rect(0, 0, underneathBitmap.width, underneathBitmap.height)
+            val underDst = Rect(l2.roundToInt(), t2.roundToInt(), (l2 + w2).roundToInt(), (t2 + h2).roundToInt())
+            drawIntoCanvas { canvas ->
+                canvas.nativeCanvas.drawBitmap(underneathBitmap, underSrc, underDst, meshPaint)
+            }
+        }
+
+        // 3. Crease shadow onto the revealed underneath page (falling to the left of xFold)
+        val shadowWidth = (r * 1.5f).coerceAtLeast(10.dp.toPx())
+        val shadowAlpha = (0.5f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.55f)
+        if (shadowAlpha > 0.02f) {
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    0.0f to Color.Transparent,
+                    0.6f to Color.Black.copy(alpha = shadowAlpha * 0.4f),
+                    1.0f to Color.Black.copy(alpha = shadowAlpha),
+                    startX = (xFold - shadowWidth).coerceAtLeast(spineX),
+                    endX = xFold,
+                ),
+                topLeft = Offset((xFold - shadowWidth).coerceAtLeast(spineX), t2),
+                size = Size(xFold - (xFold - shadowWidth).coerceAtLeast(spineX), h),
+            )
+        }
+
+        // 4. Moving front sheet (lifts from right edge, curls around cylinder)
+        var fIdx = 0
+        for (row in 0..MESH_ROWS) {
+            val v = row.toFloat() / MESH_ROWS
+            val y = t2 + v * h
+            for (col in 0..MESH_COLS) {
+                val u = col.toFloat() / MESH_COLS
+                val s = u * w
+                val x = computeSpreadCurlX(s, sFold, r, spineX, isPeelingFromRight = true)
+                vertsFront[fIdx++] = x
+                vertsFront[fIdx++] = y
+            }
+        }
+        clipRect(left = spineX, top = t2 - 2f, right = xApex + 1f, bottom = t2 + h + 2f) {
+            drawIntoCanvas { canvas ->
+                canvas.nativeCanvas.drawBitmapMesh(
+                    movingFrontBitmap,
+                    MESH_COLS,
+                    MESH_ROWS,
+                    vertsFront,
+                    0,
+                    null,
+                    0,
+                    meshPaint,
+                )
+            }
+        }
+
+        // 5. Moving back sheet (reverse face, becomes visible as sheet turns over, upright and readable)
+        if (movingBackBitmap != null && !movingBackBitmap.isRecycled) {
+            var bIdx = 0
+            for (row in 0..MESH_ROWS) {
+                val v = row.toFloat() / MESH_ROWS
+                val y = t1 + v * h1
+                for (col in 0..MESH_COLS) {
+                    val u = col.toFloat() / MESH_COLS
+                    val s = (1f - u) * w
+                    val x = computeSpreadCurlX(s, sFold, r, spineX, isPeelingFromRight = true)
+                    vertsBack[bIdx++] = x
+                    vertsBack[bIdx++] = y
+                }
+            }
+            clipRect(left = l1 - 20f, top = minOf(t1, t2) - 2f, right = xApex, bottom = maxOf(t1 + h1, t2 + h) + 2f) {
+                drawIntoCanvas { canvas ->
+                    canvas.nativeCanvas.drawBitmapMesh(
+                        movingBackBitmap,
+                        MESH_COLS,
+                        MESH_ROWS,
+                        vertsBack,
+                        0,
+                        null,
+                        0,
+                        meshPaint,
+                    )
+                }
+            }
+        }
+
+        // 6. Landing shadow cast onto the static page on the left
+        val landingAlpha = (0.35f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.4f)
+        if (landingAlpha > 0.02f && t > 0.35f) {
+            val minTurnedX = computeSpreadCurlX(w, sFold, r, spineX, isPeelingFromRight = true)
+            val landingW = (r * 1.6f).coerceAtLeast(12.dp.toPx())
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    0.0f to Color.Transparent,
+                    0.7f to Color.Black.copy(alpha = landingAlpha * 0.5f),
+                    1.0f to Color.Black.copy(alpha = landingAlpha),
+                    startX = (minTurnedX - landingW).coerceAtLeast(l1),
+                    endX = minTurnedX,
+                ),
+                topLeft = Offset((minTurnedX - landingW).coerceAtLeast(l1), t1),
+                size = Size(minTurnedX - (minTurnedX - landingW).coerceAtLeast(l1), h1),
+            )
+        }
+
+        // 7. Specular highlight along apex of the roll
+        val highlightWidth = r * 0.7f
+        val highlightAlpha = (0.28f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.3f)
+        if (highlightAlpha > 0.02f) {
+            val hlLeft = xApex - highlightWidth * 0.5f
+            val hlRight = xApex + highlightWidth * 0.5f
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    0.0f to Color.Transparent,
+                    0.5f to Color.White.copy(alpha = highlightAlpha),
+                    1.0f to Color.Transparent,
+                    startX = hlLeft,
+                    endX = hlRight,
+                ),
+                topLeft = Offset(hlLeft, minOf(t1, t2)),
+                size = Size(hlRight - hlLeft, maxOf(h1, h)),
+            )
+        }
+    } else {
+        // Peeling from Left to Right
+        val w = w1
+        val h = h1
+        val maxR = w * 0.16f
+        val r = (maxR * kotlin.math.sin(t * Math.PI.toFloat())).coerceAtLeast(2.dp.toPx())
+        val sFold = w * (1f - t)
+        val xFold = spineX - sFold
+        val xApex = xFold - r
+
+        // 1. Static page on the right: stays in place until covered
+        val staticSrc = Rect(0, 0, staticBitmap.width, staticBitmap.height)
+        val staticDst = Rect(l2.roundToInt(), t2.roundToInt(), (l2 + w2).roundToInt(), (t2 + h2).roundToInt())
+        drawIntoCanvas { canvas ->
+            canvas.nativeCanvas.drawBitmap(staticBitmap, staticSrc, staticDst, meshPaint)
+        }
+
+        // 2. Underneath page revealed on the left as the sheet lifts
+        if (underneathBitmap != null && !underneathBitmap.isRecycled) {
+            val underSrc = Rect(0, 0, underneathBitmap.width, underneathBitmap.height)
+            val underDst = Rect(l1.roundToInt(), t1.roundToInt(), (l1 + w1).roundToInt(), (t1 + h1).roundToInt())
+            drawIntoCanvas { canvas ->
+                canvas.nativeCanvas.drawBitmap(underneathBitmap, underSrc, underDst, meshPaint)
+            }
+        }
+
+        // 3. Crease shadow onto revealed underneath page (falling to the right of xFold)
+        val shadowWidth = (r * 1.5f).coerceAtLeast(10.dp.toPx())
+        val shadowAlpha = (0.5f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.55f)
+        if (shadowAlpha > 0.02f) {
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    0.0f to Color.Black.copy(alpha = shadowAlpha),
+                    0.4f to Color.Black.copy(alpha = shadowAlpha * 0.4f),
+                    1.0f to Color.Transparent,
+                    startX = xFold,
+                    endX = (xFold + shadowWidth).coerceAtMost(spineX),
+                ),
+                topLeft = Offset(xFold, t1),
+                size = Size((xFold + shadowWidth).coerceAtMost(spineX) - xFold, h),
+            )
+        }
+
+        // 4. Moving front sheet (lifts from left edge, curls toward spine)
+        var fIdx = 0
+        for (row in 0..MESH_ROWS) {
+            val v = row.toFloat() / MESH_ROWS
+            val y = t1 + v * h
+            for (col in 0..MESH_COLS) {
+                val u = col.toFloat() / MESH_COLS
+                val s = (1f - u) * w
+                val x = computeSpreadCurlX(s, sFold, r, spineX, isPeelingFromRight = false)
+                vertsFront[fIdx++] = x
+                vertsFront[fIdx++] = y
+            }
+        }
+        clipRect(left = xApex - 1f, top = t1 - 2f, right = spineX, bottom = t1 + h + 2f) {
+            drawIntoCanvas { canvas ->
+                canvas.nativeCanvas.drawBitmapMesh(
+                    movingFrontBitmap,
+                    MESH_COLS,
+                    MESH_ROWS,
+                    vertsFront,
+                    0,
+                    null,
+                    0,
+                    meshPaint,
+                )
+            }
+        }
+
+        // 5. Moving back sheet (reverse face, becomes visible as sheet turns over, upright and readable)
+        if (movingBackBitmap != null && !movingBackBitmap.isRecycled) {
+            var bIdx = 0
+            for (row in 0..MESH_ROWS) {
+                val v = row.toFloat() / MESH_ROWS
+                val y = t2 + v * h2
+                for (col in 0..MESH_COLS) {
+                    val u = col.toFloat() / MESH_COLS
+                    val s = u * w
+                    val x = computeSpreadCurlX(s, sFold, r, spineX, isPeelingFromRight = false)
+                    vertsBack[bIdx++] = x
+                    vertsBack[bIdx++] = y
+                }
+            }
+            clipRect(left = xApex, top = minOf(t1, t2) - 2f, right = l2 + w2 + 20f, bottom = maxOf(t1 + h, t2 + h2) + 2f) {
+                drawIntoCanvas { canvas ->
+                    canvas.nativeCanvas.drawBitmapMesh(
+                        movingBackBitmap,
+                        MESH_COLS,
+                        MESH_ROWS,
+                        vertsBack,
+                        0,
+                        null,
+                        0,
+                        meshPaint,
+                    )
+                }
+            }
+        }
+
+        // 6. Landing shadow cast onto the static page on the right
+        val landingAlpha = (0.35f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.4f)
+        if (landingAlpha > 0.02f && t > 0.35f) {
+            val maxTurnedX = computeSpreadCurlX(w, sFold, r, spineX, isPeelingFromRight = false)
+            val landingW = (r * 1.6f).coerceAtLeast(12.dp.toPx())
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    0.0f to Color.Black.copy(alpha = landingAlpha),
+                    0.3f to Color.Black.copy(alpha = landingAlpha * 0.5f),
+                    1.0f to Color.Transparent,
+                    startX = maxTurnedX,
+                    endX = (maxTurnedX + landingW).coerceAtMost(l2 + w2),
+                ),
+                topLeft = Offset(maxTurnedX, t2),
+                size = Size((maxTurnedX + landingW).coerceAtMost(l2 + w2) - maxTurnedX, h2),
+            )
+        }
+
+        // 7. Specular highlight along apex of the roll
+        val highlightWidth = r * 0.7f
+        val highlightAlpha = (0.28f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.3f)
+        if (highlightAlpha > 0.02f) {
+            val hlLeft = xApex - highlightWidth * 0.5f
+            val hlRight = xApex + highlightWidth * 0.5f
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    0.0f to Color.Transparent,
+                    0.5f to Color.White.copy(alpha = highlightAlpha),
+                    1.0f to Color.Transparent,
+                    startX = hlLeft,
+                    endX = hlRight,
+                ),
+                topLeft = Offset(hlLeft, minOf(t1, t2)),
+                size = Size(hlRight - hlLeft, maxOf(h, h2)),
+            )
+        }
+    }
+}
+
 @Composable
 private fun PageViewer(
     state: ReaderUiState,
     fitMode: PageFitMode = PageFitMode.FIT_PAGE,
     nextBitmap: Bitmap?,
     prevBitmap: Bitmap?,
+    getPageBitmap: (Int?) -> Bitmap? = { null },
     curlDirection: CurlDirection?,
     curlProgress: Float,
     onUpdateCurl: (CurlDirection?, Float) -> Unit,
@@ -805,7 +1174,9 @@ private fun PageViewer(
     }
 
     val meshPaint = remember { Paint().apply { isFilterBitmap = true } }
-    val verts = remember { FloatArray(MESH_VERT_COUNT) }
+    val vertsFront = remember { FloatArray(MESH_VERT_COUNT) }
+    val vertsBack = remember { FloatArray(MESH_VERT_COUNT) }
+    val verts = vertsFront
 
     var pendingTap by remember { mutableStateOf<Job?>(null) }
 
@@ -848,7 +1219,7 @@ private fun PageViewer(
                                     if (pan.x > 0f) CurlDirection.FORWARD else CurlDirection.BACKWARD
                                 }
                                 val canTurn = when (dir) {
-                                    CurlDirection.FORWARD -> (if (isSpread) pageIndex + 1 < pageCount - 1 else pageIndex < pageCount - 1)
+                                    CurlDirection.FORWARD -> (if (isSpread) pageIndex + 2 < pageCount else pageIndex < pageCount - 1)
                                     CurlDirection.BACKWARD -> pageIndex > 0
                                 }
                                 if (canTurn) {
@@ -974,30 +1345,52 @@ private fun PageViewer(
                     containerH = size.height,
                     fitMode = fitMode,
                 )
+
+                if (curlDirection != null && curlProgress > 0.001f && userScale <= 1.05f) {
+                    val isForward = curlDirection == CurlDirection.FORWARD
+                    val mapping = computeSpreadTurnMapping(
+                        pageIndex = pageIndex,
+                        secondPageIndex = pageIndex + 1,
+                        pageCount = pageCount,
+                        rightToLeft = rtl,
+                        isForward = isForward,
+                    )
+                    if (mapping != null) {
+                        val staticBitmap = getPageBitmap(mapping.staticPageDocIndex)
+                        val movingFrontBitmap = getPageBitmap(mapping.movingFrontDocIndex)
+                        val movingBackBitmap = getPageBitmap(mapping.movingBackDocIndex)
+                        val underneathBitmap = mapping.underneathDocIndex?.let { getPageBitmap(it) }
+
+                        if (staticBitmap != null && movingFrontBitmap != null) {
+                            drawSpreadCurlTurn(
+                                spread = spread,
+                                staticBitmap = staticBitmap,
+                                movingFrontBitmap = movingFrontBitmap,
+                                movingBackBitmap = movingBackBitmap,
+                                underneathBitmap = underneathBitmap,
+                                mapping = mapping,
+                                progress = curlProgress,
+                                userScale = userScale,
+                                userPanX = userPanX,
+                                userPanY = userPanY,
+                                vertsFront = vertsFront,
+                                vertsBack = vertsBack,
+                                meshPaint = meshPaint,
+                            )
+                            return@Canvas
+                        }
+                    }
+                }
+
                 val cx = size.width / 2f
                 val cy = size.height / 2f
 
-                val slideOffset = if (curlDirection != null && curlProgress > 0.001f && userScale <= 1.05f) {
-                    if (curlDirection == CurlDirection.FORWARD) {
-                        if (!rtl) -size.width * curlProgress else size.width * curlProgress
-                    } else {
-                        if (!rtl) size.width * curlProgress else -size.width * curlProgress
-                    }
-                } else {
-                    0f
-                }
-                val spreadAlpha = if (curlDirection != null && curlProgress > 0.001f && userScale <= 1.05f) {
-                    (1f - curlProgress * 0.45f).coerceIn(0.1f, 1f)
-                } else {
-                    1f
-                }
-
-                val l1 = cx + (spread.left1 - cx) * userScale + userPanX + slideOffset
+                val l1 = cx + (spread.left1 - cx) * userScale + userPanX
                 val t1 = cy + (spread.top1 - cy) * userScale + userPanY
                 val w1 = spread.width1 * userScale
                 val h1 = spread.height1 * userScale
 
-                val l2 = cx + (spread.left2 - cx) * userScale + userPanX + slideOffset
+                val l2 = cx + (spread.left2 - cx) * userScale + userPanX
                 val t2 = cy + (spread.top2 - cy) * userScale + userPanY
                 val w2 = spread.width2 * userScale
                 val h2 = spread.height2 * userScale
@@ -1006,13 +1399,11 @@ private fun PageViewer(
                     image = leftImage,
                     dstOffset = IntOffset(l1.roundToInt(), t1.roundToInt()),
                     dstSize = IntSize(w1.roundToInt(), h1.roundToInt()),
-                    alpha = spreadAlpha,
                 )
                 drawImage(
                     image = rightImage,
                     dstOffset = IntOffset(l2.roundToInt(), t2.roundToInt()),
                     dstSize = IntSize(w2.roundToInt(), h2.roundToInt()),
-                    alpha = spreadAlpha,
                 )
             } else {
                 val draw = computePageDraw(

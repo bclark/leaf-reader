@@ -133,4 +133,95 @@ class CameraTransformTest {
         assertNear(0.8f, mid.right)
         assertNear(0.9f, mid.bottom)
     }
+
+    @Test
+    fun computeSpreadTurnMapping_ltrForwardMatchesOpenBookPhysics() {
+        // Start spread: pages 4 and 5 (0-based 3 and 4)
+        val mapping = computeSpreadTurnMapping(
+            pageIndex = 3,
+            secondPageIndex = 4,
+            pageCount = 10,
+            rightToLeft = false,
+            isForward = true,
+        )
+        requireNotNull(mapping)
+        assertEquals(3, mapping.staticPageDocIndex)       // Page 4 stays on left
+        assertEquals(4, mapping.movingFrontDocIndex)      // Page 5 lifts from right
+        assertEquals(5, mapping.movingBackDocIndex)       // Page 6 on reverse face
+        assertEquals(6, mapping.underneathDocIndex)       // Page 7 underneath on right
+        assertTrue(mapping.isPeelingFromRight)            // Right to left curl
+    }
+
+    @Test
+    fun computeSpreadTurnMapping_ltrReverseMatchesOpenBookPhysics() {
+        // Start spread: pages 6 and 7 (0-based 5 and 6)
+        val mapping = computeSpreadTurnMapping(
+            pageIndex = 5,
+            secondPageIndex = 6,
+            pageCount = 10,
+            rightToLeft = false,
+            isForward = false,
+        )
+        requireNotNull(mapping)
+        assertEquals(6, mapping.staticPageDocIndex)       // Page 7 stays on right
+        assertEquals(5, mapping.movingFrontDocIndex)      // Page 6 lifts from left
+        assertEquals(4, mapping.movingBackDocIndex)       // Page 5 on reverse face
+        assertEquals(3, mapping.underneathDocIndex)       // Page 4 underneath on left
+        assertTrue(!mapping.isPeelingFromRight)           // Left to right curl
+    }
+
+    @Test
+    fun computeSpreadTurnMapping_ltrReverseToCover() {
+        // Start spread: pages 2 and 3 (0-based 1 and 2)
+        val mapping = computeSpreadTurnMapping(
+            pageIndex = 1,
+            secondPageIndex = 2,
+            pageCount = 10,
+            rightToLeft = false,
+            isForward = false,
+        )
+        requireNotNull(mapping)
+        assertEquals(2, mapping.staticPageDocIndex)       // Page 3 stays on right
+        assertEquals(1, mapping.movingFrontDocIndex)      // Page 2 lifts from left
+        assertEquals(0, mapping.movingBackDocIndex)       // Page 1 (cover) on reverse face
+        assertEquals(null, mapping.underneathDocIndex)    // Cover is alone, no underneath page
+        assertTrue(!mapping.isPeelingFromRight)
+    }
+
+    @Test
+    fun computeSpreadTurnMapping_rtlForwardMatchesOpenBookPhysics() {
+        // In RTL: Page 4 (index 3) is on right, Page 5 (index 4) is on left
+        val mapping = computeSpreadTurnMapping(
+            pageIndex = 3,
+            secondPageIndex = 4,
+            pageCount = 10,
+            rightToLeft = true,
+            isForward = true,
+        )
+        requireNotNull(mapping)
+        assertEquals(3, mapping.staticPageDocIndex)       // Page 4 stays on right
+        assertEquals(4, mapping.movingFrontDocIndex)      // Page 5 lifts from left
+        assertEquals(5, mapping.movingBackDocIndex)       // Page 6 on reverse face
+        assertEquals(6, mapping.underneathDocIndex)       // Page 7 underneath on left
+        assertTrue(!mapping.isPeelingFromRight)           // Left to right curl in RTL forward
+    }
+
+    @Test
+    fun computeSpreadCurlX_flatAndTurnedExtremes() {
+        val spineX = 500f
+        val w = 400f
+        // Peeling from right: s goes from 0 (spine) to w (outer edge).
+        // At t=0 (flat on right): sFold = w, r = 0.
+        val x0 = computeSpreadCurlX(s = 0f, sFold = w, r = 0f, spineX = spineX, isPeelingFromRight = true)
+        val xW = computeSpreadCurlX(s = w, sFold = w, r = 0f, spineX = spineX, isPeelingFromRight = true)
+        assertNear(spineX, x0)
+        assertNear(spineX + w, xW)
+
+        // At t=1 (fully turned flat on left): sFold = 0, r = 0.
+        // For s in 0..w: computeSpreadCurlX should map to spineX - s!
+        val xTurned0 = computeSpreadCurlX(s = 0f, sFold = 0f, r = 0f, spineX = spineX, isPeelingFromRight = true)
+        val xTurnedW = computeSpreadCurlX(s = w, sFold = 0f, r = 0f, spineX = spineX, isPeelingFromRight = true)
+        assertNear(spineX, xTurned0)
+        assertNear(spineX - w, xTurnedW)
+    }
 }

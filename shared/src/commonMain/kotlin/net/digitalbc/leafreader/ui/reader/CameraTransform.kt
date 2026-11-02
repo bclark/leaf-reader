@@ -149,3 +149,123 @@ fun lerpPanel(from: Panel, to: Panel, t: Float): Panel {
         bottom = l(from.bottom, to.bottom),
     )
 }
+
+/**
+ * Resolved document page positions for a physical two-page spread turn.
+ *
+ * @param staticPageDocIndex The document page on the stationary side (stays visible until covered).
+ * @param movingFrontDocIndex The document page on the front of the turning sheet (lifts and curls).
+ * @param movingBackDocIndex The document page on the reverse face of the turning sheet (visible as sheet turns over, upright).
+ * @param underneathDocIndex The document page revealed on the active side as the moving sheet lifts away (null if at end).
+ * @param isPeelingFromRight True if turning sheet from right to left; false if turning sheet from left to right.
+ */
+data class SpreadTurnMapping(
+    val staticPageDocIndex: Int,
+    val movingFrontDocIndex: Int,
+    val movingBackDocIndex: Int,
+    val underneathDocIndex: Int?,
+    val isPeelingFromRight: Boolean,
+)
+
+/**
+ * Resolves document page mapping for an open-book two-page spread turn in LTR and RTL reading directions.
+ */
+fun computeSpreadTurnMapping(
+    pageIndex: Int,
+    secondPageIndex: Int?,
+    pageCount: Int,
+    rightToLeft: Boolean,
+    isForward: Boolean,
+): SpreadTurnMapping? {
+    if (secondPageIndex == null) return null
+    val rtl = rightToLeft
+    val currentLeft = if (rtl) secondPageIndex else pageIndex
+    val currentRight = if (rtl) pageIndex else secondPageIndex
+
+    return if (isForward) {
+        val target = pageIndex + 2
+        if (target >= pageCount) return null
+        val nextP1 = target
+        val nextP2 = if (target + 1 < pageCount) target + 1 else null
+        val nextLeft = if (!rtl) nextP1 else nextP2
+        val nextRight = if (!rtl) nextP2 else nextP1
+        val movingBack = if (!rtl) (nextLeft ?: nextP1) else (nextRight ?: nextP1)
+        val underneath = if (!rtl) nextRight else nextLeft
+
+        SpreadTurnMapping(
+            staticPageDocIndex = if (!rtl) currentLeft else currentRight,
+            movingFrontDocIndex = if (!rtl) currentRight else currentLeft,
+            movingBackDocIndex = movingBack,
+            underneathDocIndex = underneath,
+            isPeelingFromRight = !rtl,
+        )
+    } else {
+        if (pageIndex <= 0) return null
+        val target = if (pageIndex % 2 == 1) (pageIndex - 2).coerceAtLeast(0) else pageIndex - 1
+        val prevP1 = target
+        val prevP2 = if (target > 0 && target + 1 < pageIndex) target + 1 else null
+        val prevLeft = if (!rtl) (if (prevP2 != null) prevP1 else null) else prevP2
+        val prevRight = if (!rtl) (prevP2 ?: prevP1) else prevP1
+        val movingBack = if (!rtl) prevRight else (prevLeft ?: prevRight)
+        val underneath = if (!rtl) prevLeft else (if (prevP2 != null) prevRight else null)
+
+        SpreadTurnMapping(
+            staticPageDocIndex = if (!rtl) currentRight else currentLeft,
+            movingFrontDocIndex = if (!rtl) currentLeft else currentRight,
+            movingBackDocIndex = movingBack,
+            underneathDocIndex = underneath,
+            isPeelingFromRight = rtl,
+        )
+    }
+}
+
+/**
+ * Computes the deformed x-coordinate for a point on a sheet at arc-distance [s] from the center spine.
+ *
+ * @param s Arc distance along the sheet from the spine (0..W).
+ * @param sFold Distance along the sheet where the fold starts (W*(1-t)).
+ * @param r Radius of the cylindrical roll.
+ * @param spineX X position of the center spine on screen.
+ * @param isPeelingFromRight True if peeling right sheet toward left; false if peeling left sheet toward right.
+ */
+fun computeSpreadCurlX(
+    s: Float,
+    sFold: Float,
+    r: Float,
+    spineX: Float,
+    isPeelingFromRight: Boolean,
+): Float {
+    return if (isPeelingFromRight) {
+        if (s <= sFold) {
+            spineX + s
+        } else {
+            val deltaS = s - sFold
+            if (r > 0.001f) {
+                val theta = deltaS / r
+                if (theta <= kotlin.math.PI.toFloat()) {
+                    (spineX + sFold) + r * kotlin.math.sin(theta)
+                } else {
+                    (spineX + sFold) - (deltaS - kotlin.math.PI.toFloat() * r)
+                }
+            } else {
+                (spineX + sFold) - deltaS
+            }
+        }
+    } else {
+        if (s <= sFold) {
+            spineX - s
+        } else {
+            val deltaS = s - sFold
+            if (r > 0.001f) {
+                val theta = deltaS / r
+                if (theta <= kotlin.math.PI.toFloat()) {
+                    (spineX - sFold) - r * kotlin.math.sin(theta)
+                } else {
+                    (spineX - sFold) + (deltaS - kotlin.math.PI.toFloat() * r)
+                }
+            } else {
+                (spineX - sFold) + deltaS
+            }
+        }
+    }
+}
