@@ -2343,7 +2343,6 @@ private fun ComicStackCard(
                         }
                         .clip(RoundedCornerShape(4.dp))
                         .background(InkSoft)
-                        .border(1.5.dp, LeafSecondary, RoundedCornerShape(4.dp))
                 ) {
                     if (cover3 != null) {
                         Image(cover3, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -2364,10 +2363,9 @@ private fun ComicStackCard(
                         .comicShadow(offset = (shadowOffset.value * progress).dp, color = Color(0xB3000000))
                         .clip(RoundedCornerShape(4.dp))
                         .background(if (progress > 0.5f) InkSoft else DeepInkSurface)
-                        .border(
-                            width = lerp(1.5f, borderWidth.value, progress).dp,
-                            color = if (progress > 0.5f) Ink else Ochre,
-                            shape = RoundedCornerShape(4.dp)
+                        .then(
+                            if (progress > 0.5f) Modifier.border(borderWidth, Ink, RoundedCornerShape(4.dp))
+                            else Modifier
                         )
                 ) {
                     if (cover2 != null) {
@@ -2377,17 +2375,21 @@ private fun ComicStackCard(
                     val layer2IssueNum = if (issueCount > 0) ((topIndex + 1) % issueCount + issueCount) % issueCount + 1 else 2
                     Box(
                         modifier = Modifier
-                            .padding(6.dp)
+                            .align(Alignment.BottomStart)
+                            .padding(
+                                start = if (columns >= 4) 4.dp else 6.dp,
+                                bottom = (if (columns >= 4) 4.dp else 6.dp) + progressHeight,
+                            )
                             .clip(RoundedCornerShape(3.dp))
                             .background(Ink.copy(alpha = 0.85f))
                             .border(1.dp, Ochre, RoundedCornerShape(3.dp))
-                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                            .padding(horizontal = if (columns >= 4) 4.dp else 5.dp, vertical = 2.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             text = "ISSUE $layer2IssueNum OF ${stack.totalIssues}",
                             fontFamily = Anton,
-                            fontSize = 9.sp,
+                            fontSize = if (columns >= 4) 7.sp else 8.sp,
                             color = Cream,
                         )
                     }
@@ -2420,18 +2422,22 @@ private fun ComicStackCard(
 
                 Box(
                     modifier = Modifier
-                        .padding(6.dp)
+                        .align(Alignment.BottomStart)
+                        .padding(
+                            start = if (columns >= 4) 4.dp else 6.dp,
+                            bottom = (if (columns >= 4) 4.dp else 6.dp) + progressHeight,
+                        )
                         .clip(RoundedCornerShape(3.dp))
                         .background(Ink.copy(alpha = 0.85f))
                         .border(1.dp, Ochre, RoundedCornerShape(3.dp))
-                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                        .padding(horizontal = if (columns >= 4) 4.dp else 5.dp, vertical = 2.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     val currentIssueNum = if (issueCount > 0) (topIndex % issueCount + issueCount) % issueCount + 1 else 1
                     Text(
                         text = if (stack.totalIssues > 1) "ISSUE $currentIssueNum OF ${stack.totalIssues}" else if (stack.volume != null) "${stack.seriesName.uppercase()} · ${stack.volume.uppercase()}" else "1 ISSUE",
                         fontFamily = Anton,
-                        fontSize = 9.sp,
+                        fontSize = if (columns >= 4) 7.sp else 8.sp,
                         color = Cream,
                     )
                 }
