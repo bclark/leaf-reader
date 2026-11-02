@@ -19,6 +19,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
@@ -142,6 +143,7 @@ fun ReaderScreen(
 
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val isCompact = !isLandscape && configuration.screenWidthDp < 600
     val spreadActive = resolveSpreadLayout(isLandscape, portraitSpread, landscapeSpread)
     LaunchedEffect(spreadActive) {
         viewModel.setSpreadEnabled(spreadActive)
@@ -304,8 +306,7 @@ fun ReaderScreen(
             exit = slideOutVertically { -it } + fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
@@ -318,48 +319,94 @@ fun ReaderScreen(
                         ),
                     )
                     .statusBarsPadding()
-                    .padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 18.dp),
+                    .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 18.dp),
             ) {
-                Box(
-                    Modifier.size(38.dp).clip(CircleShape).background(Cream.copy(alpha = 0.12f))
-                        .clickable(onClick = onBack),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack, "Back",
-                        tint = Cream, modifier = Modifier.size(18.dp),
-                    )
-                }
-                Spacer(Modifier.size(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        state.title, fontFamily = Archivo, fontWeight = FontWeight.ExtraBold,
-                        fontSize = 14.sp, color = Cream, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        pageStatus(state), fontFamily = Archivo, fontWeight = FontWeight.SemiBold,
-                        fontSize = 9.sp, letterSpacing = 1.4.sp, color = CreamMuted,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    SpreadChip(
-                        spreadEnabled = spreadActive,
-                        orientation = if (isLandscape) "Landscape" else "Portrait",
-                        onClick = if (isLandscape) onToggleLandscapeSpread else onTogglePortraitSpread,
-                    )
-                    FitModeChip(
-                        fitMode = fitMode,
-                        onClick = {
-                            onSetFitMode(
-                                if (fitMode == PageFitMode.FIT_PAGE) PageFitMode.FIT_WIDTH else PageFitMode.FIT_PAGE,
+                if (isCompact) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Box(
+                            Modifier.size(38.dp).clip(CircleShape).background(Cream.copy(alpha = 0.12f))
+                                .clickable(onClick = onBack),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack, "Back",
+                                tint = Cream, modifier = Modifier.size(18.dp),
                             )
-                        },
-                    )
-                    DirectionChip(rightToLeft = state.rightToLeft, onClick = viewModel::toggleReadingDirection)
+                        }
+                        Spacer(Modifier.size(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                state.title, fontFamily = Archivo, fontWeight = FontWeight.ExtraBold,
+                                fontSize = 14.sp, color = Cream, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                pageStatus(state), fontFamily = Archivo, fontWeight = FontWeight.SemiBold,
+                                fontSize = 9.sp, letterSpacing = 1.4.sp, color = CreamMuted,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ReaderActionChips(
+                            spreadActive = spreadActive,
+                            isLandscape = isLandscape,
+                            onToggleLandscapeSpread = onToggleLandscapeSpread,
+                            onTogglePortraitSpread = onTogglePortraitSpread,
+                            fitMode = fitMode,
+                            onSetFitMode = onSetFitMode,
+                            rightToLeft = state.rightToLeft,
+                            onToggleReadingDirection = viewModel::toggleReadingDirection,
+                        )
+                    }
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Box(
+                            Modifier.size(38.dp).clip(CircleShape).background(Cream.copy(alpha = 0.12f))
+                                .clickable(onClick = onBack),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack, "Back",
+                                tint = Cream, modifier = Modifier.size(18.dp),
+                            )
+                        }
+                        Spacer(Modifier.size(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                state.title, fontFamily = Archivo, fontWeight = FontWeight.ExtraBold,
+                                fontSize = 14.sp, color = Cream, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                pageStatus(state), fontFamily = Archivo, fontWeight = FontWeight.SemiBold,
+                                fontSize = 9.sp, letterSpacing = 1.4.sp, color = CreamMuted,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                        Spacer(Modifier.size(12.dp))
+                        ReaderActionChips(
+                            spreadActive = spreadActive,
+                            isLandscape = isLandscape,
+                            onToggleLandscapeSpread = onToggleLandscapeSpread,
+                            onTogglePortraitSpread = onTogglePortraitSpread,
+                            fitMode = fitMode,
+                            onSetFitMode = onSetFitMode,
+                            rightToLeft = state.rightToLeft,
+                            onToggleReadingDirection = viewModel::toggleReadingDirection,
+                        )
+                    }
                 }
             }
         }
@@ -1294,6 +1341,40 @@ private fun clampPan(pan: Float, base: Float, size: Float, container: Float, pad
     val minPan = container - padding - size - base
     val maxPan = padding - base
     return pan.coerceIn(minOf(minPan, maxPan), maxOf(minPan, maxPan))
+}
+
+@Composable
+private fun ReaderActionChips(
+    spreadActive: Boolean,
+    isLandscape: Boolean,
+    onToggleLandscapeSpread: () -> Unit,
+    onTogglePortraitSpread: () -> Unit,
+    fitMode: PageFitMode,
+    onSetFitMode: (PageFitMode) -> Unit,
+    rightToLeft: Boolean,
+    onToggleReadingDirection: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SpreadChip(
+            spreadEnabled = spreadActive,
+            orientation = if (isLandscape) "Landscape" else "Portrait",
+            onClick = if (isLandscape) onToggleLandscapeSpread else onTogglePortraitSpread,
+        )
+        FitModeChip(
+            fitMode = fitMode,
+            onClick = {
+                onSetFitMode(
+                    if (fitMode == PageFitMode.FIT_PAGE) PageFitMode.FIT_WIDTH else PageFitMode.FIT_PAGE,
+                )
+            },
+        )
+        DirectionChip(rightToLeft = rightToLeft, onClick = onToggleReadingDirection)
+    }
 }
 
 /** Mode control that toggles between fit-to-page and fit-to-width. */
