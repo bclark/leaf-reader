@@ -99,6 +99,7 @@ android {
 
 dependencies {
     implementation(project(":shared"))
+    testImplementation("junit:junit:4.13.2")
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

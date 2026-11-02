@@ -68,6 +68,15 @@ class ComicReaderApp : Application() {
         _pageFitMode.value = mode
     }
 
+    /** Layout preferences update the active reader immediately and persist across launches. */
+    private val _portraitSpread by lazy { MutableStateFlow(settings.portraitSpread) }
+    val portraitSpread: StateFlow<Boolean> by lazy { _portraitSpread.asStateFlow() }
+
+    fun setPortraitSpread(enabled: Boolean) {
+        settings.portraitSpread = enabled
+        _portraitSpread.value = enabled
+    }
+
     /** Process-wide reactive flag for optional two-page spread in landscape orientation. */
     private val _landscapeSpread by lazy { MutableStateFlow(settings.landscapeSpread) }
     val landscapeSpread: StateFlow<Boolean> by lazy { _landscapeSpread.asStateFlow() }

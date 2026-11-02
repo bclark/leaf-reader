@@ -300,3 +300,7 @@ fun spreadTurnSheetWidth(from: SpreadDraw, to: SpreadDraw, progress: Float, from
     val end = if (fromRight) to.width1 else to.width2
     return start + (end - start) * progress.coerceIn(0f, 1f)
 }
+
+/** Orientation chooses its own preference; cover/wide-page exceptions are resolved separately. */
+fun resolveSpreadLayout(isLandscape: Boolean, portraitSpread: Boolean, landscapeSpread: Boolean): Boolean =
+    if (isLandscape) landscapeSpread else portraitSpread

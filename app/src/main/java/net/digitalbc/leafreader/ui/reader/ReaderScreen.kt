@@ -131,6 +131,8 @@ fun ReaderScreen(
     onTogglePageSlideEnabled: () -> Unit = {},
     fitMode: PageFitMode = PageFitMode.FIT_PAGE,
     onSetFitMode: (PageFitMode) -> Unit = {},
+    portraitSpread: Boolean = false,
+    onTogglePortraitSpread: () -> Unit = {},
     landscapeSpread: Boolean = false,
     onToggleLandscapeSpread: () -> Unit = {},
     onBack: () -> Unit,
@@ -140,9 +142,9 @@ fun ReaderScreen(
 
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-    val spreadActive = isLandscape && landscapeSpread
+    val spreadActive = resolveSpreadLayout(isLandscape, portraitSpread, landscapeSpread)
     LaunchedEffect(spreadActive) {
-        viewModel.setLandscapeSpread(spreadActive)
+        viewModel.setSpreadEnabled(spreadActive)
     }
 
     val pageCount = state.pageCount.coerceAtLeast(1)
@@ -342,12 +344,11 @@ fun ReaderScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (isLandscape) {
-                        SpreadChip(
-                            landscapeSpread = landscapeSpread,
-                            onClick = onToggleLandscapeSpread,
-                        )
-                    }
+                    SpreadChip(
+                        spreadEnabled = spreadActive,
+                        orientation = if (isLandscape) "Landscape" else "Portrait",
+                        onClick = if (isLandscape) onToggleLandscapeSpread else onTogglePortraitSpread,
+                    )
                     FitModeChip(
                         fitMode = fitMode,
                         onClick = {
@@ -1345,9 +1346,9 @@ private fun DirectionChip(rightToLeft: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** Mode control that toggles two-page spread in landscape orientation. */
+/** Quick control for the current orientation's persisted layout preference. */
 @Composable
-private fun SpreadChip(landscapeSpread: Boolean, onClick: () -> Unit) {
+private fun SpreadChip(spreadEnabled: Boolean, orientation: String, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .clip(CircleShape)
@@ -1359,12 +1360,12 @@ private fun SpreadChip(landscapeSpread: Boolean, onClick: () -> Unit) {
     ) {
         Icon(
             imageVector = Icons.AutoMirrored.Filled.MenuBook,
-            contentDescription = "Toggle two-page spread",
+            contentDescription = "$orientation layout: ${if (spreadEnabled) "Two-page spread" else "Single page"}. Toggle layout",
             tint = Cream,
             modifier = Modifier.size(15.dp),
         )
         Text(
-            if (landscapeSpread) "SPREAD" else "SINGLE",
+            if (spreadEnabled) "SPREAD" else "SINGLE",
             fontFamily = Archivo,
             fontWeight = FontWeight.Bold,
             fontSize = 11.sp,

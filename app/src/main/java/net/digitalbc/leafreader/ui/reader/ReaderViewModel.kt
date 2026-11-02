@@ -45,7 +45,7 @@ class ReaderViewModel(
     private val panelCache = HashMap<Int, List<Panel>>()
 
     private var rightToLeft = false
-    private var landscapeSpread = false
+    private var spreadEnabled = false
     private var navJob: Job? = null
 
     init {
@@ -76,11 +76,11 @@ class ReaderViewModel(
         goToPage(comic.lastPage.coerceIn(0, (archive.pageCount - 1).coerceAtLeast(0)), comic.lastSlot)
     }
 
-    fun setLandscapeSpread(enabled: Boolean) {
-        if (landscapeSpread == enabled) return
-        landscapeSpread = enabled
+    fun setSpreadEnabled(enabled: Boolean) {
+        if (spreadEnabled == enabled) return
+        spreadEnabled = enabled
         if (_state.value.pageCount > 0 && _state.value.page != null) {
-            goToPage(_state.value.pageIndex, targetSlot = 0)
+            goToPage(_state.value.readingPageIndex, targetSlot = 0)
         }
     }
 
@@ -126,7 +126,7 @@ class ReaderViewModel(
         val s = _state.value
         if (s.loading || s.error != null) return
         if (s.pageIndex <= 0) return
-        goToPage(s.pageIndex - 1, targetSlot = 0)
+        goToPage(s.previousSpread?.first ?: s.pageIndex - 1, targetSlot = 0)
     }
 
     /** Zoom back out to the whole current page (full-page view). */
@@ -141,7 +141,7 @@ class ReaderViewModel(
         val s = _state.value
         if (s.error != null || s.pageCount == 0) return
         val target = page.coerceIn(0, s.pageCount - 1)
-        if (target != s.pageIndex) goToPage(target, targetSlot = 0)
+        if (target != s.readingPageIndex) goToPage(target, targetSlot = 0)
     }
 
     /** Returns the cached bitmap for [page] if already decoded in memory, or null. */
@@ -164,7 +164,7 @@ class ReaderViewModel(
         _state.update { it.copy(rightToLeft = rightToLeft) }
         viewModelScope.launch { repository.setReadingDirection(comicId, rightToLeft) }
         // Re-detect current page with new ordering, keeping the page in view.
-        goToPage(_state.value.pageIndex, targetSlot = 0)
+        goToPage(_state.value.readingPageIndex, targetSlot = 0)
     }
 
     private fun setSlot(slot: Int) {
@@ -196,7 +196,7 @@ class ReaderViewModel(
                 }
                 _state.update {
                     it.copy(loading = false, detecting = !isExperiment && cachedPanels == null,
-                        pageIndex = resolvedPage, page = bitmap, secondPage = secondBitmap,
+                        pageIndex = resolvedPage, readingPageIndex = page, page = bitmap, secondPage = secondBitmap,
                         isSpread = secondBitmap != null, previousSpread = previous, nextSpread = next,
                         panels = initialPanels, slot = slotFor(initialPanels), error = null)
                 }
@@ -222,7 +222,7 @@ class ReaderViewModel(
     private suspend fun resolveSpread(page: Int): ReaderSpread? {
         val loader = pageLoader ?: return null
         if (page !in 0 until loader.pageCount) return null
-        if (!landscapeSpread) return ReaderSpread(page)
+        if (!spreadEnabled) return ReaderSpread(page)
         // Read only bounds and retain the prefix so navigation never depends on bitmap-cache residency.
         while (sizesKnownThrough < minOf(page + 1, loader.pageCount - 1)) {
             val index = sizesKnownThrough + 1
@@ -263,7 +263,7 @@ class ReaderViewModel(
     private fun persistProgress() {
         val s = _state.value
         val slotToSave = if (ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) 0 else s.slot
-        viewModelScope.launch { repository.saveProgress(comicId, s.pageIndex, slotToSave) }
+        viewModelScope.launch { repository.saveProgress(comicId, s.readingPageIndex, slotToSave) }
     }
 
     override fun onCleared() {
@@ -292,6 +292,8 @@ data class ReaderUiState(
     val loading: Boolean = true,
     val detecting: Boolean = false,
     val pageIndex: Int = 0,
+    /** Exact document page retained when a layout temporarily groups it with its partner. */
+    val readingPageIndex: Int = 0,
     val pageCount: Int = 0,
     val page: Bitmap? = null,
     val secondPage: Bitmap? = null,

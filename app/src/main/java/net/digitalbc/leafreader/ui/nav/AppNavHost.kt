@@ -76,6 +76,7 @@ fun AppNavHost() {
             val amoled by app.amoledTheme.collectAsState()
             val pageSlide by app.pageSlideEnabled.collectAsState()
             val fitMode by app.pageFitMode.collectAsState()
+            val portraitSpread by app.portraitSpread.collectAsState()
             val landscapeSpread by app.landscapeSpread.collectAsState()
             MenuScreen(
                 amoledTheme = amoled,
@@ -84,7 +85,9 @@ fun AppNavHost() {
                 onSetPageSlideEnabled = app::setPageSlideEnabled,
                 pageFitMode = fitMode,
                 onSetPageFitMode = app::setPageFitMode,
+                portraitSpread = portraitSpread,
                 landscapeSpread = landscapeSpread,
+                onSetPortraitSpread = app::setPortraitSpread,
                 onSetLandscapeSpread = app::setLandscapeSpread,
                 settings = app.settings,
                 onBack = { navController.popBackStack() },
@@ -97,6 +100,7 @@ fun AppNavHost() {
             val comicId = entry.arguments?.getLong("comicId") ?: return@composable
             val pageSlide by app.pageSlideEnabled.collectAsState()
             val fitMode by app.pageFitMode.collectAsState()
+            val portraitSpread by app.portraitSpread.collectAsState()
             val landscapeSpread by app.landscapeSpread.collectAsState()
             val vm: ReaderViewModel = viewModel(
                 key = "reader-$comicId",
@@ -108,7 +112,9 @@ fun AppNavHost() {
                 onTogglePageSlideEnabled = { app.setPageSlideEnabled(!pageSlide) },
                 fitMode = fitMode,
                 onSetFitMode = app::setPageFitMode,
+                portraitSpread = portraitSpread,
                 landscapeSpread = landscapeSpread,
+                onTogglePortraitSpread = { app.setPortraitSpread(!portraitSpread) },
                 onToggleLandscapeSpread = { app.setLandscapeSpread(!landscapeSpread) },
                 onBack = { navController.popBackStack() },
             )

@@ -5,6 +5,8 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -93,6 +95,8 @@ fun MenuScreen(
     onSetPageSlideEnabled: (Boolean) -> Unit,
     pageFitMode: net.digitalbc.leafreader.ui.reader.PageFitMode = net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_PAGE,
     onSetPageFitMode: (net.digitalbc.leafreader.ui.reader.PageFitMode) -> Unit = {},
+    portraitSpread: Boolean = false,
+    onSetPortraitSpread: (Boolean) -> Unit = {},
     landscapeSpread: Boolean = false,
     onSetLandscapeSpread: (Boolean) -> Unit = {},
     settings: AppSettings,
@@ -327,11 +331,11 @@ fun MenuScreen(
                     }
                 }
 
-                ToggleRow(
-                    title = "Two-Page Spread (Landscape)",
-                    subtitle = "Display two pages side-by-side in landscape orientation (cover and wide splash pages remain single).",
-                    checked = landscapeSpread,
-                    onCheckedChange = onSetLandscapeSpread,
+                LayoutChoice("Portrait layout", portraitSpread, onSetPortraitSpread)
+                LayoutChoice("Landscape layout", landscapeSpread, onSetLandscapeSpread)
+                Text(
+                    "The cover and wide pages stay single in either layout.",
+                    fontFamily = Archivo, fontSize = 11.sp, color = CreamMuted,
                 )
             }
             Spacer(Modifier.size(32.dp))
@@ -807,5 +811,33 @@ private fun ToggleRow(
                 uncheckedBorderColor = CreamMuted,
             ),
         )
+    }
+}
+
+
+@Composable
+private fun LayoutChoice(title: String, spread: Boolean, onChange: (Boolean) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(title, fontFamily = Archivo, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Cream)
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).background(Ink).padding(2.dp)
+                .selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            for (option in listOf(false, true)) {
+                Box(
+                    Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(3.dp))
+                        .background(if (spread == option) Ochre else Color.Transparent)
+                        .selectable(selected = spread == option, role = androidx.compose.ui.semantics.Role.RadioButton,
+                            onClick = { onChange(option) })
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(if (option) "Two-page spread" else "Single page",
+                        fontFamily = Archivo, fontWeight = FontWeight.Bold, fontSize = 12.sp,
+                        color = if (spread == option) Ink else CreamMuted)
+                }
+            }
+        }
     }
 }

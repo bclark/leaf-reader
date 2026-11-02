@@ -9,25 +9,8 @@ import android.content.Context
  * remembers its own direction once opened (stored per-comic in the database). This is the global
  * half of "remembered per comic + a global default", matching the iOS app's ReadingPrefs.
  */
-class AppSettings(context: Context) {
-    private val prefs = run {
-        val leafPrefs = context.getSharedPreferences("leaf.settings", Context.MODE_PRIVATE)
-        val chikaPrefs = context.getSharedPreferences("chika.settings", Context.MODE_PRIVATE)
-        if (leafPrefs.all.isEmpty() && chikaPrefs.all.isNotEmpty()) {
-            val editor = leafPrefs.edit()
-            for ((key, value) in chikaPrefs.all) {
-                when (value) {
-                    is Boolean -> editor.putBoolean(key, value)
-                    is Int -> editor.putInt(key, value)
-                    is Long -> editor.putLong(key, value)
-                    is Float -> editor.putFloat(key, value)
-                    is String -> editor.putString(key, value)
-                }
-            }
-            editor.apply()
-        }
-        leafPrefs
-    }
+class AppSettings internal constructor(private val prefs: android.content.SharedPreferences) {
+    constructor(context: Context) : this(loadPreferences(context))
 
     var defaultRightToLeft: Boolean
         get() = prefs.getBoolean(KEY_DEFAULT_RTL, false)
@@ -51,7 +34,12 @@ class AppSettings(context: Context) {
         }
         set(value) { prefs.edit().putString(KEY_PAGE_FIT_MODE, value.name).apply() }
 
-    /** When true and in landscape orientation, two pages are displayed side-by-side (except cover & splash pages). Default false. */
+    /** Independent portrait choice; existing installations previously always used single pages here. */
+    var portraitSpread: Boolean
+        get() = prefs.getBoolean(KEY_PORTRAIT_SPREAD, false)
+        set(value) { prefs.edit().putBoolean(KEY_PORTRAIT_SPREAD, value).apply() }
+
+    /** Retain the original key so existing landscape preferences migrate without changing behavior. */
     var landscapeSpread: Boolean
         get() = prefs.getBoolean(KEY_LANDSCAPE_SPREAD, false)
         set(value) { prefs.edit().putBoolean(KEY_LANDSCAPE_SPREAD, value).apply() }
@@ -81,10 +69,30 @@ class AppSettings(context: Context) {
         get() = smbHost.isNotBlank() && smbShare.isNotBlank()
 
     private companion object {
+        fun loadPreferences(context: Context): android.content.SharedPreferences {
+            val leafPrefs = context.getSharedPreferences("leaf.settings", Context.MODE_PRIVATE)
+            val chikaPrefs = context.getSharedPreferences("chika.settings", Context.MODE_PRIVATE)
+            if (leafPrefs.all.isEmpty() && chikaPrefs.all.isNotEmpty()) {
+                val editor = leafPrefs.edit()
+                for ((key, value) in chikaPrefs.all) {
+                    when (value) {
+                        is Boolean -> editor.putBoolean(key, value)
+                        is Int -> editor.putInt(key, value)
+                        is Long -> editor.putLong(key, value)
+                        is Float -> editor.putFloat(key, value)
+                        is String -> editor.putString(key, value)
+                    }
+                }
+                editor.apply()
+            }
+            return leafPrefs
+        }
+
         const val KEY_DEFAULT_RTL = "default_rtl"
         const val KEY_AMOLED = "amoled_theme"
         const val KEY_PAGE_SLIDE = "page_slide_enabled"
         const val KEY_PAGE_FIT_MODE = "page_fit_mode"
+        const val KEY_PORTRAIT_SPREAD = "portrait_spread"
         const val KEY_LANDSCAPE_SPREAD = "landscape_spread"
         const val KEY_LIBRARY_COLUMNS = "library_columns"
         const val KEY_SMB_HOST = "smb_host"
