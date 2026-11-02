@@ -3,7 +3,7 @@
 
 Categories:
   - Reading
-License: MPL-2.0
+License: MPL-2.0 AND AGPL-3.0-only
 AuthorName: Bryan Clark (forked from Chakra)
 WebSite: https://github.com/bclark/leaf-reader
 SourceCode: https://github.com/bclark/leaf-reader
@@ -17,7 +17,7 @@ Repo: https://github.com/bclark/leaf-reader.git
 Builds:
   - versionName: 0.3.3
     versionCode: 30300
-    commit: 16db28373b9e4a3b839ef4267b14fc03ddf45be4
+    commit: v0.3.3
     subdir: app
     gradle:
       - fdroid
