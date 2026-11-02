@@ -155,7 +155,7 @@ fun ReaderScreen(
         when {
             state.error != null -> ErrorView(state.error!!)
             state.page == null -> LoadingView()
-            pageSlideEnabled -> SlidePageViewer(
+            pageSlideEnabled && !net.digitalbc.leafreader.ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING -> SlidePageViewer(
                 state = state,
                 viewModel = viewModel,
                 onToggleChrome = { chromeVisible = !chromeVisible },
@@ -269,32 +269,34 @@ private fun PageScrubber(
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = if (!net.digitalbc.leafreader.ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) Arrangement.SpaceBetween else Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = LeafPrimary.copy(alpha = 0.9f),
-                modifier = Modifier.clickable { onTogglePageSlideEnabled() },
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            if (!net.digitalbc.leafreader.ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = LeafPrimary.copy(alpha = 0.9f),
+                    modifier = Modifier.clickable { onTogglePageSlideEnabled() },
                 ) {
-                    Icon(
-                        imageVector = if (pageSlideEnabled) Icons.AutoMirrored.Filled.MenuBook else Icons.Default.CropFree,
-                        contentDescription = "Switch reading mode",
-                        tint = LeafAccent,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Text(
-                        if (pageSlideEnabled) "PAGE FLIP" else "PANEL BY PANEL",
-                        fontFamily = Anton,
-                        fontSize = 11.sp,
-                        letterSpacing = 1.sp,
-                        color = PaperWhite,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    ) {
+                        Icon(
+                            imageVector = if (pageSlideEnabled) Icons.AutoMirrored.Filled.MenuBook else Icons.Default.CropFree,
+                            contentDescription = "Switch reading mode",
+                            tint = LeafAccent,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            if (pageSlideEnabled) "PAGE FLIP" else "PANEL BY PANEL",
+                            fontFamily = Anton,
+                            fontSize = 11.sp,
+                            letterSpacing = 1.sp,
+                            color = PaperWhite,
+                        )
+                    }
                 }
             }
             PageCoin(page = shownPage, total = pageCount)
@@ -1042,6 +1044,7 @@ private fun DirectionChip(rightToLeft: Boolean, onClick: () -> Unit) {
 
 private fun pageStatus(state: ReaderUiState): String {
     val page = "Page ${state.pageIndex + 1}/${state.pageCount}"
+    if (net.digitalbc.leafreader.ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) return page
     val panel = state.panelLabel
     val panelText = when {
         state.detecting -> " · detecting…"

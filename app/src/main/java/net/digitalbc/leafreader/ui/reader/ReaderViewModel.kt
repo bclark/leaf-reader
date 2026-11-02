@@ -77,6 +77,10 @@ class ReaderViewModel(
     fun next() {
         val s = _state.value
         if (s.loading || s.error != null) return
+        if (ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) {
+            nextPage()
+            return
+        }
         val lastSlot = s.panels.size + 1
         when {
             s.slot < lastSlot -> setSlot(s.slot + 1)
@@ -88,6 +92,10 @@ class ReaderViewModel(
     fun previous() {
         val s = _state.value
         if (s.loading || s.error != null) return
+        if (ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) {
+            previousPage()
+            return
+        }
         when {
             s.slot > 0 -> setSlot(s.slot - 1)
             s.pageIndex > 0 -> goToPage(s.pageIndex - 1, targetSlot = ENTER_AT_OUTRO)
@@ -154,18 +162,19 @@ class ReaderViewModel(
     private fun goToPage(page: Int, targetSlot: Int) {
         val loader = pageLoader ?: return
         navJob?.cancel()
+        val isExperiment = ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING
         val cachedPage = loader.getCachedPage(page)
-        val cachedPanels = panelCache[page]
+        val cachedPanels = if (isExperiment) listOf(Panel.FULL_PAGE) else panelCache[page]
         if (cachedPage != null) {
             val panels = cachedPanels ?: listOf(Panel.FULL_PAGE)
-            val resolvedSlot = when (targetSlot) {
+            val resolvedSlot = if (isExperiment) 0 else when (targetSlot) {
                 ENTER_AT_OUTRO -> panels.size + 1
                 else -> targetSlot.coerceIn(0, panels.size + 1)
             }
             _state.update {
                 it.copy(
                     loading = false,
-                    detecting = cachedPanels == null,
+                    detecting = !isExperiment && cachedPanels == null,
                     pageIndex = page,
                     page = cachedPage,
                     panels = panels,
@@ -176,20 +185,20 @@ class ReaderViewModel(
         }
         navJob = viewModelScope.launch {
             if (cachedPage == null) {
-                _state.update { it.copy(loading = it.page == null, detecting = true, error = null) }
+                _state.update { it.copy(loading = it.page == null, detecting = !isExperiment, error = null) }
             }
             try {
                 val bitmap = cachedPage ?: loader.loadPage(page)
                 if (cachedPage == null) {
                     val initialPanels = cachedPanels ?: listOf(Panel.FULL_PAGE)
-                    val initialSlot = when (targetSlot) {
+                    val initialSlot = if (isExperiment) 0 else when (targetSlot) {
                         ENTER_AT_OUTRO -> initialPanels.size + 1
                         else -> targetSlot.coerceIn(0, initialPanels.size + 1)
                     }
                     _state.update {
                         it.copy(
                             loading = false,
-                            detecting = cachedPanels == null,
+                            detecting = !isExperiment && cachedPanels == null,
                             pageIndex = page,
                             page = bitmap,
                             panels = initialPanels,
@@ -199,7 +208,7 @@ class ReaderViewModel(
                     }
                 }
                 val panels = panelsFor(page, bitmap)
-                val resolvedSlot = when (targetSlot) {
+                val resolvedSlot = if (isExperiment) 0 else when (targetSlot) {
                     ENTER_AT_OUTRO -> panels.size + 1
                     else -> targetSlot.coerceIn(0, panels.size + 1)
                 }
@@ -226,6 +235,9 @@ class ReaderViewModel(
     }
 
     private suspend fun panelsFor(page: Int, bitmap: Bitmap): List<Panel> {
+        if (ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) {
+            return listOf(Panel.FULL_PAGE)
+        }
         panelCache[page]?.let { return it }
         val panels = withContext(Dispatchers.Default) { panelSource.detect(bitmap, rightToLeft) }
         panelCache[page] = panels
@@ -235,6 +247,10 @@ class ReaderViewModel(
     private fun prefetch(page: Int) {
         val loader = pageLoader ?: return
         if (page < 0 || page >= _state.value.pageCount) return
+        if (ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) {
+            viewModelScope.launch { runCatching { loader.loadPage(page) } }
+            return
+        }
         if (panelCache.containsKey(page)) return
         viewModelScope.launch {
             runCatching {
@@ -246,7 +262,8 @@ class ReaderViewModel(
 
     private fun persistProgress() {
         val s = _state.value
-        viewModelScope.launch { repository.saveProgress(comicId, s.pageIndex, s.slot) }
+        val slotToSave = if (ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) 0 else s.slot
+        viewModelScope.launch { repository.saveProgress(comicId, s.pageIndex, slotToSave) }
     }
 
     override fun onCleared() {

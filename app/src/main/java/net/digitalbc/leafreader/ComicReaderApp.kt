@@ -23,9 +23,22 @@ class ComicReaderApp : Application() {
         LibraryRepository(this, database.comicDao(), settings, database.readingListDao())
     }
 
-    /** On-device ML panel detector; falls back to whole-page-only if the model can't load. */
+    companion object {
+        /**
+         * Temporary experiment flag: disables ML panel detection and guided panel-by-panel reading,
+         * keeping Leaf in whole-page mode with standard page navigation and zoom/pan.
+         * Set to false to restore panel-by-panel guided reading.
+         */
+        const val EXPERIMENT_DISABLE_PANEL_READING = true
+    }
+
+    /** On-device ML panel detector; falls back to whole-page-only if the model can't load or experiment is active. */
     val panelSource: PanelSource by lazy {
-        MlPanelDetector.tryCreate(this) ?: NoopPanelSource
+        if (EXPERIMENT_DISABLE_PANEL_READING) {
+            NoopPanelSource
+        } else {
+            MlPanelDetector.tryCreate(this) ?: NoopPanelSource
+        }
     }
 
     /** Process-wide reactive theme flag so the whole UI re-themes the moment it's toggled. */
