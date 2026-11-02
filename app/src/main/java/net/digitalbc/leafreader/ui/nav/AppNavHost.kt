@@ -75,11 +75,14 @@ fun AppNavHost() {
         composable(Routes.MENU) {
             val amoled by app.amoledTheme.collectAsState()
             val pageSlide by app.pageSlideEnabled.collectAsState()
+            val fitMode by app.pageFitMode.collectAsState()
             MenuScreen(
                 amoledTheme = amoled,
                 onSetAmoledTheme = app::setAmoledTheme,
                 pageSlideEnabled = pageSlide,
                 onSetPageSlideEnabled = app::setPageSlideEnabled,
+                pageFitMode = fitMode,
+                onSetPageFitMode = app::setPageFitMode,
                 settings = app.settings,
                 onBack = { navController.popBackStack() },
             )
@@ -90,6 +93,7 @@ fun AppNavHost() {
         ) { entry ->
             val comicId = entry.arguments?.getLong("comicId") ?: return@composable
             val pageSlide by app.pageSlideEnabled.collectAsState()
+            val fitMode by app.pageFitMode.collectAsState()
             val vm: ReaderViewModel = viewModel(
                 key = "reader-$comicId",
                 factory = ReaderViewModel.factory(app, comicId),
@@ -98,6 +102,8 @@ fun AppNavHost() {
                 viewModel = vm,
                 pageSlideEnabled = pageSlide,
                 onTogglePageSlideEnabled = { app.setPageSlideEnabled(!pageSlide) },
+                fitMode = fitMode,
+                onSetFitMode = app::setPageFitMode,
                 onBack = { navController.popBackStack() },
             )
         }

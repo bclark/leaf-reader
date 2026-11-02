@@ -91,6 +91,8 @@ fun MenuScreen(
     onSetAmoledTheme: (Boolean) -> Unit,
     pageSlideEnabled: Boolean,
     onSetPageSlideEnabled: (Boolean) -> Unit,
+    pageFitMode: net.digitalbc.leafreader.ui.reader.PageFitMode = net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_PAGE,
+    onSetPageFitMode: (net.digitalbc.leafreader.ui.reader.PageFitMode) -> Unit = {},
     settings: AppSettings,
     onBack: () -> Unit,
 ) {
@@ -183,29 +185,95 @@ fun MenuScreen(
             Spacer(Modifier.size(32.dp))
 
             // ---- Reading -------------------------------------------------------------
-            if (!net.digitalbc.leafreader.ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) {
-                SectionLabel("READING")
-                Spacer(Modifier.size(10.dp))
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(InkSoft)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
+            SectionLabel("READING")
+            Spacer(Modifier.size(10.dp))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(InkSoft)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                if (!net.digitalbc.leafreader.ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Reading Mode",
+                            fontFamily = Archivo,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = Cream,
+                        )
+                        Text(
+                            if (pageSlideEnabled) {
+                                "Turn full pages with a smooth slide transition."
+                            } else {
+                                "Guided reading that automatically zooms and steps through each detected panel."
+                            },
+                            fontFamily = Archivo,
+                            fontSize = 12.sp,
+                            color = CreamMuted,
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Ink)
+                                .padding(2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(if (pageSlideEnabled) Ochre else Color.Transparent)
+                                    .clickable { onSetPageSlideEnabled(true) }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "PAGE FLIP",
+                                    fontFamily = Archivo,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = if (pageSlideEnabled) Ink else CreamMuted,
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(if (!pageSlideEnabled) Ochre else Color.Transparent)
+                                    .clickable { onSetPageSlideEnabled(false) }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "PANEL BY PANEL",
+                                    fontFamily = Archivo,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = if (!pageSlideEnabled) Ink else CreamMuted,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Reading Mode",
+                        "Page Fit",
                         fontFamily = Archivo,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
                         color = Cream,
                     )
                     Text(
-                        if (pageSlideEnabled) {
-                            "Turn full pages with a smooth slide transition."
+                        if (pageFitMode == net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_WIDTH) {
+                            "Fit page to screen width for easier reading of small text and speech bubbles."
                         } else {
-                            "Guided reading that automatically zooms and steps through each detected panel."
+                            "Fit the entire page on screen."
                         },
                         fontFamily = Archivo,
                         fontSize = 12.sp,
@@ -224,40 +292,40 @@ fun MenuScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(3.dp))
-                                .background(if (pageSlideEnabled) Ochre else Color.Transparent)
-                                .clickable { onSetPageSlideEnabled(true) }
+                                .background(if (pageFitMode == net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_PAGE) Ochre else Color.Transparent)
+                                .clickable { onSetPageFitMode(net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_PAGE) }
                                 .padding(vertical = 8.dp),
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
-                                "PAGE FLIP",
+                                "FIT TO PAGE",
                                 fontFamily = Archivo,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
-                                color = if (pageSlideEnabled) Ink else CreamMuted,
+                                color = if (pageFitMode == net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_PAGE) Ink else CreamMuted,
                             )
                         }
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(3.dp))
-                                .background(if (!pageSlideEnabled) Ochre else Color.Transparent)
-                                .clickable { onSetPageSlideEnabled(false) }
+                                .background(if (pageFitMode == net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_WIDTH) Ochre else Color.Transparent)
+                                .clickable { onSetPageFitMode(net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_WIDTH) }
                                 .padding(vertical = 8.dp),
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
-                                "PANEL BY PANEL",
+                                "FIT TO WIDTH",
                                 fontFamily = Archivo,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
-                                color = if (!pageSlideEnabled) Ink else CreamMuted,
+                                color = if (pageFitMode == net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_WIDTH) Ink else CreamMuted,
                             )
                         }
                     }
                 }
-                Spacer(Modifier.size(32.dp))
             }
+            Spacer(Modifier.size(32.dp))
 
             // ---- Library -------------------------------------------------------------
             SectionLabel("LIBRARY")

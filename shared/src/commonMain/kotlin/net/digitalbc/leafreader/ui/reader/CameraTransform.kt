@@ -14,6 +14,14 @@ data class PageDraw(
     val scaledHeight: Float,
 )
 
+/** Mode for framing pages in whole-page viewing. */
+enum class PageFitMode {
+    /** Contain the whole page within the container (default). */
+    FIT_PAGE,
+    /** Scale page width to container width (allowing vertical scrolling for tall pages). */
+    FIT_WIDTH,
+}
+
 /**
  * Computes the [PageDraw] that frames [camera] (a normalized page rect) inside a container of size
  * [containerW] x [containerH], given the page bitmap's pixel size. [fill] < 1 leaves padding around
@@ -26,6 +34,7 @@ fun computePageDraw(
     containerW: Float,
     containerH: Float,
     fill: Float = 0.98f,
+    fitMode: PageFitMode = PageFitMode.FIT_PAGE,
 ): PageDraw {
     val bw = bitmapW.toFloat().coerceAtLeast(1f)
     val bh = bitmapH.toFloat().coerceAtLeast(1f)
@@ -36,13 +45,22 @@ fun computePageDraw(
     val camCx = camera.centerX * bw
     val camCy = camera.centerY * bh
 
-    // Scale so the camera region fits the container (contain), with a little padding.
-    val scale = minOf(containerW / camW, containerH / camH) * fill
+    // Scale so the camera region fits the container according to the chosen fit mode.
+    val scale = when (fitMode) {
+        PageFitMode.FIT_PAGE -> minOf(containerW / camW, containerH / camH) * fill
+        PageFitMode.FIT_WIDTH -> (containerW / camW) * fill
+    }
 
     val scaledWidth = bw * scale
     val scaledHeight = bh * scale
     val left = containerW / 2f - camCx * scale
-    val top = containerH / 2f - camCy * scale
+    val top = if (fitMode == PageFitMode.FIT_WIDTH && scaledHeight > containerH) {
+        // In fit-to-width mode when the page is taller than the screen, start at the top margin
+        val topPadding = (containerH - containerH * fill) / 2f
+        topPadding - camera.top * scaledHeight
+    } else {
+        containerH / 2f - camCy * scale
+    }
 
     return PageDraw(left, top, scaledWidth, scaledHeight)
 }

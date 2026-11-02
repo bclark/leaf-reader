@@ -45,6 +45,46 @@ class CameraTransformTest {
     }
 
     @Test
+    fun fitToWidthScalesToContainerWidthAndPositionsAtTopWhenTall() {
+        // 1000x2000 tall page in 500x500 container, fill = 1f
+        val draw = computePageDraw(
+            camera = Panel.FULL_PAGE,
+            bitmapW = 1000,
+            bitmapH = 2000,
+            containerW = 500f,
+            containerH = 500f,
+            fill = 1f,
+            fitMode = PageFitMode.FIT_WIDTH,
+        )
+        // Scaled to width (500px): scale = 500/1000 = 0.5. Height becomes 1000px.
+        assertNear(500f, draw.scaledWidth)
+        assertNear(1000f, draw.scaledHeight)
+        assertNear(0f, draw.left)
+        // Since scaledHeight (1000) > containerH (500), top starts at 0 (top of page).
+        assertNear(0f, draw.top)
+    }
+
+    @Test
+    fun fitToWidthCentersVerticallyWhenPageFitsWithinHeight() {
+        // 1000x500 wide page in 500x500 container, fill = 1f
+        val draw = computePageDraw(
+            camera = Panel.FULL_PAGE,
+            bitmapW = 1000,
+            bitmapH = 500,
+            containerW = 500f,
+            containerH = 500f,
+            fill = 1f,
+            fitMode = PageFitMode.FIT_WIDTH,
+        )
+        // Scaled to width (500px): scale = 0.5. Height becomes 250px.
+        assertNear(500f, draw.scaledWidth)
+        assertNear(250f, draw.scaledHeight)
+        assertNear(0f, draw.left)
+        // Since scaledHeight (250) <= containerH (500), centered vertically at (500-250)/2 = 125.
+        assertNear(125f, draw.top)
+    }
+
+    @Test
     fun degenerateBitmapAndCameraSizesDoNotBlowUp() {
         val draw = computePageDraw(Panel(0.5f, 0.5f, 0.5f, 0.5f), 0, 0, 100f, 100f)
         assertTrue(draw.scaledWidth.isFinite())

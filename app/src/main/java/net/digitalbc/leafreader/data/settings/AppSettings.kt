@@ -43,6 +43,14 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean(KEY_PAGE_SLIDE, true)
         set(value) { prefs.edit().putBoolean(KEY_PAGE_SLIDE, value).apply() }
 
+    /** Preferred whole-page framing: fit-to-page (contain, default) or fit-to-width. */
+    var pageFitMode: net.digitalbc.leafreader.ui.reader.PageFitMode
+        get() = when (prefs.getString(KEY_PAGE_FIT_MODE, net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_PAGE.name)) {
+            net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_WIDTH.name -> net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_WIDTH
+            else -> net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_PAGE
+        }
+        set(value) { prefs.edit().putString(KEY_PAGE_FIT_MODE, value.name).apply() }
+
     /** Number of comic cover columns on the library screen. */
     var libraryColumns: Int
         get() = prefs.getInt(KEY_LIBRARY_COLUMNS, 2)
@@ -71,6 +79,7 @@ class AppSettings(context: Context) {
         const val KEY_DEFAULT_RTL = "default_rtl"
         const val KEY_AMOLED = "amoled_theme"
         const val KEY_PAGE_SLIDE = "page_slide_enabled"
+        const val KEY_PAGE_FIT_MODE = "page_fit_mode"
         const val KEY_LIBRARY_COLUMNS = "library_columns"
         const val KEY_SMB_HOST = "smb_host"
         const val KEY_SMB_SHARE = "smb_share"

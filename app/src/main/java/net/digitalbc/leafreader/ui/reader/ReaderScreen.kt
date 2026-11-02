@@ -41,7 +41,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.NavigateBefore
+import androidx.compose.material.icons.automirrored.filled.NavigateNext
+import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.CropFree
+import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -124,6 +128,8 @@ fun ReaderScreen(
     viewModel: ReaderViewModel,
     pageSlideEnabled: Boolean,
     onTogglePageSlideEnabled: () -> Unit = {},
+    fitMode: PageFitMode = PageFitMode.FIT_PAGE,
+    onSetFitMode: (PageFitMode) -> Unit = {},
     onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -162,6 +168,7 @@ fun ReaderScreen(
             )
             else -> PageViewer(
                 state = state,
+                fitMode = fitMode,
                 onNext = viewModel::next,
                 onPrev = viewModel::previous,
                 onNextPage = viewModel::nextPage,
@@ -226,7 +233,20 @@ fun ReaderScreen(
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
-                DirectionChip(rightToLeft = state.rightToLeft, onClick = viewModel::toggleReadingDirection)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    FitModeChip(
+                        fitMode = fitMode,
+                        onClick = {
+                            onSetFitMode(
+                                if (fitMode == PageFitMode.FIT_PAGE) PageFitMode.FIT_WIDTH else PageFitMode.FIT_PAGE,
+                            )
+                        },
+                    )
+                    DirectionChip(rightToLeft = state.rightToLeft, onClick = viewModel::toggleReadingDirection)
+                }
             }
         }
 
@@ -239,8 +259,11 @@ fun ReaderScreen(
             PageScrubber(
                 pageIndex = state.pageIndex,
                 pageCount = state.pageCount,
+                rightToLeft = state.rightToLeft,
                 pageSlideEnabled = pageSlideEnabled,
                 onTogglePageSlideEnabled = onTogglePageSlideEnabled,
+                onPrevPage = viewModel::previousPage,
+                onNextPage = viewModel::nextPage,
                 onJumpToPage = viewModel::jumpToPage,
             )
         }
@@ -251,8 +274,11 @@ fun ReaderScreen(
 private fun PageScrubber(
     pageIndex: Int,
     pageCount: Int,
+    rightToLeft: Boolean,
     pageSlideEnabled: Boolean,
     onTogglePageSlideEnabled: () -> Unit,
+    onPrevPage: () -> Unit,
+    onNextPage: () -> Unit,
     onJumpToPage: (Int) -> Unit,
 ) {
     var scrubbing by remember { mutableStateOf(false) }
@@ -265,7 +291,7 @@ private fun PageScrubber(
             .fillMaxWidth()
             .background(Brush.verticalGradient(listOf(Color.Transparent, DeepInkSurface.copy(alpha = 0.98f))))
             .navigationBarsPadding()
-            .padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 12.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 12.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -301,20 +327,50 @@ private fun PageScrubber(
             }
             PageCoin(page = shownPage, total = pageCount)
         }
-        Slider(
-            value = scrub.coerceIn(0f, (pageCount - 1).toFloat()),
-            onValueChange = { scrubbing = true; scrub = it },
-            onValueChangeFinished = {
-                scrubbing = false
-                onJumpToPage(scrub.roundToInt())
-            },
-            valueRange = 0f..(pageCount - 1).toFloat(),
-            colors = SliderDefaults.colors(
-                thumbColor = Ochre,
-                activeTrackColor = Ochre,
-                inactiveTrackColor = Cream.copy(alpha = 0.2f),
-            ),
-        )
+        Spacer(Modifier.size(4.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            IconButton(
+                onClick = onPrevPage,
+                enabled = pageIndex > 0,
+                modifier = Modifier.size(44.dp),
+            ) {
+                Icon(
+                    imageVector = if (rightToLeft) Icons.AutoMirrored.Filled.NavigateNext else Icons.AutoMirrored.Filled.NavigateBefore,
+                    contentDescription = "Previous page",
+                    tint = if (pageIndex > 0) Cream else CreamMuted.copy(alpha = 0.35f),
+                )
+            }
+            Slider(
+                modifier = Modifier.weight(1f),
+                value = scrub.coerceIn(0f, (pageCount - 1).toFloat()),
+                onValueChange = { scrubbing = true; scrub = it },
+                onValueChangeFinished = {
+                    scrubbing = false
+                    onJumpToPage(scrub.roundToInt())
+                },
+                valueRange = 0f..(pageCount - 1).toFloat(),
+                colors = SliderDefaults.colors(
+                    thumbColor = Ochre,
+                    activeTrackColor = Ochre,
+                    inactiveTrackColor = Cream.copy(alpha = 0.2f),
+                ),
+            )
+            IconButton(
+                onClick = onNextPage,
+                enabled = pageIndex < pageCount - 1,
+                modifier = Modifier.size(44.dp),
+            ) {
+                Icon(
+                    imageVector = if (rightToLeft) Icons.AutoMirrored.Filled.NavigateBefore else Icons.AutoMirrored.Filled.NavigateNext,
+                    contentDescription = "Next page",
+                    tint = if (pageIndex < pageCount - 1) Cream else CreamMuted.copy(alpha = 0.35f),
+                )
+            }
+        }
     }
 }
 
@@ -818,6 +874,7 @@ private fun DrawScope.drawCurlTurn(
 @Composable
 private fun PageViewer(
     state: ReaderUiState,
+    fitMode: PageFitMode = PageFitMode.FIT_PAGE,
     onNext: () -> Unit,
     onPrev: () -> Unit,
     onNextPage: () -> Unit,
@@ -843,13 +900,13 @@ private fun PageViewer(
         pageAlpha.animateTo(1f, tween(280))
     }
 
-    // Free pinch-to-zoom / pan, reset whenever the framed view changes. The comic floats over the
+    // Free pinch-to-zoom / pan, reset whenever the framed view or fit mode changes. The comic floats over the
     // background: it can be moved freely in any direction (even past the framed region), bounded only
     // so a grabbable sliver always stays on screen.
     var userScale by remember { mutableFloatStateOf(1f) }
     var userPanX by remember { mutableFloatStateOf(0f) }
     var userPanY by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(state.pageIndex, state.slot) {
+    LaunchedEffect(state.pageIndex, state.slot, fitMode) {
         userScale = 1f; userPanX = 0f; userPanY = 0f
     }
 
@@ -867,15 +924,15 @@ private fun PageViewer(
     }
 
     // A single pointer handler so taps, double-taps, and pan/zoom never fight over the same touch.
-    // Tap zones drive panel navigation (which crosses page boundaries) and chrome; one-finger drag
-    // pans the floating comic; pinch zooms; double-tap jumps back to the whole-page view. A single
-    // tap is deferred briefly so a following tap can be recognised as a double-tap.
+    // Tap zones drive navigation and chrome; one-finger drag pans when content exceeds container;
+    // pinch zooms; double-tap jumps back to the whole-page view. A single tap is deferred briefly
+    // so a following tap can be recognized as a double-tap.
     var pendingTap by remember { mutableStateOf<Job?>(null) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(rtl) {
+            .pointerInput(rtl, fitMode) {
                 awaitEachGesture {
                     val down = awaitFirstDown()
                     var pan = Offset.Zero
@@ -901,20 +958,29 @@ private fun PageViewer(
                         if (pastSlop) {
                             val newScale = (userScale * zoomChange).coerceIn(1f, 5f)
                             userScale = newScale
-                            if (newScale <= 1.01f) {
-                                userPanX = 0f
-                                userPanY = 0f
+                            val draw = computePageDraw(
+                                camera = camera.value,
+                                bitmapW = image.width,
+                                bitmapH = image.height,
+                                containerW = size.width.toFloat(),
+                                containerH = size.height.toFloat(),
+                                fitMode = fitMode,
+                            )
+                            val cw = size.width.toFloat()
+                            val ch = size.height.toFloat()
+                            val effectiveW = draw.scaledWidth * newScale
+                            val effectiveH = draw.scaledHeight * newScale
+                            val baseLeft = cw / 2f + (draw.left - cw / 2f) * newScale
+                            val baseTop = ch / 2f + (draw.top - ch / 2f) * newScale
+                            userPanX = if (effectiveW > cw) {
+                                clampPan(userPanX + panChange.x, baseLeft, effectiveW, cw)
                             } else {
-                                val draw = computePageDraw(
-                                    camera.value, image.width, image.height,
-                                    size.width.toFloat(), size.height.toFloat(),
-                                )
-                                val cw = size.width.toFloat()
-                                val ch = size.height.toFloat()
-                                val baseLeft = cw / 2f + (draw.left - cw / 2f) * newScale
-                                val baseTop = ch / 2f + (draw.top - ch / 2f) * newScale
-                                userPanX = clampPan(userPanX + panChange.x, baseLeft, draw.scaledWidth * newScale, cw)
-                                userPanY = clampPan(userPanY + panChange.y, baseTop, draw.scaledHeight * newScale, ch)
+                                0f
+                            }
+                            userPanY = if (effectiveH > ch) {
+                                clampPan(userPanY + panChange.y, baseTop, effectiveH, ch)
+                            } else {
+                                0f
                             }
                             event.changes.forEach { if (it.positionChanged()) it.consume() }
                         }
@@ -936,10 +1002,17 @@ private fun PageViewer(
                         } else {
                             pendingTap = scope.launch {
                                 delay(DOUBLE_TAP_WINDOW_MS)
-                                when {
-                                    tapX < w / 3f -> onPrev()
-                                    tapX > w * 2f / 3f -> onNext()
-                                    else -> onToggleChrome()
+                                if (userScale > 1.05f) {
+                                    // While zoomed in, pinch and pan win over edge swipes/taps.
+                                    // Tapping toggles chrome without accidentally turning pages.
+                                    onToggleChrome()
+                                } else {
+                                    // At normal scale, honor LTR/RTL order consistently
+                                    when {
+                                        tapX < w / 3f -> if (rtl) onNext() else onPrev()
+                                        tapX > w * 2f / 3f -> if (rtl) onPrev() else onNext()
+                                        else -> onToggleChrome()
+                                    }
                                 }
                                 pendingTap = null
                             }
@@ -964,6 +1037,7 @@ private fun PageViewer(
                 bitmapH = image.height,
                 containerW = size.width,
                 containerH = size.height,
+                fitMode = fitMode,
             )
             val cx = size.width / 2f
             val cy = size.height / 2f
@@ -1001,12 +1075,43 @@ private fun ErrorView(message: String) {
 }
 
 /**
- * Clamps pan along one axis when zoomed in (> 1x): when larger than the screen, pans only until an
- * edge meets the screen edge; when it fits within the screen along that axis, stays locked at 0.
+ * Clamps pan along one axis when content is larger than the container: pans only until an edge
+ * meets the container edge; when it fits within the container along that axis, stays locked at 0.
  */
-private fun clampPan(pan: Float, base: Float, size: Float, container: Float): Float {
+private fun clampPan(pan: Float, base: Float, size: Float, container: Float, padding: Float = 0f): Float {
     if (size <= container) return 0f
-    return pan.coerceIn(container - size - base, -base)
+    val minPan = container - padding - size - base
+    val maxPan = padding - base
+    return pan.coerceIn(minOf(minPan, maxPan), maxOf(minPan, maxPan))
+}
+
+/** Mode control that toggles between fit-to-page and fit-to-width. */
+@Composable
+private fun FitModeChip(fitMode: PageFitMode, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(Cream.copy(alpha = 0.12f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Icon(
+            imageVector = if (fitMode == PageFitMode.FIT_WIDTH) Icons.Default.FitScreen else Icons.Default.AspectRatio,
+            contentDescription = "Switch fit mode",
+            tint = Cream,
+            modifier = Modifier.size(15.dp),
+        )
+        Text(
+            if (fitMode == PageFitMode.FIT_WIDTH) "WIDTH" else "PAGE",
+            fontFamily = Archivo,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp,
+            letterSpacing = 1.sp,
+            color = Cream,
+        )
+    }
 }
 
 /** A single tap waits this long for a possible second tap before acting, enabling double-tap. */

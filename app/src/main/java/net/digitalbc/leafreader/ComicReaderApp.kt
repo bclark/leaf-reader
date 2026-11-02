@@ -58,4 +58,13 @@ class ComicReaderApp : Application() {
         settings.pageSlideEnabled = enabled
         _pageSlideEnabled.value = enabled
     }
+
+    /** Process-wide reactive fit mode for whole-page viewing (fit to page vs fit to width). */
+    private val _pageFitMode by lazy { MutableStateFlow(settings.pageFitMode) }
+    val pageFitMode: StateFlow<net.digitalbc.leafreader.ui.reader.PageFitMode> by lazy { _pageFitMode.asStateFlow() }
+
+    fun setPageFitMode(mode: net.digitalbc.leafreader.ui.reader.PageFitMode) {
+        settings.pageFitMode = mode
+        _pageFitMode.value = mode
+    }
 }
