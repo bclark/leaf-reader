@@ -14,7 +14,7 @@ import java.io.File
  * Each PDF page is rasterized on demand onto a white background at [PageConstants.maxPageDimension]
  * on its long edge so downstream panel detection and reader zoom work identically to CBZ/CBR pages.
  */
-class PdfComicArchive(file: File) : ComicArchive {
+class PdfComicArchive(file: File) : ComicArchive, PageSizeSource {
 
     private val pfd: ParcelFileDescriptor =
         ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
@@ -45,6 +45,10 @@ class PdfComicArchive(file: File) : ComicArchive {
                 bitmap.recycle()
             }
         }
+    }
+
+    override fun pageSize(index: Int): IntArray = synchronized(this) {
+        renderer.openPage(index).use { intArrayOf(it.width, it.height) }
     }
 
     override fun pageName(index: Int): String = "page_${index + 1}.jpg"

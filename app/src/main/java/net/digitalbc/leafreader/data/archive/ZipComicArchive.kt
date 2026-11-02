@@ -8,7 +8,7 @@ import java.io.File
  * CBZ (ZIP) archive backed by Apache Commons Compress, which supports random access to entries via
  * [ZipFile] and handles a wider range of ZIP encodings than the JDK's [java.util.zip.ZipFile].
  */
-class ZipComicArchive(file: File) : ComicArchive {
+class ZipComicArchive(file: File) : ComicArchive, PageSizeSource {
 
     private val zip: ZipFile = ZipFile.builder().setFile(file).get()
 
@@ -24,6 +24,12 @@ class ZipComicArchive(file: File) : ComicArchive {
 
     override fun readPage(index: Int): ByteArray =
         zip.getInputStream(entries[index]).use { it.readBytes() }
+
+    override fun pageSize(index: Int): IntArray {
+        val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        zip.getInputStream(entries[index]).use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
+        return intArrayOf(options.outWidth, options.outHeight)
+    }
 
     override fun pageName(index: Int): String = entries[index].name
 

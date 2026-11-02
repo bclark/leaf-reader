@@ -153,17 +153,7 @@ fun ReaderScreen(
     val isSpread = state.isSpread && state.secondPage != null
     val scope = rememberCoroutineScope()
 
-    // Keep document indices with decoded images: produceState retains its previous value
-    // when keys change, so unlabelled adjacent images can briefly belong to the old spread.
-    val adjacentPages by produceState<Map<Int, Bitmap>>(emptyMap(), pageIndex, isSpread, pageCount) {
-        value = emptyMap()
-        for (index in (pageIndex - 2..pageIndex + 3)) {
-            if (index in 0 until pageCount && index != pageIndex) {
-                val page = viewModel.getCachedPageBitmap(index) ?: viewModel.loadPageBitmap(index)
-                if (page != null) value = value + (index to page)
-            }
-        }
-    }
+    val adjacentPages = state.adjacentPages
     val getPageBitmap: (Int?) -> Bitmap? = { index ->
         when (index) {
             null -> null
@@ -226,15 +216,21 @@ fun ReaderScreen(
         }
     }
     val turnForward: () -> Unit = {
-        if (canTurnForward && curlDirection == null && canAnimateTurn(CurlDirection.FORWARD)) {
-            curlDirection = CurlDirection.FORWARD
-            settleTurn(CurlDirection.FORWARD, 0f, true)
+        if (canTurnForward && curlDirection == null && !state.preparingSpread) {
+            if (!canAnimateTurn(CurlDirection.FORWARD)) viewModel.nextPage()
+            else {
+                curlDirection = CurlDirection.FORWARD
+                settleTurn(CurlDirection.FORWARD, 0f, true)
+            }
         }
     }
     val turnBackward: () -> Unit = {
-        if (canTurnBackward && curlDirection == null && canAnimateTurn(CurlDirection.BACKWARD)) {
-            curlDirection = CurlDirection.BACKWARD
-            settleTurn(CurlDirection.BACKWARD, 0f, true)
+        if (canTurnBackward && curlDirection == null && !state.preparingSpread) {
+            if (!canAnimateTurn(CurlDirection.BACKWARD)) viewModel.previousPage()
+            else {
+                curlDirection = CurlDirection.BACKWARD
+                settleTurn(CurlDirection.BACKWARD, 0f, true)
+            }
         }
     }
 
@@ -262,8 +258,8 @@ fun ReaderScreen(
             .background(MaterialTheme.colorScheme.background),
     ) {
         when {
-            state.error != null -> ErrorView(state.error!!)
-            state.page == null -> LoadingView()
+            state.error != null -> ErrorView(state.error!!, viewModel::retry, onBack)
+            state.page == null -> LoadingView(onBack)
             else -> PageViewer(
                 state = state,
                 fitMode = fitMode,
@@ -283,6 +279,12 @@ fun ReaderScreen(
                 onToggleChrome = { chromeVisible = !chromeVisible },
                 onShowFullPage = viewModel::showFullPage,
             )
+        }
+
+        if ((state.preparingSpread || state.loading && state.page != null) && state.error == null) {
+            Surface(Modifier.align(Alignment.BottomCenter).padding(16.dp), color = MaterialTheme.colorScheme.surface) {
+                Text(if (state.preparingSpread) "Preparing two-page layout…" else "Opening page…", modifier = Modifier.padding(12.dp))
+            }
         }
 
         // Faint reticle brackets framing the viewport (comic identity), under the chrome.
@@ -1262,20 +1264,24 @@ private fun PageViewer(
 }
 
 @Composable
-private fun LoadingView() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+private fun LoadingView(onBack: () -> Unit) {
+    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center) {
         CircularProgressIndicator()
+        Text("Opening comic…", modifier = Modifier.padding(16.dp))
+        androidx.compose.material3.TextButton(onClick = onBack) { Text("Go back") }
     }
 }
 
 @Composable
-private fun ErrorView(message: String) {
-    Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-        Text(
-            text = message,
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodyLarge,
-        )
+private fun ErrorView(message: String, onRetry: () -> Unit, onBack: () -> Unit) {
+    Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center) {
+        Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyLarge)
+        Row {
+            androidx.compose.material3.TextButton(onClick = onRetry) { Text("Retry") }
+            androidx.compose.material3.TextButton(onClick = onBack) { Text("Go back") }
+        }
     }
 }
 

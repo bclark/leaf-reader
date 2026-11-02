@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import net.digitalbc.leafreader.data.archive.ComicArchive
+import net.digitalbc.leafreader.data.archive.PageSizeSource
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -24,6 +26,7 @@ class PageLoader(
     cacheBytes: Int = defaultCacheBytes(),
 ) {
     private val decodeMutex = Mutex()
+    private val dimensions = mutableMapOf<Int, IntArray>()
 
     private val cache = object : LruCache<Int, Bitmap>(cacheBytes) {
         override fun sizeOf(key: Int, value: Bitmap): Int = value.byteCount
@@ -52,23 +55,35 @@ class PageLoader(
     /** Decodes only the dimensions of page [index] without allocating the full bitmap. */
     suspend fun pageSize(index: Int): IntArray = withContext(Dispatchers.IO) {
         decodeMutex.withLock {
-            val bytes = archive.readPage(index)
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-            intArrayOf(opts.outWidth, opts.outHeight)
+            dimensions[index]?.let { return@withLock it }
+            val size = cache.get(index)?.let { intArrayOf(it.width, it.height) }
+                ?: (archive as? PageSizeSource)?.pageSize(index)
+                ?: run {
+                    val bytes = archive.readPage(index)
+                    val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                    intArrayOf(opts.outWidth, opts.outHeight)
+                }
+            check(size[0] > 0 && size[1] > 0) { "Page ${index + 1} is corrupt or unsupported" }
+            dimensions[index] = size
+            size
         }
     }
 
     fun evictAll() = cache.evictAll()
 
-    fun close() {
-        cache.evictAll()
-        runCatching { archive.close() }
+    suspend fun close(): Unit = withContext(Dispatchers.IO + NonCancellable) {
+        decodeMutex.withLock {
+            cache.evictAll()
+            runCatching { archive.close() }
+            Unit
+        }
     }
 
     private fun decodeSampled(bytes: ByteArray, maxDim: Int): Bitmap {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        check(bounds.outWidth > 0 && bounds.outHeight > 0) { "Page is corrupt or unsupported" }
 
         val opts = BitmapFactory.Options().apply {
             inSampleSize = computeInSampleSize(bounds.outWidth, bounds.outHeight, maxDim)

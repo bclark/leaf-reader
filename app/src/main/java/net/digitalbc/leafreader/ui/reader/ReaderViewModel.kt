@@ -10,6 +10,8 @@ import net.digitalbc.leafreader.data.library.LibraryRepository
 import net.digitalbc.leafreader.data.page.PageLoader
 import net.digitalbc.leafreader.detection.Panel
 import net.digitalbc.leafreader.detection.PanelSource
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -48,32 +50,59 @@ class ReaderViewModel(
     private var spreadEnabled = false
     private var navJob: Job? = null
 
-    init {
-        viewModelScope.launch { open() }
+    private val widePages = mutableSetOf<Int>()
+    private var sizesKnownThrough = 0
+    private var openJob: Job? = null
+    private var prefetchJob: Job? = null
+    private var openingWatchdog: Job? = null
+    private var lastRequestedPage: Int? = null
+
+    init { retry() }
+
+    fun retry() {
+        openJob?.cancel()
+        navJob?.cancel()
+        prefetchJob?.cancel()
+        openingWatchdog?.cancel()
+        pageLoader?.let { old -> CoroutineScope(Dispatchers.IO).launch { old.close() } }
+        pageLoader = null
+        _state.value = ReaderUiState()
+        widePages.clear()
+        sizesKnownThrough = 0
+        watchLoading()
+        openJob = viewModelScope.launch {
+            try { open() }
+            catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                openingWatchdog?.cancel()
+                _state.update { it.copy(loading = false, error = "Could not open this comic: ${t.message}") }
+            }
+        }
+    }
+
+    private fun watchLoading() {
+        openingWatchdog?.cancel()
+        openingWatchdog = viewModelScope.launch {
+            delay(30_000)
+            openJob?.cancel()
+            navJob?.cancel()
+            prefetchJob?.cancel()
+            _state.update { it.copy(loading = false, preparingSpread = false,
+                error = "This comic is taking too long to open. Retry or go back.") }
+        }
     }
 
     private suspend fun open() {
-        val comic = repository.getComic(comicId)
-        if (comic == null) {
-            _state.update { it.copy(loading = false, error = "Comic not found.") }
-            return
-        }
+        val comic = repository.getComic(comicId) ?: error("Comic not found")
         rightToLeft = comic.rightToLeft
-        val archive = try {
-            ComicArchiveFactory.open(File(comic.filePath))
-        } catch (t: Throwable) {
-            _state.update { it.copy(loading = false, error = "Could not open this comic: ${t.message}") }
-            return
+        val archive = withContext(Dispatchers.IO) {
+            ComicArchiveFactory.open(File(comic.filePath)).also {
+                if (it.pageCount == 0) { it.close(); error("This archive has no readable pages") }
+            }
         }
         pageLoader = PageLoader(archive)
-        _state.update {
-            it.copy(
-                title = comic.title,
-                pageCount = archive.pageCount,
-                rightToLeft = rightToLeft,
-            )
-        }
-        goToPage(comic.lastPage.coerceIn(0, (archive.pageCount - 1).coerceAtLeast(0)), comic.lastSlot)
+        _state.update { it.copy(title = comic.title, pageCount = archive.pageCount, rightToLeft = rightToLeft) }
+        goToPage((lastRequestedPage ?: comic.lastPage).coerceIn(0, archive.pageCount - 1), comic.lastSlot)
     }
 
     fun setSpreadEnabled(enabled: Boolean) {
@@ -86,7 +115,7 @@ class ReaderViewModel(
 
     fun next() {
         val s = _state.value
-        if (s.loading || s.error != null) return
+        if (s.loading || s.preparingSpread || s.error != null) return
         if (ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) {
             nextPage()
             return
@@ -101,7 +130,7 @@ class ReaderViewModel(
 
     fun previous() {
         val s = _state.value
-        if (s.loading || s.error != null) return
+        if (s.loading || s.preparingSpread || s.error != null) return
         if (ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) {
             previousPage()
             return
@@ -115,7 +144,7 @@ class ReaderViewModel(
     /** Turn to the next whole page (skips remaining panels), landing on its full-page view. */
     fun nextPage() {
         val s = _state.value
-        if (s.loading || s.error != null) return
+        if (s.loading || s.preparingSpread || s.error != null) return
         val step = if (s.isSpread) 2 else 1
         val target = s.pageIndex + step
         if (target < s.pageCount) goToPage(target, targetSlot = 0)
@@ -124,7 +153,7 @@ class ReaderViewModel(
     /** Turn to the previous whole page, landing on its full-page view. */
     fun previousPage() {
         val s = _state.value
-        if (s.loading || s.error != null) return
+        if (s.loading || s.preparingSpread || s.error != null) return
         if (s.pageIndex <= 0) return
         goToPage(s.previousSpread?.first ?: s.pageIndex - 1, targetSlot = 0)
     }
@@ -132,7 +161,7 @@ class ReaderViewModel(
     /** Zoom back out to the whole current page (full-page view). */
     fun showFullPage() {
         val s = _state.value
-        if (s.loading || s.error != null) return
+        if (s.loading || s.preparingSpread || s.error != null) return
         if (s.slot != 0) setSlot(0)
     }
 
@@ -175,19 +204,24 @@ class ReaderViewModel(
     private fun goToPage(page: Int, targetSlot: Int) {
         val loader = pageLoader ?: return
         navJob?.cancel()
+        prefetchJob?.cancel()
+        lastRequestedPage = page
+        watchLoading()
         val isExperiment = ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING
 
         navJob = viewModelScope.launch {
-            if (_state.value.page == null) {
-                _state.update { it.copy(loading = true, error = null) }
-            }
+            _state.update { it.copy(loading = true, error = null) }
             try {
-                val spread = resolveSpread(page) ?: return@launch
+                // Publish the requested page before resolving spread metadata or decoding neighbors.
+                val requested = loader.getCachedPage(page) ?: loader.loadPage(page)
+                if (_state.value.page == null) {
+                    _state.update { it.copy(loading = false, pageIndex = page, readingPageIndex = page,
+                        page = requested, preparingSpread = spreadEnabled, error = null) }
+                }
+                val spread = resolveSpread(page) ?: error("Page ${page + 1} is outside this comic")
                 val resolvedPage = spread.first
                 val bitmap = loader.getCachedPage(resolvedPage) ?: loader.loadPage(resolvedPage)
                 val secondBitmap = spread.second?.let { loader.getCachedPage(it) ?: loader.loadPage(it) }
-                val previous = resolveSpread(resolvedPage - 1)
-                val next = resolveSpread(spread.after)
                 val cachedPanels = if (isExperiment) listOf(Panel.FULL_PAGE) else panelCache[resolvedPage]
                 val initialPanels = cachedPanels ?: listOf(Panel.FULL_PAGE)
                 fun slotFor(panels: List<Panel>) = if (isExperiment) 0 else when (targetSlot) {
@@ -197,32 +231,51 @@ class ReaderViewModel(
                 _state.update {
                     it.copy(loading = false, detecting = !isExperiment && cachedPanels == null,
                         pageIndex = resolvedPage, readingPageIndex = page, page = bitmap, secondPage = secondBitmap,
-                        isSpread = secondBitmap != null, previousSpread = previous, nextSpread = next,
+                        preparingSpread = false, adjacentPages = emptyMap(),
+                        isSpread = secondBitmap != null, previousSpread = null, nextSpread = null,
                         panels = initialPanels, slot = slotFor(initialPanels), error = null)
                 }
+                openingWatchdog?.cancel()
                 val panels = panelsFor(resolvedPage, bitmap)
                 _state.update { it.copy(detecting = false, panels = panels, slot = slotFor(panels)) }
                 persistProgress()
-                for (neighbor in listOfNotNull(previous, next)) {
-                    prefetch(neighbor.first)
-                    neighbor.second?.let(::prefetch)
+                prefetchJob = viewModelScope.launch {
+                    suspend fun neighbor(index: Int): ReaderSpread? {
+                        if (index !in 0 until loader.pageCount) return null
+                        return try { resolveSpread(index) }
+                        catch (t: Throwable) {
+                            if (t is CancellationException) throw t
+                            ReaderSpread(index) // A broken neighbor must not hide the readable current page.
+                        }
+                    }
+                    val next = neighbor(spread.after)
+                    val previous = neighbor(resolvedPage - 1)
+                    _state.update { it.copy(nextSpread = next, previousSpread = previous) }
+                    for (index in listOfNotNull(next?.first, next?.second, previous?.first, previous?.second).distinct()) {
+                        try {
+                            val image = loader.loadPage(index)
+                            _state.update { it.copy(adjacentPages = it.adjacentPages + (index to image)) }
+                            if (!isExperiment) panelsFor(index, image)
+                        } catch (t: Throwable) {
+                            if (t is CancellationException) throw t
+                            // Opening the neighbor explicitly will present its error and Retry action.
+                        }
+                    }
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
+                openingWatchdog?.cancel()
                 _state.update {
-                    it.copy(loading = false, detecting = false, error = "Failed to load page ${page + 1}: ${t.message}")
+                    it.copy(loading = false, preparingSpread = false, detecting = false, error = "Failed to load page ${page + 1}: ${t.message}")
                 }
             }
         }
     }
 
-    private val widePages = mutableSetOf<Int>()
-    private var sizesKnownThrough = 0
-
     private suspend fun resolveSpread(page: Int): ReaderSpread? {
         val loader = pageLoader ?: return null
         if (page !in 0 until loader.pageCount) return null
-        if (!spreadEnabled) return ReaderSpread(page)
+        if (!spreadEnabled || page == 0) return ReaderSpread(page)
         // Read only bounds and retain the prefix so navigation never depends on bitmap-cache residency.
         while (sizesKnownThrough < minOf(page + 1, loader.pageCount - 1)) {
             val index = sizesKnownThrough + 1
@@ -244,22 +297,6 @@ class ReaderViewModel(
         return panels
     }
 
-    private fun prefetch(page: Int) {
-        val loader = pageLoader ?: return
-        if (page < 0 || page >= _state.value.pageCount) return
-        if (ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) {
-            viewModelScope.launch { runCatching { loader.loadPage(page) } }
-            return
-        }
-        if (panelCache.containsKey(page)) return
-        viewModelScope.launch {
-            runCatching {
-                val bmp = loader.loadPage(page)
-                panelsFor(page, bmp)
-            }
-        }
-    }
-
     private fun persistProgress() {
         val s = _state.value
         val slotToSave = if (ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) 0 else s.slot
@@ -267,7 +304,8 @@ class ReaderViewModel(
     }
 
     override fun onCleared() {
-        pageLoader?.close()
+        openingWatchdog?.cancel()
+        pageLoader?.let { loader -> CoroutineScope(Dispatchers.IO).launch { loader.close() } }
         pageLoader = null
     }
 
@@ -291,6 +329,8 @@ data class ReaderUiState(
     val title: String = "",
     val loading: Boolean = true,
     val detecting: Boolean = false,
+    val preparingSpread: Boolean = false,
+    val adjacentPages: Map<Int, Bitmap> = emptyMap(),
     val pageIndex: Int = 0,
     /** Exact document page retained when a layout temporarily groups it with its partner. */
     val readingPageIndex: Int = 0,
