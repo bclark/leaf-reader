@@ -51,6 +51,11 @@ class AppSettings(context: Context) {
         }
         set(value) { prefs.edit().putString(KEY_PAGE_FIT_MODE, value.name).apply() }
 
+    /** When true and in landscape orientation, two pages are displayed side-by-side (except cover & splash pages). Default false. */
+    var landscapeSpread: Boolean
+        get() = prefs.getBoolean(KEY_LANDSCAPE_SPREAD, false)
+        set(value) { prefs.edit().putBoolean(KEY_LANDSCAPE_SPREAD, value).apply() }
+
     /** Number of comic cover columns on the library screen. */
     var libraryColumns: Int
         get() = prefs.getInt(KEY_LIBRARY_COLUMNS, 2)
@@ -80,6 +85,7 @@ class AppSettings(context: Context) {
         const val KEY_AMOLED = "amoled_theme"
         const val KEY_PAGE_SLIDE = "page_slide_enabled"
         const val KEY_PAGE_FIT_MODE = "page_fit_mode"
+        const val KEY_LANDSCAPE_SPREAD = "landscape_spread"
         const val KEY_LIBRARY_COLUMNS = "library_columns"
         const val KEY_SMB_HOST = "smb_host"
         const val KEY_SMB_SHARE = "smb_share"

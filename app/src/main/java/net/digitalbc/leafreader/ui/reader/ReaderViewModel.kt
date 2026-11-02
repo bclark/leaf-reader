@@ -44,6 +44,7 @@ class ReaderViewModel(
     private val panelCache = HashMap<Int, List<Panel>>()
 
     private var rightToLeft = false
+    private var landscapeSpread = false
     private var navJob: Job? = null
 
     init {
@@ -72,6 +73,14 @@ class ReaderViewModel(
             )
         }
         goToPage(comic.lastPage.coerceIn(0, (archive.pageCount - 1).coerceAtLeast(0)), comic.lastSlot)
+    }
+
+    fun setLandscapeSpread(enabled: Boolean) {
+        if (landscapeSpread == enabled) return
+        landscapeSpread = enabled
+        if (_state.value.pageCount > 0 && _state.value.page != null) {
+            goToPage(_state.value.pageIndex, targetSlot = 0)
+        }
     }
 
     fun next() {
@@ -106,14 +115,31 @@ class ReaderViewModel(
     fun nextPage() {
         val s = _state.value
         if (s.loading || s.error != null) return
-        if (s.pageIndex < s.pageCount - 1) goToPage(s.pageIndex + 1, targetSlot = 0)
+        val step = if (s.isSpread) 2 else 1
+        val target = s.pageIndex + step
+        if (target < s.pageCount) goToPage(target, targetSlot = 0)
     }
 
     /** Turn to the previous whole page, landing on its full-page view. */
     fun previousPage() {
         val s = _state.value
         if (s.loading || s.error != null) return
-        if (s.pageIndex > 0) goToPage(s.pageIndex - 1, targetSlot = 0)
+        if (s.pageIndex <= 0) return
+        val loader = pageLoader
+        if (landscapeSpread && loader != null && s.pageIndex > 1) {
+            val prevPageIndex = s.pageIndex - 1
+            val prevIsWide = loader.getCachedPage(prevPageIndex)?.let { it.width > it.height } ?: false
+            val target = if (prevIsWide) {
+                prevPageIndex
+            } else if (s.pageIndex % 2 == 1) {
+                (s.pageIndex - 2).coerceAtLeast(0)
+            } else {
+                prevPageIndex
+            }
+            goToPage(target, targetSlot = 0)
+        } else {
+            goToPage(s.pageIndex - 1, targetSlot = 0)
+        }
     }
 
     /** Zoom back out to the whole current page (full-page view). */
@@ -163,8 +189,31 @@ class ReaderViewModel(
         val loader = pageLoader ?: return
         navJob?.cancel()
         val isExperiment = ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING
-        val cachedPage = loader.getCachedPage(page)
-        val cachedPanels = if (isExperiment) listOf(Panel.FULL_PAGE) else panelCache[page]
+
+        // In landscape spread mode, page 0 is standalone (cover); odd pages (1, 3, 5...) start spreads.
+        // If an even page > 0 is requested, snap to page - 1 if page - 1 is not a wide scan.
+        val resolvedPage = if (landscapeSpread && page > 0 && page % 2 == 0) {
+            val candCached = loader.getCachedPage(page - 1)
+            val candIsWide = candCached?.let { it.width > it.height } ?: false
+            if (!candIsWide) page - 1 else page
+        } else {
+            page
+        }
+
+        val cachedPage = loader.getCachedPage(resolvedPage)
+        val cachedPanels = if (isExperiment) listOf(Panel.FULL_PAGE) else panelCache[resolvedPage]
+        var cachedSecond: Bitmap? = null
+        var cachedSpread = false
+        if (landscapeSpread && resolvedPage > 0 && resolvedPage + 1 < _state.value.pageCount) {
+            if (cachedPage != null && cachedPage.width <= cachedPage.height) {
+                val partner = loader.getCachedPage(resolvedPage + 1)
+                if (partner != null && partner.width <= partner.height) {
+                    cachedSecond = partner
+                    cachedSpread = true
+                }
+            }
+        }
+
         if (cachedPage != null) {
             val panels = cachedPanels ?: listOf(Panel.FULL_PAGE)
             val resolvedSlot = if (isExperiment) 0 else when (targetSlot) {
@@ -175,8 +224,10 @@ class ReaderViewModel(
                 it.copy(
                     loading = false,
                     detecting = !isExperiment && cachedPanels == null,
-                    pageIndex = page,
+                    pageIndex = resolvedPage,
                     page = cachedPage,
+                    secondPage = cachedSecond,
+                    isSpread = cachedSpread,
                     panels = panels,
                     slot = resolvedSlot,
                     error = null,
@@ -188,7 +239,18 @@ class ReaderViewModel(
                 _state.update { it.copy(loading = it.page == null, detecting = !isExperiment, error = null) }
             }
             try {
-                val bitmap = cachedPage ?: loader.loadPage(page)
+                val bitmap = cachedPage ?: loader.loadPage(resolvedPage)
+                var secondBitmap: Bitmap? = null
+                var isSpread = false
+                val isWide = bitmap.width > bitmap.height
+                if (landscapeSpread && resolvedPage > 0 && !isWide && resolvedPage + 1 < _state.value.pageCount) {
+                    val partner = loader.getCachedPage(resolvedPage + 1) ?: loader.loadPage(resolvedPage + 1)
+                    if (partner.width <= partner.height) {
+                        secondBitmap = partner
+                        isSpread = true
+                    }
+                }
+
                 if (cachedPage == null) {
                     val initialPanels = cachedPanels ?: listOf(Panel.FULL_PAGE)
                     val initialSlot = if (isExperiment) 0 else when (targetSlot) {
@@ -199,15 +261,17 @@ class ReaderViewModel(
                         it.copy(
                             loading = false,
                             detecting = !isExperiment && cachedPanels == null,
-                            pageIndex = page,
+                            pageIndex = resolvedPage,
                             page = bitmap,
+                            secondPage = secondBitmap,
+                            isSpread = isSpread,
                             panels = initialPanels,
                             slot = initialSlot,
                             error = null,
                         )
                     }
                 }
-                val panels = panelsFor(page, bitmap)
+                val panels = panelsFor(resolvedPage, bitmap)
                 val resolvedSlot = if (isExperiment) 0 else when (targetSlot) {
                     ENTER_AT_OUTRO -> panels.size + 1
                     else -> targetSlot.coerceIn(0, panels.size + 1)
@@ -216,19 +280,26 @@ class ReaderViewModel(
                     it.copy(
                         loading = false,
                         detecting = false,
-                        pageIndex = page,
+                        pageIndex = resolvedPage,
                         page = bitmap,
+                        secondPage = secondBitmap,
+                        isSpread = isSpread,
                         panels = panels,
                         slot = resolvedSlot,
                         error = null,
                     )
                 }
                 persistProgress()
-                prefetch(page + 1)
-                if (page > 0) prefetch(page - 1)
+                if (isSpread) {
+                    prefetch(resolvedPage + 2)
+                    prefetch(resolvedPage + 3)
+                } else {
+                    prefetch(resolvedPage + 1)
+                }
+                if (resolvedPage > 0) prefetch(resolvedPage - 1)
             } catch (t: Throwable) {
                 _state.update {
-                    it.copy(loading = false, detecting = false, error = "Failed to load page ${page + 1}: ${t.message}")
+                    it.copy(loading = false, detecting = false, error = "Failed to load page ${resolvedPage + 1}: ${t.message}")
                 }
             }
         }
@@ -294,6 +365,8 @@ data class ReaderUiState(
     val pageIndex: Int = 0,
     val pageCount: Int = 0,
     val page: Bitmap? = null,
+    val secondPage: Bitmap? = null,
+    val isSpread: Boolean = false,
     val panels: List<Panel> = listOf(Panel.FULL_PAGE),
     val slot: Int = 0,
     val rightToLeft: Boolean = false,
@@ -303,7 +376,7 @@ data class ReaderUiState(
     val currentCamera: Panel
         get() = if (slot in 1..panels.size) panels[slot - 1] else Panel.FULL_PAGE
 
-    val isFullPageView: Boolean get() = slot !in 1..panels.size
+    val isFullPageView: Boolean get() = isSpread || slot !in 1..panels.size
 
     /** 1-based panel number for display, or null when showing the whole page. */
     val panelLabel: Int? get() = if (slot in 1..panels.size) slot else null

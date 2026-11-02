@@ -93,6 +93,8 @@ fun MenuScreen(
     onSetPageSlideEnabled: (Boolean) -> Unit,
     pageFitMode: net.digitalbc.leafreader.ui.reader.PageFitMode = net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_PAGE,
     onSetPageFitMode: (net.digitalbc.leafreader.ui.reader.PageFitMode) -> Unit = {},
+    landscapeSpread: Boolean = false,
+    onSetLandscapeSpread: (Boolean) -> Unit = {},
     settings: AppSettings,
     onBack: () -> Unit,
 ) {
@@ -324,6 +326,13 @@ fun MenuScreen(
                         }
                     }
                 }
+
+                ToggleRow(
+                    title = "Two-Page Spread (Landscape)",
+                    subtitle = "Display two pages side-by-side in landscape orientation (cover and wide splash pages remain single).",
+                    checked = landscapeSpread,
+                    onCheckedChange = onSetLandscapeSpread,
+                )
             }
             Spacer(Modifier.size(32.dp))
 

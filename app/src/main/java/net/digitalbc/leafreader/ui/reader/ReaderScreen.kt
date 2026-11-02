@@ -130,10 +130,19 @@ fun ReaderScreen(
     onTogglePageSlideEnabled: () -> Unit = {},
     fitMode: PageFitMode = PageFitMode.FIT_PAGE,
     onSetFitMode: (PageFitMode) -> Unit = {},
+    landscapeSpread: Boolean = false,
+    onToggleLandscapeSpread: () -> Unit = {},
     onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var chromeVisible by rememberSaveable { mutableStateOf(false) }
+
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val spreadActive = isLandscape && landscapeSpread
+    LaunchedEffect(spreadActive) {
+        viewModel.setLandscapeSpread(spreadActive)
+    }
 
     // Go fully immersive (hide the status/nav bars, incl. the battery/clock icons) while reading;
     // bring the bars back with the chrome, and restore them when leaving the reader.
@@ -237,6 +246,12 @@ fun ReaderScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    if (isLandscape) {
+                        SpreadChip(
+                            landscapeSpread = landscapeSpread,
+                            onClick = onToggleLandscapeSpread,
+                        )
+                    }
                     FitModeChip(
                         fitMode = fitMode,
                         onClick = {
@@ -259,6 +274,7 @@ fun ReaderScreen(
             PageScrubber(
                 pageIndex = state.pageIndex,
                 pageCount = state.pageCount,
+                isSpread = state.isSpread,
                 rightToLeft = state.rightToLeft,
                 pageSlideEnabled = pageSlideEnabled,
                 onTogglePageSlideEnabled = onTogglePageSlideEnabled,
@@ -274,6 +290,7 @@ fun ReaderScreen(
 private fun PageScrubber(
     pageIndex: Int,
     pageCount: Int,
+    isSpread: Boolean,
     rightToLeft: Boolean,
     pageSlideEnabled: Boolean,
     onTogglePageSlideEnabled: () -> Unit,
@@ -285,6 +302,13 @@ private fun PageScrubber(
     var scrub by remember { mutableFloatStateOf(pageIndex.toFloat()) }
     LaunchedEffect(pageIndex) { if (!scrubbing) scrub = pageIndex.toFloat() }
     val shownPage = (if (scrubbing) scrub.roundToInt() else pageIndex) + 1
+    val shownPageLabel = if (isSpread && !scrubbing && pageIndex + 1 < pageCount) {
+        "${pageIndex + 1}-${pageIndex + 2}"
+    } else {
+        "$shownPage"
+    }
+    val canGoPrev = pageIndex > 0
+    val canGoNext = if (isSpread) pageIndex + 1 < pageCount - 1 else pageIndex < pageCount - 1
 
     Column(
         modifier = Modifier
@@ -325,7 +349,7 @@ private fun PageScrubber(
                     }
                 }
             }
-            PageCoin(page = shownPage, total = pageCount)
+            PageCoin(pageLabel = shownPageLabel, total = pageCount)
         }
         Spacer(Modifier.size(4.dp))
         Row(
@@ -335,13 +359,13 @@ private fun PageScrubber(
         ) {
             IconButton(
                 onClick = onPrevPage,
-                enabled = pageIndex > 0,
+                enabled = canGoPrev,
                 modifier = Modifier.size(44.dp),
             ) {
                 Icon(
                     imageVector = if (rightToLeft) Icons.AutoMirrored.Filled.NavigateNext else Icons.AutoMirrored.Filled.NavigateBefore,
-                    contentDescription = "Previous page",
-                    tint = if (pageIndex > 0) Cream else CreamMuted.copy(alpha = 0.35f),
+                    contentDescription = if (isSpread) "Previous pages" else "Previous page",
+                    tint = if (canGoPrev) Cream else CreamMuted.copy(alpha = 0.35f),
                 )
             }
             Slider(
@@ -361,13 +385,13 @@ private fun PageScrubber(
             )
             IconButton(
                 onClick = onNextPage,
-                enabled = pageIndex < pageCount - 1,
+                enabled = canGoNext,
                 modifier = Modifier.size(44.dp),
             ) {
                 Icon(
                     imageVector = if (rightToLeft) Icons.AutoMirrored.Filled.NavigateBefore else Icons.AutoMirrored.Filled.NavigateNext,
-                    contentDescription = "Next page",
-                    tint = if (pageIndex < pageCount - 1) Cream else CreamMuted.copy(alpha = 0.35f),
+                    contentDescription = if (isSpread) "Next pages" else "Next page",
+                    tint = if (canGoNext) Cream else CreamMuted.copy(alpha = 0.35f),
                 )
             }
         }
@@ -883,9 +907,25 @@ private fun PageViewer(
     onShowFullPage: () -> Unit,
 ) {
     val bitmap = state.page ?: return
-    val image = remember(bitmap) { bitmap.asImageBitmap() }
     val rtl = state.rightToLeft
     val scope = rememberCoroutineScope()
+    val secondPage = state.secondPage
+    val isSpread = state.isSpread && secondPage != null
+
+    val leftBitmap = if (isSpread && secondPage != null) {
+        if (rtl) secondPage else bitmap
+    } else {
+        bitmap
+    }
+    val rightBitmap = if (isSpread && secondPage != null) {
+        if (rtl) bitmap else secondPage
+    } else {
+        bitmap
+    }
+    val leftImage = remember(leftBitmap) { leftBitmap.asImageBitmap() }
+    val rightImage = remember(rightBitmap) { rightBitmap.asImageBitmap() }
+    val image = leftImage
+
     // The framed view counts as "full page" at the intro/outro slots; a flick only turns pages there.
     val isFullPage by rememberUpdatedState(state.isFullPageView)
 
@@ -900,13 +940,11 @@ private fun PageViewer(
         pageAlpha.animateTo(1f, tween(280))
     }
 
-    // Free pinch-to-zoom / pan, reset whenever the framed view or fit mode changes. The comic floats over the
-    // background: it can be moved freely in any direction (even past the framed region), bounded only
-    // so a grabbable sliver always stays on screen.
+    // Free pinch-to-zoom / pan, reset whenever the framed view, fit mode, or spread changes.
     var userScale by remember { mutableFloatStateOf(1f) }
     var userPanX by remember { mutableFloatStateOf(0f) }
     var userPanY by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(state.pageIndex, state.slot, fitMode) {
+    LaunchedEffect(state.pageIndex, state.slot, fitMode, isSpread) {
         userScale = 1f; userPanX = 0f; userPanY = 0f
     }
 
@@ -932,7 +970,7 @@ private fun PageViewer(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(rtl, fitMode) {
+            .pointerInput(rtl, fitMode, isSpread) {
                 awaitEachGesture {
                     val down = awaitFirstDown()
                     var pan = Offset.Zero
@@ -958,29 +996,55 @@ private fun PageViewer(
                         if (pastSlop) {
                             val newScale = (userScale * zoomChange).coerceIn(1f, 5f)
                             userScale = newScale
-                            val draw = computePageDraw(
-                                camera = camera.value,
-                                bitmapW = image.width,
-                                bitmapH = image.height,
-                                containerW = size.width.toFloat(),
-                                containerH = size.height.toFloat(),
-                                fitMode = fitMode,
-                            )
                             val cw = size.width.toFloat()
                             val ch = size.height.toFloat()
-                            val effectiveW = draw.scaledWidth * newScale
-                            val effectiveH = draw.scaledHeight * newScale
-                            val baseLeft = cw / 2f + (draw.left - cw / 2f) * newScale
-                            val baseTop = ch / 2f + (draw.top - ch / 2f) * newScale
-                            userPanX = if (effectiveW > cw) {
-                                clampPan(userPanX + panChange.x, baseLeft, effectiveW, cw)
+                            if (isSpread) {
+                                val spread = computeSpreadDraw(
+                                    page1W = leftBitmap.width,
+                                    page1H = leftBitmap.height,
+                                    page2W = rightBitmap.width,
+                                    page2H = rightBitmap.height,
+                                    containerW = cw,
+                                    containerH = ch,
+                                    fitMode = fitMode,
+                                )
+                                val effectiveW = spread.totalWidth * newScale
+                                val effectiveH = spread.totalHeight * newScale
+                                val baseLeft = cw / 2f + (spread.boundLeft - cw / 2f) * newScale
+                                val baseTop = ch / 2f + (spread.boundTop - ch / 2f) * newScale
+                                userPanX = if (effectiveW > cw) {
+                                    clampPan(userPanX + panChange.x, baseLeft, effectiveW, cw)
+                                } else {
+                                    0f
+                                }
+                                userPanY = if (effectiveH > ch) {
+                                    clampPan(userPanY + panChange.y, baseTop, effectiveH, ch)
+                                } else {
+                                    0f
+                                }
                             } else {
-                                0f
-                            }
-                            userPanY = if (effectiveH > ch) {
-                                clampPan(userPanY + panChange.y, baseTop, effectiveH, ch)
-                            } else {
-                                0f
+                                val draw = computePageDraw(
+                                    camera = camera.value,
+                                    bitmapW = image.width,
+                                    bitmapH = image.height,
+                                    containerW = cw,
+                                    containerH = ch,
+                                    fitMode = fitMode,
+                                )
+                                val effectiveW = draw.scaledWidth * newScale
+                                val effectiveH = draw.scaledHeight * newScale
+                                val baseLeft = cw / 2f + (draw.left - cw / 2f) * newScale
+                                val baseTop = ch / 2f + (draw.top - ch / 2f) * newScale
+                                userPanX = if (effectiveW > cw) {
+                                    clampPan(userPanX + panChange.x, baseLeft, effectiveW, cw)
+                                } else {
+                                    0f
+                                }
+                                userPanY = if (effectiveH > ch) {
+                                    clampPan(userPanY + panChange.y, baseTop, effectiveH, ch)
+                                } else {
+                                    0f
+                                }
                             }
                             event.changes.forEach { if (it.positionChanged()) it.consume() }
                         }
@@ -1031,27 +1095,63 @@ private fun PageViewer(
             },
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val draw = computePageDraw(
-                camera = camera.value,
-                bitmapW = image.width,
-                bitmapH = image.height,
-                containerW = size.width,
-                containerH = size.height,
-                fitMode = fitMode,
-            )
-            val cx = size.width / 2f
-            val cy = size.height / 2f
-            val left = cx + (draw.left - cx) * userScale + userPanX
-            val top = cy + (draw.top - cy) * userScale + userPanY
-            val w = draw.scaledWidth * userScale
-            val h = draw.scaledHeight * userScale
+            if (isSpread) {
+                val spread = computeSpreadDraw(
+                    page1W = leftBitmap.width,
+                    page1H = leftBitmap.height,
+                    page2W = rightBitmap.width,
+                    page2H = rightBitmap.height,
+                    containerW = size.width,
+                    containerH = size.height,
+                    fitMode = fitMode,
+                )
+                val cx = size.width / 2f
+                val cy = size.height / 2f
+                val l1 = cx + (spread.left1 - cx) * userScale + userPanX
+                val t1 = cy + (spread.top1 - cy) * userScale + userPanY
+                val w1 = spread.width1 * userScale
+                val h1 = spread.height1 * userScale
 
-            drawImage(
-                image = image,
-                dstOffset = IntOffset(left.roundToInt(), top.roundToInt()),
-                dstSize = IntSize(w.roundToInt(), h.roundToInt()),
-                alpha = pageAlpha.value,
-            )
+                val l2 = cx + (spread.left2 - cx) * userScale + userPanX
+                val t2 = cy + (spread.top2 - cy) * userScale + userPanY
+                val w2 = spread.width2 * userScale
+                val h2 = spread.height2 * userScale
+
+                drawImage(
+                    image = leftImage,
+                    dstOffset = IntOffset(l1.roundToInt(), t1.roundToInt()),
+                    dstSize = IntSize(w1.roundToInt(), h1.roundToInt()),
+                    alpha = pageAlpha.value,
+                )
+                drawImage(
+                    image = rightImage,
+                    dstOffset = IntOffset(l2.roundToInt(), t2.roundToInt()),
+                    dstSize = IntSize(w2.roundToInt(), h2.roundToInt()),
+                    alpha = pageAlpha.value,
+                )
+            } else {
+                val draw = computePageDraw(
+                    camera = camera.value,
+                    bitmapW = image.width,
+                    bitmapH = image.height,
+                    containerW = size.width,
+                    containerH = size.height,
+                    fitMode = fitMode,
+                )
+                val cx = size.width / 2f
+                val cy = size.height / 2f
+                val left = cx + (draw.left - cx) * userScale + userPanX
+                val top = cy + (draw.top - cy) * userScale + userPanY
+                val w = draw.scaledWidth * userScale
+                val h = draw.scaledHeight * userScale
+
+                drawImage(
+                    image = image,
+                    dstOffset = IntOffset(left.roundToInt(), top.roundToInt()),
+                    dstSize = IntSize(w.roundToInt(), h.roundToInt()),
+                    alpha = pageAlpha.value,
+                )
+            }
         }
     }
 }
@@ -1147,8 +1247,41 @@ private fun DirectionChip(rightToLeft: Boolean, onClick: () -> Unit) {
     }
 }
 
+/** Mode control that toggles two-page spread in landscape orientation. */
+@Composable
+private fun SpreadChip(landscapeSpread: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(Cream.copy(alpha = 0.12f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.MenuBook,
+            contentDescription = "Toggle two-page spread",
+            tint = Cream,
+            modifier = Modifier.size(15.dp),
+        )
+        Text(
+            if (landscapeSpread) "SPREAD" else "SINGLE",
+            fontFamily = Archivo,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp,
+            letterSpacing = 1.sp,
+            color = Cream,
+        )
+    }
+}
+
 private fun pageStatus(state: ReaderUiState): String {
-    val page = "Page ${state.pageIndex + 1}/${state.pageCount}"
+    val page = if (state.isSpread) {
+        "Pages ${state.pageIndex + 1}-${state.pageIndex + 2}/${state.pageCount}"
+    } else {
+        "Page ${state.pageIndex + 1}/${state.pageCount}"
+    }
     if (net.digitalbc.leafreader.ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) return page
     val panel = state.panelLabel
     val panelText = when {

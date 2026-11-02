@@ -189,6 +189,22 @@ fun PageCoin(
     modifier: Modifier = Modifier,
     size: Dp = Dp.Unspecified,
 ) {
+    PageCoin(
+        pageLabel = "$page",
+        total = total,
+        modifier = modifier,
+        size = size,
+    )
+}
+
+/** Dog-eared page-curl bookmark badge showing current page label (e.g. "1" or "2-3") and total page count horizontally. */
+@Composable
+fun PageCoin(
+    pageLabel: String,
+    total: Int,
+    modifier: Modifier = Modifier,
+    size: Dp = Dp.Unspecified,
+) {
     val cornerPx = with(androidx.compose.ui.platform.LocalDensity.current) { 10.dp.toPx() }
     val shadowOffsetPx = with(androidx.compose.ui.platform.LocalDensity.current) { 2.5.dp.toPx() }
     val strokeWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) { 2.dp.toPx() }
@@ -252,7 +268,7 @@ fun PageCoin(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                text = "$page",
+                text = pageLabel,
                 fontFamily = Archivo,
                 fontWeight = FontWeight.Medium,
                 fontSize = 15.sp,

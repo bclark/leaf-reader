@@ -67,4 +67,13 @@ class ComicReaderApp : Application() {
         settings.pageFitMode = mode
         _pageFitMode.value = mode
     }
+
+    /** Process-wide reactive flag for optional two-page spread in landscape orientation. */
+    private val _landscapeSpread by lazy { MutableStateFlow(settings.landscapeSpread) }
+    val landscapeSpread: StateFlow<Boolean> by lazy { _landscapeSpread.asStateFlow() }
+
+    fun setLandscapeSpread(enabled: Boolean) {
+        settings.landscapeSpread = enabled
+        _landscapeSpread.value = enabled
+    }
 }

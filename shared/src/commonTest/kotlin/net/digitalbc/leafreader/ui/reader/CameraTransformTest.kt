@@ -94,6 +94,34 @@ class CameraTransformTest {
     }
 
     @Test
+    fun computeSpreadDrawPlacesPagesSideBySideSeamlessly() {
+        // Two 1000x1500 pages in a 2000x1000 landscape container, fill = 1f
+        val spread = computeSpreadDraw(
+            page1W = 1000,
+            page1H = 1500,
+            page2W = 1000,
+            page2H = 1500,
+            containerW = 2000f,
+            containerH = 1000f,
+            fill = 1f,
+            fitMode = PageFitMode.FIT_PAGE,
+        )
+        // Target height = 1500. Total norm width = 2000.
+        // Scale = min(2000/2000, 1000/1500) = 2/3.
+        // Scaled height = 1000. Scaled W1 = 666.67, Scaled W2 = 666.67.
+        // Total W = 1333.33. Centered in 2000 -> boundLeft = (2000 - 1333.33) / 2 = 333.33.
+        assertNear(1000f, spread.height1)
+        assertNear(1000f, spread.height2)
+        assertNear(666.667f, spread.width1)
+        assertNear(666.667f, spread.width2)
+        assertNear(333.333f, spread.left1)
+        assertNear(333.333f + 666.667f, spread.left2) // touching seamlessly
+        assertNear(spread.left1 + spread.width1, spread.left2)
+        assertNear(0f, spread.top1)
+        assertNear(0f, spread.top2)
+    }
+
+    @Test
     fun lerpPanelInterpolatesLinearly() {
         val from = Panel(0f, 0f, 1f, 1f)
         val to = Panel(0.2f, 0.4f, 0.6f, 0.8f)
