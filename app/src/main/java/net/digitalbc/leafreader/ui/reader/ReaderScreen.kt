@@ -29,7 +29,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.Box
@@ -144,6 +143,63 @@ fun ReaderScreen(
         viewModel.setLandscapeSpread(spreadActive)
     }
 
+    val pageCount = state.pageCount.coerceAtLeast(1)
+    val pageIndex = state.pageIndex.coerceIn(0, pageCount - 1)
+    val rtl = state.rightToLeft
+    val isSpread = state.isSpread && state.secondPage != null
+    val scope = rememberCoroutineScope()
+
+    val nextBitmap by produceState<Bitmap?>(
+        initialValue = viewModel.getCachedPageBitmap(pageIndex + 1),
+        key1 = pageIndex,
+    ) {
+        if (pageIndex < pageCount - 1) {
+            value = viewModel.getCachedPageBitmap(pageIndex + 1) ?: viewModel.loadPageBitmap(pageIndex + 1)
+        }
+    }
+    val prevBitmap by produceState<Bitmap?>(
+        initialValue = viewModel.getCachedPageBitmap(pageIndex - 1),
+        key1 = pageIndex,
+    ) {
+        if (pageIndex > 0) {
+            value = viewModel.getCachedPageBitmap(pageIndex - 1) ?: viewModel.loadPageBitmap(pageIndex - 1)
+        }
+    }
+
+    var curlDirection by remember { mutableStateOf<CurlDirection?>(null) }
+    var curlProgress by remember { mutableFloatStateOf(0f) }
+
+    val canTurnForward = if (isSpread) pageIndex + 1 < pageCount - 1 else pageIndex < pageCount - 1
+    val canTurnBackward = pageIndex > 0
+
+    val turnForward: () -> Unit = {
+        if (canTurnForward && curlDirection == null) {
+            curlDirection = CurlDirection.FORWARD
+            scope.launch {
+                animate(0f, 1f, animationSpec = tween(280, easing = FastOutSlowInEasing)) { value, _ ->
+                    curlProgress = value
+                }
+                viewModel.nextPage()
+                curlProgress = 0f
+                curlDirection = null
+            }
+        }
+    }
+
+    val turnBackward: () -> Unit = {
+        if (canTurnBackward && curlDirection == null) {
+            curlDirection = CurlDirection.BACKWARD
+            scope.launch {
+                animate(0f, 1f, animationSpec = tween(280, easing = FastOutSlowInEasing)) { value, _ ->
+                    curlProgress = value
+                }
+                viewModel.previousPage()
+                curlProgress = 0f
+                curlDirection = null
+            }
+        }
+    }
+
     // Go fully immersive (hide the status/nav bars, incl. the battery/clock icons) while reading;
     // bring the bars back with the chrome, and restore them when leaving the reader.
     val view = LocalView.current
@@ -170,16 +226,19 @@ fun ReaderScreen(
         when {
             state.error != null -> ErrorView(state.error!!)
             state.page == null -> LoadingView()
-            pageSlideEnabled && !net.digitalbc.leafreader.ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING -> SlidePageViewer(
-                state = state,
-                viewModel = viewModel,
-                onToggleChrome = { chromeVisible = !chromeVisible },
-            )
             else -> PageViewer(
                 state = state,
                 fitMode = fitMode,
-                onNext = viewModel::next,
-                onPrev = viewModel::previous,
+                nextBitmap = nextBitmap,
+                prevBitmap = prevBitmap,
+                curlDirection = curlDirection,
+                curlProgress = curlProgress,
+                onUpdateCurl = { dir, prog ->
+                    curlDirection = dir
+                    curlProgress = prog
+                },
+                onTurnForward = turnForward,
+                onTurnBackward = turnBackward,
                 onNextPage = viewModel::nextPage,
                 onPrevPage = viewModel::previousPage,
                 onToggleChrome = { chromeVisible = !chromeVisible },
@@ -278,8 +337,8 @@ fun ReaderScreen(
                 rightToLeft = state.rightToLeft,
                 pageSlideEnabled = pageSlideEnabled,
                 onTogglePageSlideEnabled = onTogglePageSlideEnabled,
-                onPrevPage = viewModel::previousPage,
-                onNextPage = viewModel::nextPage,
+                onPrevPage = turnBackward,
+                onNextPage = turnForward,
                 onJumpToPage = viewModel::jumpToPage,
             )
         }
@@ -407,233 +466,7 @@ private const val MESH_COLS = 36
 private const val MESH_ROWS = 4
 private const val MESH_VERT_COUNT = (MESH_COLS + 1) * (MESH_ROWS + 1) * 2
 
-@Composable
-private fun SlidePageViewer(
-    state: ReaderUiState,
-    viewModel: ReaderViewModel,
-    onToggleChrome: () -> Unit,
-) {
-    val pageCount = state.pageCount.coerceAtLeast(1)
-    val pageIndex = state.pageIndex.coerceIn(0, pageCount - 1)
-    val rtl = state.rightToLeft
-    val scope = rememberCoroutineScope()
 
-    val currentBitmap = state.page
-    val nextBitmap by produceState<Bitmap?>(
-        initialValue = viewModel.getCachedPageBitmap(pageIndex + 1),
-        key1 = pageIndex,
-    ) {
-        if (pageIndex < pageCount - 1) {
-            value = viewModel.getCachedPageBitmap(pageIndex + 1) ?: viewModel.loadPageBitmap(pageIndex + 1)
-        }
-    }
-    val prevBitmap by produceState<Bitmap?>(
-        initialValue = viewModel.getCachedPageBitmap(pageIndex - 1),
-        key1 = pageIndex,
-    ) {
-        if (pageIndex > 0) {
-            value = viewModel.getCachedPageBitmap(pageIndex - 1) ?: viewModel.loadPageBitmap(pageIndex - 1)
-        }
-    }
-
-    var curlDirection by remember { mutableStateOf<CurlDirection?>(null) }
-    var curlProgress by remember { mutableFloatStateOf(0f) }
-
-    val turnForward: () -> Unit = {
-        val target = if (rtl) pageIndex - 1 else pageIndex + 1
-        if (target in 0 until pageCount && curlDirection == null) {
-            curlDirection = CurlDirection.FORWARD
-            scope.launch {
-                animate(0f, 1f, animationSpec = tween(280, easing = FastOutSlowInEasing)) { value, _ ->
-                    curlProgress = value
-                }
-                viewModel.onPageSettled(target)
-                curlProgress = 0f
-                curlDirection = null
-            }
-        }
-    }
-
-    val turnBackward: () -> Unit = {
-        val target = if (rtl) pageIndex + 1 else pageIndex - 1
-        if (target in 0 until pageCount && curlDirection == null) {
-            curlDirection = CurlDirection.BACKWARD
-            scope.launch {
-                animate(0f, 1f, animationSpec = tween(280, easing = FastOutSlowInEasing)) { value, _ ->
-                    curlProgress = value
-                }
-                viewModel.onPageSettled(target)
-                curlProgress = 0f
-                curlDirection = null
-            }
-        }
-    }
-
-    val meshPaint = remember { Paint().apply { isFilterBitmap = true } }
-    val verts = remember { FloatArray(MESH_VERT_COUNT) }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(pageIndex, pageCount, rtl) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    val downX = down.position.x
-                    val downY = down.position.y
-                    var dragX = 0f
-                    var dragY = 0f
-                    var isDrag = false
-                    var activeDirection: CurlDirection? = null
-                    val slop = viewConfiguration.touchSlop
-                    val tracker = VelocityTracker()
-                    tracker.addPosition(down.uptimeMillis, down.position)
-
-                    do {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        tracker.addPosition(change.uptimeMillis, change.position)
-                        dragX = change.position.x - downX
-                        dragY = change.position.y - downY
-
-                        if (!isDrag && (abs(dragX) > slop || abs(dragY) > slop)) {
-                            if (abs(dragX) > abs(dragY)) {
-                                isDrag = true
-                                val dir = if (!rtl) {
-                                    if (dragX < 0f) CurlDirection.FORWARD else CurlDirection.BACKWARD
-                                } else {
-                                    if (dragX > 0f) CurlDirection.FORWARD else CurlDirection.BACKWARD
-                                }
-                                val canTurn = when (dir) {
-                                    CurlDirection.FORWARD -> (if (!rtl) pageIndex < pageCount - 1 else pageIndex > 0)
-                                    CurlDirection.BACKWARD -> (if (!rtl) pageIndex > 0 else pageIndex < pageCount - 1)
-                                }
-                                if (canTurn) {
-                                    activeDirection = dir
-                                    curlDirection = dir
-                                }
-                            }
-                        }
-
-                        if (isDrag && activeDirection != null) {
-                            change.consume()
-                            val containerW = size.width.toFloat()
-                            val rawT = if (!rtl) {
-                                if (activeDirection == CurlDirection.FORWARD) -dragX / containerW else dragX / containerW
-                            } else {
-                                if (activeDirection == CurlDirection.FORWARD) dragX / containerW else -dragX / containerW
-                            }
-                            curlProgress = rawT.coerceIn(0f, 1f)
-                        }
-                    } while (event.changes.any { it.pressed })
-
-                    if (!isDrag) {
-                        val w = size.width.toFloat()
-                        when {
-                            downX < w / 3f -> if (rtl) turnForward() else turnBackward()
-                            downX > w * 2f / 3f -> if (rtl) turnBackward() else turnForward()
-                            else -> onToggleChrome()
-                        }
-                    } else if (activeDirection != null) {
-                        val velocity = tracker.calculateVelocity().x
-                        val velInTurnDir = if (!rtl) {
-                            if (activeDirection == CurlDirection.FORWARD) -velocity else velocity
-                        } else {
-                            if (activeDirection == CurlDirection.FORWARD) velocity else -velocity
-                        }
-                        val settleForward = (curlProgress > 0.35f || velInTurnDir > 800f) && velInTurnDir > -600f
-                        scope.launch {
-                            if (settleForward) {
-                                animate(curlProgress, 1f, animationSpec = tween(240, easing = FastOutSlowInEasing)) { value, _ ->
-                                    curlProgress = value
-                                }
-                                val target = when (activeDirection) {
-                                    CurlDirection.FORWARD -> if (rtl) pageIndex - 1 else pageIndex + 1
-                                    CurlDirection.BACKWARD -> if (rtl) pageIndex + 1 else pageIndex - 1
-                                }
-                                viewModel.onPageSettled(target)
-                            } else {
-                                animate(curlProgress, 0f, animationSpec = tween(200, easing = FastOutSlowInEasing)) { value, _ ->
-                                    curlProgress = value
-                                }
-                            }
-                            curlProgress = 0f
-                            curlDirection = null
-                        }
-                    }
-                }
-            },
-    ) {
-        if (currentBitmap == null) {
-            LoadingView()
-        } else {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val draw = computePageDraw(
-                    camera = Panel.FULL_PAGE,
-                    bitmapW = currentBitmap.width,
-                    bitmapH = currentBitmap.height,
-                    containerW = size.width,
-                    containerH = size.height,
-                )
-
-                if (curlDirection == null || curlProgress <= 0.001f) {
-                    drawIntoCanvas { canvas ->
-                        val src = Rect(0, 0, currentBitmap.width, currentBitmap.height)
-                        val dst = Rect(
-                            draw.left.roundToInt(),
-                            draw.top.roundToInt(),
-                            (draw.left + draw.scaledWidth).roundToInt(),
-                            (draw.top + draw.scaledHeight).roundToInt(),
-                        )
-                        canvas.nativeCanvas.drawBitmap(currentBitmap, src, dst, meshPaint)
-                    }
-                } else {
-                    val dir = curlDirection!!
-                    val forwardUnderneath = if (!rtl) nextBitmap else prevBitmap
-                    val backwardUnderneath = if (!rtl) prevBitmap else nextBitmap
-
-                    when (dir) {
-                        CurlDirection.FORWARD -> {
-                            drawCurlTurn(
-                                topBitmap = currentBitmap,
-                                bottomBitmap = forwardUnderneath,
-                                draw = draw,
-                                progress = curlProgress,
-                                isPeelingFromRight = !rtl,
-                                verts = verts,
-                                meshPaint = meshPaint,
-                            )
-                        }
-                        CurlDirection.BACKWARD -> {
-                            val unrollingPage = backwardUnderneath
-                            if (unrollingPage != null) {
-                                drawCurlTurn(
-                                    topBitmap = unrollingPage,
-                                    bottomBitmap = currentBitmap,
-                                    draw = draw,
-                                    progress = 1f - curlProgress,
-                                    isPeelingFromRight = !rtl,
-                                    verts = verts,
-                                    meshPaint = meshPaint,
-                                )
-                            } else {
-                                drawIntoCanvas { canvas ->
-                                    val src = Rect(0, 0, currentBitmap.width, currentBitmap.height)
-                                    val dst = Rect(
-                                        draw.left.roundToInt(),
-                                        draw.top.roundToInt(),
-                                        (draw.left + draw.scaledWidth).roundToInt(),
-                                        (draw.top + draw.scaledHeight).roundToInt(),
-                                    )
-                                    canvas.nativeCanvas.drawBitmap(currentBitmap, src, dst, meshPaint)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
 
 /**
  * Renders a skeuomorphic 3D page curl & unroll deformer along a vertical curved axis.
@@ -899,8 +732,13 @@ private fun DrawScope.drawCurlTurn(
 private fun PageViewer(
     state: ReaderUiState,
     fitMode: PageFitMode = PageFitMode.FIT_PAGE,
-    onNext: () -> Unit,
-    onPrev: () -> Unit,
+    nextBitmap: Bitmap?,
+    prevBitmap: Bitmap?,
+    curlDirection: CurlDirection?,
+    curlProgress: Float,
+    onUpdateCurl: (CurlDirection?, Float) -> Unit,
+    onTurnForward: () -> Unit,
+    onTurnBackward: () -> Unit,
     onNextPage: () -> Unit,
     onPrevPage: () -> Unit,
     onToggleChrome: () -> Unit,
@@ -911,6 +749,8 @@ private fun PageViewer(
     val scope = rememberCoroutineScope()
     val secondPage = state.secondPage
     val isSpread = state.isSpread && secondPage != null
+    val pageCount = state.pageCount.coerceAtLeast(1)
+    val pageIndex = state.pageIndex.coerceIn(0, pageCount - 1)
 
     val leftBitmap = if (isSpread && secondPage != null) {
         if (rtl) secondPage else bitmap
@@ -925,9 +765,6 @@ private fun PageViewer(
     val leftImage = remember(leftBitmap) { leftBitmap.asImageBitmap() }
     val rightImage = remember(rightBitmap) { rightBitmap.asImageBitmap() }
     val image = leftImage
-
-    // The framed view counts as "full page" at the intro/outro slots; a flick only turns pages there.
-    val isFullPage by rememberUpdatedState(state.isFullPageView)
 
     val camera = remember { Animatable(state.currentCamera, PanelConverter) }
     LaunchedEffect(state.pageIndex, state.slot) {
@@ -948,8 +785,6 @@ private fun PageViewer(
         userScale = 1f; userPanX = 0f; userPanY = 0f
     }
 
-    // Animate the view transform back to the framed default (used on double-tap alongside the
-    // jump back to the whole-page slot, so a pinch zoom glides out instead of snapping).
     val resetView: () -> Unit = {
         scope.launch {
             val s0 = userScale; val x0 = userPanX; val y0 = userPanY
@@ -961,24 +796,28 @@ private fun PageViewer(
         }
     }
 
-    // A single pointer handler so taps, double-taps, and pan/zoom never fight over the same touch.
-    // Tap zones drive navigation and chrome; one-finger drag pans when content exceeds container;
-    // pinch zooms; double-tap jumps back to the whole-page view. A single tap is deferred briefly
-    // so a following tap can be recognized as a double-tap.
+    val meshPaint = remember { Paint().apply { isFilterBitmap = true } }
+    val verts = remember { FloatArray(MESH_VERT_COUNT) }
+
     var pendingTap by remember { mutableStateOf<Job?>(null) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(rtl, fitMode, isSpread) {
+            .pointerInput(pageIndex, pageCount, rtl, fitMode, isSpread) {
                 awaitEachGesture {
-                    val down = awaitFirstDown()
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val downPos = down.position
                     var pan = Offset.Zero
                     var zoom = 1f
                     var maxPointers = 1
                     var pastSlop = false
+                    var isCurlDrag = false
+                    var activeDirection: CurlDirection? = null
+                    var curDragT = 0f
                     val slop = viewConfiguration.touchSlop
-                    val velocity = VelocityTracker()
+                    val velocityTracker = VelocityTracker()
+                    velocityTracker.addPosition(down.uptimeMillis, down.position)
 
                     do {
                         val event = awaitPointerEvent()
@@ -987,78 +826,89 @@ private fun PageViewer(
                         val panChange = event.calculatePan()
                         pan += panChange
                         zoom *= zoomChange
+
                         event.changes.firstOrNull { it.id == down.id }?.let {
-                            velocity.addPosition(it.uptimeMillis, it.position)
+                            velocityTracker.addPosition(it.uptimeMillis, it.position)
                         }
+
                         if (!pastSlop && (abs(zoom - 1f) > 0.02f || pan.getDistance() > slop)) {
                             pastSlop = true
-                        }
-                        if (pastSlop) {
-                            val newScale = (userScale * zoomChange).coerceIn(1f, 5f)
-                            userScale = newScale
-                            val cw = size.width.toFloat()
-                            val ch = size.height.toFloat()
-                            if (isSpread) {
-                                val spread = computeSpreadDraw(
-                                    page1W = leftBitmap.width,
-                                    page1H = leftBitmap.height,
-                                    page2W = rightBitmap.width,
-                                    page2H = rightBitmap.height,
-                                    containerW = cw,
-                                    containerH = ch,
-                                    fitMode = fitMode,
-                                )
-                                val effectiveW = spread.totalWidth * newScale
-                                val effectiveH = spread.totalHeight * newScale
-                                val baseLeft = cw / 2f + (spread.boundLeft - cw / 2f) * newScale
-                                val baseTop = ch / 2f + (spread.boundTop - ch / 2f) * newScale
-                                userPanX = if (effectiveW > cw) {
-                                    clampPan(userPanX + panChange.x, baseLeft, effectiveW, cw)
+                            if (maxPointers == 1 && userScale <= 1.05f && abs(pan.x) > abs(pan.y)) {
+                                val dir = if (!rtl) {
+                                    if (pan.x < 0f) CurlDirection.FORWARD else CurlDirection.BACKWARD
                                 } else {
-                                    0f
+                                    if (pan.x > 0f) CurlDirection.FORWARD else CurlDirection.BACKWARD
                                 }
-                                userPanY = if (effectiveH > ch) {
-                                    clampPan(userPanY + panChange.y, baseTop, effectiveH, ch)
-                                } else {
-                                    0f
+                                val canTurn = when (dir) {
+                                    CurlDirection.FORWARD -> (if (isSpread) pageIndex + 1 < pageCount - 1 else pageIndex < pageCount - 1)
+                                    CurlDirection.BACKWARD -> pageIndex > 0
                                 }
-                            } else {
-                                val draw = computePageDraw(
-                                    camera = camera.value,
-                                    bitmapW = image.width,
-                                    bitmapH = image.height,
-                                    containerW = cw,
-                                    containerH = ch,
-                                    fitMode = fitMode,
-                                )
-                                val effectiveW = draw.scaledWidth * newScale
-                                val effectiveH = draw.scaledHeight * newScale
-                                val baseLeft = cw / 2f + (draw.left - cw / 2f) * newScale
-                                val baseTop = ch / 2f + (draw.top - ch / 2f) * newScale
-                                userPanX = if (effectiveW > cw) {
-                                    clampPan(userPanX + panChange.x, baseLeft, effectiveW, cw)
-                                } else {
-                                    0f
-                                }
-                                userPanY = if (effectiveH > ch) {
-                                    clampPan(userPanY + panChange.y, baseTop, effectiveH, ch)
-                                } else {
-                                    0f
+                                if (canTurn) {
+                                    isCurlDrag = true
+                                    activeDirection = dir
+                                    onUpdateCurl(dir, 0f)
                                 }
                             }
-                            event.changes.forEach { if (it.positionChanged()) it.consume() }
+                        }
+
+                        if (pastSlop) {
+                            if (isCurlDrag && activeDirection != null) {
+                                event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                val containerW = size.width.toFloat()
+                                val rawT = if (!rtl) {
+                                    if (activeDirection == CurlDirection.FORWARD) -pan.x / containerW else pan.x / containerW
+                                } else {
+                                    if (activeDirection == CurlDirection.FORWARD) pan.x / containerW else -pan.x / containerW
+                                }
+                                curDragT = rawT.coerceIn(0f, 1f)
+                                onUpdateCurl(activeDirection, curDragT)
+                            } else {
+                                val newScale = (userScale * zoomChange).coerceIn(1f, 5f)
+                                userScale = newScale
+                                val cw = size.width.toFloat()
+                                val ch = size.height.toFloat()
+                                if (isSpread) {
+                                    val spread = computeSpreadDraw(
+                                        page1W = leftBitmap.width,
+                                        page1H = leftBitmap.height,
+                                        page2W = rightBitmap.width,
+                                        page2H = rightBitmap.height,
+                                        containerW = cw,
+                                        containerH = ch,
+                                        fitMode = fitMode,
+                                    )
+                                    val effectiveW = spread.totalWidth * newScale
+                                    val effectiveH = spread.totalHeight * newScale
+                                    val baseLeft = cw / 2f + (spread.boundLeft - cw / 2f) * newScale
+                                    val baseTop = ch / 2f + (spread.boundTop - ch / 2f) * newScale
+                                    userPanX = if (effectiveW > cw) clampPan(userPanX + panChange.x, baseLeft, effectiveW, cw) else 0f
+                                    userPanY = if (effectiveH > ch) clampPan(userPanY + panChange.y, baseTop, effectiveH, ch) else 0f
+                                } else {
+                                    val draw = computePageDraw(
+                                        camera = camera.value,
+                                        bitmapW = image.width,
+                                        bitmapH = image.height,
+                                        containerW = cw,
+                                        containerH = ch,
+                                        fitMode = fitMode,
+                                    )
+                                    val effectiveW = draw.scaledWidth * newScale
+                                    val effectiveH = draw.scaledHeight * newScale
+                                    val baseLeft = cw / 2f + (draw.left - cw / 2f) * newScale
+                                    val baseTop = ch / 2f + (draw.top - ch / 2f) * newScale
+                                    userPanX = if (effectiveW > cw) clampPan(userPanX + panChange.x, baseLeft, effectiveW, cw) else 0f
+                                    userPanY = if (effectiveH > ch) clampPan(userPanY + panChange.y, baseTop, effectiveH, ch) else 0f
+                                }
+                                event.changes.forEach { if (it.positionChanged()) it.consume() }
+                            }
                         }
                     } while (event.changes.any { it.pressed })
 
-                    if (!pastSlop) { // a tap (not a drag/pinch)
+                    if (!pastSlop) {
                         val w = size.width
-                        val tapX = down.position.x
+                        val tapX = downPos.x
                         val inFlight = pendingTap
                         if (inFlight != null && inFlight.isActive) {
-                            // Second quick tap → double-tap: back to the whole-page view from any
-                            // panel (mirrors the ZoomOutMap button); resetView glides the pinch
-                            // zoom out, and covers the already-on-full-page case where the slot
-                            // doesn't change.
                             inFlight.cancel()
                             pendingTap = null
                             onShowFullPage()
@@ -1067,28 +917,37 @@ private fun PageViewer(
                             pendingTap = scope.launch {
                                 delay(DOUBLE_TAP_WINDOW_MS)
                                 if (userScale > 1.05f) {
-                                    // While zoomed in, pinch and pan win over edge swipes/taps.
-                                    // Tapping toggles chrome without accidentally turning pages.
                                     onToggleChrome()
                                 } else {
-                                    // At normal scale, honor LTR/RTL order consistently
                                     when {
-                                        tapX < w / 3f -> if (rtl) onNext() else onPrev()
-                                        tapX > w * 2f / 3f -> if (rtl) onPrev() else onNext()
+                                        tapX < w / 3f -> if (rtl) onTurnForward() else onTurnBackward()
+                                        tapX > w * 2f / 3f -> if (rtl) onTurnBackward() else onTurnForward()
                                         else -> onToggleChrome()
                                     }
                                 }
                                 pendingTap = null
                             }
                         }
-                    } else if (maxPointers == 1 && userScale <= 1.01f && isFullPage) {
-                        // A quick, mostly-horizontal one-finger flick turns the page (a slow drag just
-                        // floats the comic over the background and stays put). Velocity, not distance,
-                        // is what separates a deliberate swipe from a reposition.
-                        val v = velocity.calculateVelocity()
-                        if (abs(v.x) > FLICK_VELOCITY_PX_S && abs(v.x) > abs(v.y) * SWIPE_HORIZONTAL_BIAS) {
-                            if (v.x < 0f) { if (rtl) onPrevPage() else onNextPage() }
-                            else { if (rtl) onNextPage() else onPrevPage() }
+                    } else if (isCurlDrag && activeDirection != null) {
+                        val velocity = velocityTracker.calculateVelocity().x
+                        val velInTurnDir = if (!rtl) {
+                            if (activeDirection == CurlDirection.FORWARD) -velocity else velocity
+                        } else {
+                            if (activeDirection == CurlDirection.FORWARD) velocity else -velocity
+                        }
+                        val settleForward = (curDragT > 0.35f || velInTurnDir > 700f) && velInTurnDir > -600f
+                        scope.launch {
+                            if (settleForward) {
+                                animate(curDragT, 1f, animationSpec = tween(220, easing = FastOutSlowInEasing)) { value, _ ->
+                                    onUpdateCurl(activeDirection, value)
+                                }
+                                if (activeDirection == CurlDirection.FORWARD) onNextPage() else onPrevPage()
+                            } else {
+                                animate(curDragT, 0f, animationSpec = tween(180, easing = FastOutSlowInEasing)) { value, _ ->
+                                    onUpdateCurl(activeDirection, value)
+                                }
+                            }
+                            onUpdateCurl(null, 0f)
                         }
                     }
                 }
@@ -1107,12 +966,28 @@ private fun PageViewer(
                 )
                 val cx = size.width / 2f
                 val cy = size.height / 2f
-                val l1 = cx + (spread.left1 - cx) * userScale + userPanX
+
+                val slideOffset = if (curlDirection != null && curlProgress > 0.001f && userScale <= 1.05f) {
+                    if (curlDirection == CurlDirection.FORWARD) {
+                        if (!rtl) -size.width * curlProgress else size.width * curlProgress
+                    } else {
+                        if (!rtl) size.width * curlProgress else -size.width * curlProgress
+                    }
+                } else {
+                    0f
+                }
+                val spreadAlpha = if (curlDirection != null && curlProgress > 0.001f && userScale <= 1.05f) {
+                    (1f - curlProgress * 0.45f).coerceIn(0.1f, 1f)
+                } else {
+                    pageAlpha.value
+                }
+
+                val l1 = cx + (spread.left1 - cx) * userScale + userPanX + slideOffset
                 val t1 = cy + (spread.top1 - cy) * userScale + userPanY
                 val w1 = spread.width1 * userScale
                 val h1 = spread.height1 * userScale
 
-                val l2 = cx + (spread.left2 - cx) * userScale + userPanX
+                val l2 = cx + (spread.left2 - cx) * userScale + userPanX + slideOffset
                 val t2 = cy + (spread.top2 - cy) * userScale + userPanY
                 val w2 = spread.width2 * userScale
                 val h2 = spread.height2 * userScale
@@ -1121,13 +996,13 @@ private fun PageViewer(
                     image = leftImage,
                     dstOffset = IntOffset(l1.roundToInt(), t1.roundToInt()),
                     dstSize = IntSize(w1.roundToInt(), h1.roundToInt()),
-                    alpha = pageAlpha.value,
+                    alpha = spreadAlpha,
                 )
                 drawImage(
                     image = rightImage,
                     dstOffset = IntOffset(l2.roundToInt(), t2.roundToInt()),
                     dstSize = IntSize(w2.roundToInt(), h2.roundToInt()),
-                    alpha = pageAlpha.value,
+                    alpha = spreadAlpha,
                 )
             } else {
                 val draw = computePageDraw(
@@ -1138,19 +1013,65 @@ private fun PageViewer(
                     containerH = size.height,
                     fitMode = fitMode,
                 )
-                val cx = size.width / 2f
-                val cy = size.height / 2f
-                val left = cx + (draw.left - cx) * userScale + userPanX
-                val top = cy + (draw.top - cy) * userScale + userPanY
-                val w = draw.scaledWidth * userScale
-                val h = draw.scaledHeight * userScale
 
-                drawImage(
-                    image = image,
-                    dstOffset = IntOffset(left.roundToInt(), top.roundToInt()),
-                    dstSize = IntSize(w.roundToInt(), h.roundToInt()),
-                    alpha = pageAlpha.value,
-                )
+                if (curlDirection != null && curlProgress > 0.001f && userScale <= 1.05f) {
+                    val dir = curlDirection
+                    val forwardUnderneath = nextBitmap
+                    val backwardUnderneath = prevBitmap
+
+                    when (dir) {
+                        CurlDirection.FORWARD -> {
+                            drawCurlTurn(
+                                topBitmap = bitmap,
+                                bottomBitmap = forwardUnderneath,
+                                draw = draw,
+                                progress = curlProgress,
+                                isPeelingFromRight = !rtl,
+                                verts = verts,
+                                meshPaint = meshPaint,
+                            )
+                        }
+                        CurlDirection.BACKWARD -> {
+                            val unrollingPage = backwardUnderneath
+                            if (unrollingPage != null) {
+                                drawCurlTurn(
+                                    topBitmap = unrollingPage,
+                                    bottomBitmap = bitmap,
+                                    draw = draw,
+                                    progress = 1f - curlProgress,
+                                    isPeelingFromRight = !rtl,
+                                    verts = verts,
+                                    meshPaint = meshPaint,
+                                )
+                            } else {
+                                drawIntoCanvas { canvas ->
+                                    val src = Rect(0, 0, bitmap.width, bitmap.height)
+                                    val dst = Rect(
+                                        draw.left.roundToInt(),
+                                        draw.top.roundToInt(),
+                                        (draw.left + draw.scaledWidth).roundToInt(),
+                                        (draw.top + draw.scaledHeight).roundToInt(),
+                                    )
+                                    canvas.nativeCanvas.drawBitmap(bitmap, src, dst, meshPaint)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    val cx = size.width / 2f
+                    val cy = size.height / 2f
+                    val left = cx + (draw.left - cx) * userScale + userPanX
+                    val top = cy + (draw.top - cy) * userScale + userPanY
+                    val w = draw.scaledWidth * userScale
+                    val h = draw.scaledHeight * userScale
+
+                    drawImage(
+                        image = image,
+                        dstOffset = IntOffset(left.roundToInt(), top.roundToInt()),
+                        dstSize = IntSize(w.roundToInt(), h.roundToInt()),
+                        alpha = pageAlpha.value,
+                    )
+                }
             }
         }
     }
@@ -1216,12 +1137,6 @@ private fun FitModeChip(fitMode: PageFitMode, onClick: () -> Unit) {
 
 /** A single tap waits this long for a possible second tap before acting, enabling double-tap. */
 private const val DOUBLE_TAP_WINDOW_MS = 220L
-
-/** Min horizontal release speed (px/s) for a one-finger drag to count as a page-turn flick. */
-private const val FLICK_VELOCITY_PX_S = 700f
-
-/** A flick must be this many times more horizontal than vertical to turn the page. */
-private const val SWIPE_HORIZONTAL_BIAS = 1.2f
 
 /** Reading-direction control that shows its current state (LTR/RTL) so its purpose is obvious. */
 @Composable
