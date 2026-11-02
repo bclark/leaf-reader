@@ -179,9 +179,13 @@ fun ReaderScreen(
                 animate(0f, 1f, animationSpec = tween(280, easing = FastOutSlowInEasing)) { value, _ ->
                     curlProgress = value
                 }
+                val oldIndex = viewModel.state.value.pageIndex
                 viewModel.nextPage()
-                curlProgress = 0f
-                curlDirection = null
+                delay(60)
+                if (viewModel.state.value.pageIndex == oldIndex) {
+                    curlProgress = 0f
+                    curlDirection = null
+                }
             }
         }
     }
@@ -193,11 +197,20 @@ fun ReaderScreen(
                 animate(0f, 1f, animationSpec = tween(280, easing = FastOutSlowInEasing)) { value, _ ->
                     curlProgress = value
                 }
+                val oldIndex = viewModel.state.value.pageIndex
                 viewModel.previousPage()
-                curlProgress = 0f
-                curlDirection = null
+                delay(60)
+                if (viewModel.state.value.pageIndex == oldIndex) {
+                    curlProgress = 0f
+                    curlDirection = null
+                }
             }
         }
+    }
+
+    LaunchedEffect(state.pageIndex) {
+        curlProgress = 0f
+        curlDirection = null
     }
 
     // Go fully immersive (hide the status/nav bars, incl. the battery/clock icons) while reading;
@@ -771,11 +784,6 @@ private fun PageViewer(
         camera.animateTo(state.currentCamera, tween(360, easing = FastOutSlowInEasing))
     }
 
-    val pageAlpha = remember { Animatable(1f) }
-    LaunchedEffect(state.pageIndex) {
-        pageAlpha.snapTo(0.35f)
-        pageAlpha.animateTo(1f, tween(280))
-    }
 
     // Free pinch-to-zoom / pan, reset whenever the framed view, fit mode, or spread changes.
     var userScale by remember { mutableFloatStateOf(1f) }
@@ -942,12 +950,14 @@ private fun PageViewer(
                                     onUpdateCurl(activeDirection, value)
                                 }
                                 if (activeDirection == CurlDirection.FORWARD) onNextPage() else onPrevPage()
+                                delay(60)
+                                onUpdateCurl(null, 0f)
                             } else {
                                 animate(curDragT, 0f, animationSpec = tween(180, easing = FastOutSlowInEasing)) { value, _ ->
                                     onUpdateCurl(activeDirection, value)
                                 }
+                                onUpdateCurl(null, 0f)
                             }
-                            onUpdateCurl(null, 0f)
                         }
                     }
                 }
@@ -979,7 +989,7 @@ private fun PageViewer(
                 val spreadAlpha = if (curlDirection != null && curlProgress > 0.001f && userScale <= 1.05f) {
                     (1f - curlProgress * 0.45f).coerceIn(0.1f, 1f)
                 } else {
-                    pageAlpha.value
+                    1f
                 }
 
                 val l1 = cx + (spread.left1 - cx) * userScale + userPanX + slideOffset
@@ -1069,7 +1079,6 @@ private fun PageViewer(
                         image = image,
                         dstOffset = IntOffset(left.roundToInt(), top.roundToInt()),
                         dstSize = IntSize(w.roundToInt(), h.roundToInt()),
-                        alpha = pageAlpha.value,
                     )
                 }
             }
