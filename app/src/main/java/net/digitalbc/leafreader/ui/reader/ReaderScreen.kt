@@ -365,6 +365,7 @@ fun ReaderScreen(
                             onSetFitMode = onSetFitMode,
                             rightToLeft = state.rightToLeft,
                             onToggleReadingDirection = viewModel::toggleReadingDirection,
+                            showFitMode = false,
                         )
                     }
                 } else {
@@ -1354,6 +1355,7 @@ private fun ReaderActionChips(
     rightToLeft: Boolean,
     onToggleReadingDirection: () -> Unit,
     modifier: Modifier = Modifier,
+    showFitMode: Boolean = true,
 ) {
     Row(
         modifier = modifier,
@@ -1365,14 +1367,16 @@ private fun ReaderActionChips(
             orientation = if (isLandscape) "Landscape" else "Portrait",
             onClick = if (isLandscape) onToggleLandscapeSpread else onTogglePortraitSpread,
         )
-        FitModeChip(
-            fitMode = fitMode,
-            onClick = {
-                onSetFitMode(
-                    if (fitMode == PageFitMode.FIT_PAGE) PageFitMode.FIT_WIDTH else PageFitMode.FIT_PAGE,
-                )
-            },
-        )
+        if (showFitMode) {
+            FitModeChip(
+                fitMode = fitMode,
+                onClick = {
+                    onSetFitMode(
+                        if (fitMode == PageFitMode.FIT_PAGE) PageFitMode.FIT_WIDTH else PageFitMode.FIT_PAGE,
+                    )
+                },
+            )
+        }
         DirectionChip(rightToLeft = rightToLeft, onClick = onToggleReadingDirection)
     }
 }
