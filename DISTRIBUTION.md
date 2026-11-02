@@ -42,13 +42,16 @@ Things to handle for the main repo:
 - **Versioning:** ✅ handled — `versionCode` is now derived deterministically from `versionName`
   (`MAJOR*10000 + MINOR*100 + PATCH`, e.g. `0.1.1` → `101`) in `app/build.gradle.kts`, so it's stable
   and increasing whether built by CI or by F-Droid from source. Just bump `versionName` per release.
-- **Unsigned release build:** ✅ handled — release signing only activates when the keystore env vars
-  are present (CI), so F-Droid's `assembleRelease` produces an unsigned APK that F-Droid then signs
+- **Unsigned release build:** ✅ handled — release signing only activates when keystore env vars
+  are present (CI), so F-Droid's build (`assembleFdroidRelease`) produces an unsigned APK that F-Droid then signs
   with its own key.
 - **Bundled model blob:** `app/src/main/assets/manga_panel_detector_int8.tflite` is a prebuilt
-  binary committed to the repo. It is Apache-2.0 (free) **data**, not executable code, so it is
-  generally acceptable, but F-Droid reviewers may ask that it be fetched at build time or flagged.
-- Dependencies from JitPack (7-Zip-JBinding) and Maven are allowed as free binaries.
+  neural model (~2.8 MB) licensed under GNU AGPL-3.0 (derived from Ultralytics YOLO; trained on Manga109-s + COMICS).
+  Full Python export and training scripts are included in `training/`. Complete AGPL-3.0 and Manga109-s
+  attribution notices are provided in `THIRD_PARTY_NOTICES.md`.
+- **Flavor Scope:** The F-Droid build targets the `fdroid` product flavor which completely excludes 7-Zip-JBinding
+  and non-free unRAR code from dependencies and native binaries. In the `fdroid` build, CBR archives are rejected
+  with a clear message directing users to CBZ or full releases.
 
 A ready-to-submit recipe is in [`fdroid/net.digitalbc.leafreader.yml`](fdroid/net.digitalbc.leafreader.yml)
 — copy it to `metadata/net.digitalbc.leafreader.yml` in your `fdroiddata` fork and open the MR.

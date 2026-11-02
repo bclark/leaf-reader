@@ -31,14 +31,9 @@ jobs:
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      # compileSdk 36 / buildToolsVersion 36.1.0 are pinned in app/build.gradle.kts.
-      # AGP will auto-download them (licenses are accepted by setup-android); this makes it explicit
-      # and fails fast with a clear message if a pinned version isn't available on the runner.
-      - name: Install required SDK packages
-        run: |
-          yes | sdkmanager "platforms;android-36" "build-tools;36.1.0"
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.1.0'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -49,18 +44,18 @@ jobs:
       - name: Shared module unit tests
         run: ./gradlew :shared:jvmTest --stacktrace
 
-      - name: Build debug APK
+      - name: Build debug APKs
         run: ./gradlew :app:assembleDebug --stacktrace
 
       - name: Android Lint (informational)
         continue-on-error: true
-        run: ./gradlew :app:lintDebug --stacktrace
+        run: ./gradlew :app:lintFdroidDebug :app:lintFullDebug --stacktrace
 
-      - name: Upload debug APK
+      - name: Upload debug APKs
         uses: actions/upload-artifact@v4
         with:
-          name: leaf-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: leaf-debug-apks
+          path: app/build/outputs/apk/*/*/*.apk
           if-no-files-found: error
 
       - name: Upload lint report

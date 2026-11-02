@@ -16,8 +16,8 @@ This checklist tracks verified requirements and pending actions for submitting *
   - `short_description.txt`: Read CBZ/CBR comics panel by panel, with on-device panel detection.
   - `full_description.txt`: Accurate Leaf feature description explaining that network permission is used exclusively for user-configured SMB local network shares.
   - Added changelog `fastlane/metadata/android/en-US/changelogs/30200.txt`.
-- [x] **Bundled License Notices:** Bundled [`assets/THIRD_PARTY_NOTICES.md`](../app/src/main/assets/THIRD_PARTY_NOTICES.md) directly in the APK assets directory, ensuring full third-party notices and offline license accessibility.
-- [x] **Recipe Template:** Created [`fdroid/net.digitalbc.leafreader.yml`](net.digitalbc.leafreader.yml) targeting `fdroidRelease`.
+- [x] **Bundled License Notices:** Bundled [`assets/THIRD_PARTY_NOTICES.md`](../app/src/main/assets/THIRD_PARTY_NOTICES.md) directly in the APK assets directory, ensuring full third-party notices, AGPL-3.0 text, and offline license accessibility in the app UI.
+- [x] **Recipe Template:** Updated [`fdroid/net.digitalbc.leafreader.yml`](net.digitalbc.leafreader.yml) targeting `gradle: - fdroid` and `subdir: app`. Archived obsolete `com.chakra.comicreader.yml`.
 
 ---
 

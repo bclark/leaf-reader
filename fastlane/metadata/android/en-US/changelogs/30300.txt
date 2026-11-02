@@ -1,0 +1,1 @@
+Single-finger drag-to-peel gesture on series stacks and reading lists, offline in-app license viewer, F-Droid recipe and workflow fixes, and updated license notices.

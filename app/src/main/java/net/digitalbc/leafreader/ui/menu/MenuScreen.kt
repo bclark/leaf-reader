@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -24,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -32,6 +34,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -63,6 +66,7 @@ import net.digitalbc.leafreader.ui.theme.Archivo
 import net.digitalbc.leafreader.ui.theme.Cream
 import net.digitalbc.leafreader.ui.theme.CreamMuted
 import net.digitalbc.leafreader.ui.theme.Crimson
+import net.digitalbc.leafreader.ui.theme.DeepInk
 import net.digitalbc.leafreader.ui.theme.DeepInkSurface
 import net.digitalbc.leafreader.ui.theme.Ink
 import net.digitalbc.leafreader.ui.theme.InkSoft
@@ -70,6 +74,7 @@ import net.digitalbc.leafreader.ui.theme.LeafPrimary
 import net.digitalbc.leafreader.ui.theme.LeafSecondary
 import net.digitalbc.leafreader.ui.theme.Ochre
 import net.digitalbc.leafreader.ui.theme.PaperWhite
+import net.digitalbc.leafreader.ui.theme.PaperWhiteMuted
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -98,6 +103,7 @@ fun MenuScreen(
     var smbTesting by remember { mutableStateOf(false) }
     var smbValid by remember { mutableStateOf<Boolean?>(null) }
     var smbStatusMessage by remember { mutableStateOf<String?>(null) }
+    var showLicensesDialog by remember { mutableStateOf(false) }
 
     val version = remember {
         runCatching {
@@ -469,7 +475,7 @@ fun MenuScreen(
             }
             Spacer(Modifier.size(8.dp))
             LinkRow("Open-source licenses & notices.") {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(LICENSES_URL)))
+                showLicensesDialog = true
             }
 
             Spacer(Modifier.size(24.dp))
@@ -569,6 +575,60 @@ fun MenuScreen(
                 modifier = Modifier.clickable(onClick = openUpstream).padding(top = 2.dp),
             )
         }
+    }
+
+    if (showLicensesDialog) {
+        val licensesText = remember {
+            runCatching {
+                context.assets.open("THIRD_PARTY_NOTICES.md").bufferedReader().use { it.readText() }
+            }.getOrDefault("Failed to load third-party notices.")
+        }
+        AlertDialog(
+            onDismissRequest = { showLicensesDialog = false },
+            title = {
+                Text(
+                    text = "THIRD-PARTY NOTICES",
+                    fontFamily = Anton,
+                    fontSize = 18.sp,
+                    color = PaperWhite,
+                )
+            },
+            text = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(DeepInk)
+                        .padding(12.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = licensesText,
+                        fontFamily = Archivo,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp,
+                        color = Cream,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showLicensesDialog = false
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(LICENSES_URL)))
+                    }
+                }) {
+                    Text("VIEW ON GITHUB", color = Ochre, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLicensesDialog = false }) {
+                    Text("CLOSE", color = PaperWhiteMuted)
+                }
+            },
+            containerColor = DeepInkSurface,
+        )
     }
 }
 }

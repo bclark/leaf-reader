@@ -1,4 +1,4 @@
-# F-Droid main-repo recipe TEMPLATE for Leaf Reader.
+# F-Droid main-repo recipe for Leaf Reader.
 # Submit by copying to metadata/net.digitalbc.leafreader.yml in https://gitlab.com/fdroid/fdroiddata.
 
 Categories:
@@ -8,19 +8,21 @@ AuthorName: Bryan Clark (forked from Chakra)
 WebSite: https://github.com/bclark/leaf-reader
 SourceCode: https://github.com/bclark/leaf-reader
 IssueTracker: https://github.com/bclark/leaf-reader/issues
-Donate: https://ko-fi.com/bryanclark
+Donate:
+  - https://ko-fi.com/bryanclark
 
 RepoType: git
 Repo: https://github.com/bclark/leaf-reader.git
 
 Builds:
-  - versionName: 0.3.2
-    versionCode: 30200
-    commit: v0.3.2
+  - versionName: 0.3.3
+    versionCode: 30300
+    commit: 16db28373b9e4a3b839ef4267b14fc03ddf45be4
+    subdir: app
     gradle:
-      - fdroidRelease
+      - fdroid
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9.]+$
-CurrentVersion: 0.3.2
-CurrentVersionCode: 30200
+CurrentVersion: 0.3.3
+CurrentVersionCode: 30300

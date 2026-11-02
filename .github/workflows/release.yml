@@ -25,10 +25,9 @@ jobs:
           java-version: "21"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install required SDK packages
-        run: yes | sdkmanager "platforms;android-36" "build-tools;36.1.0"
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.1.0'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -39,26 +38,40 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           echo "name=${TAG#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Verify version matches tag
+        run: |
+          TAG_VERSION="${{ steps.ver.outputs.name }}"
+          if ! grep -q "versionName = \"$TAG_VERSION\"" app/build.gradle.kts; then
+            echo "Error: Tag version '$TAG_VERSION' does not match versionName in app/build.gradle.kts"
+            exit 1
+          fi
+
       - name: Decode signing keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "${RUNNER_TEMP}/release.jks"
 
-      - name: Build signed AAB + APK
+      - name: Build signed full release and unsigned F-Droid release
         env:
           KEYSTORE_FILE: ${{ runner.temp }}/release.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          VERSION_NAME: ${{ steps.ver.outputs.name }}
         run: |
           chmod +x ./gradlew
-          ./gradlew :app:bundleRelease :app:assembleRelease --stacktrace
+          # Build signed full bundle (AAB) and APK
+          ./gradlew :app:bundleFullRelease :app:assembleFullRelease --stacktrace
+          # Build unsigned F-Droid release APK for F-Droid server signing
+          ./gradlew :app:assembleFdroidRelease --stacktrace
 
-      # R8 is enabled, so keep the deobfuscation map with every release — Play crash
+      # R8 is enabled, so keep the deobfuscation maps with every release — crash
       # reports (and any bug report against this build) are unreadable without it.
-      - name: Package R8 mapping
+      - name: Package R8 mappings
         run: |
-          cp app/build/outputs/mapping/release/mapping.txt \
-             "mapping-${{ steps.ver.outputs.name }}.txt"
+          if [ -f app/build/outputs/mapping/fullRelease/mapping.txt ]; then
+            cp app/build/outputs/mapping/fullRelease/mapping.txt "mapping-full-${{ steps.ver.outputs.name }}.txt"
+          fi
+          if [ -f app/build/outputs/mapping/fdroidRelease/mapping.txt ]; then
+            cp app/build/outputs/mapping/fdroidRelease/mapping.txt "mapping-fdroid-${{ steps.ver.outputs.name }}.txt"
+          fi
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -68,6 +81,7 @@ jobs:
           # Tags with a suffix (e.g. v0.2.0-beta, v1.0.0-rc1) publish as a GitHub pre-release.
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
-            app/build/outputs/bundle/release/*.aab
-            app/build/outputs/apk/release/*.apk
+            app/build/outputs/bundle/fullRelease/*.aab
+            app/build/outputs/apk/full/release/*.apk
+            app/build/outputs/apk/fdroid/release/*.apk
             mapping-*.txt

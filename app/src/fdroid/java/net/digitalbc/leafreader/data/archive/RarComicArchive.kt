@@ -7,7 +7,7 @@ import java.io.File
  */
 class RarComicArchive(file: File) : ComicArchive {
     init {
-        throw UnsupportedComicException("CBR (RAR) archives are omitted in the F-Droid FLOSS build to comply with F-Droid policy. Convert to CBZ (ZIP) or PDF, or download the full release from GitHub.")
+        throw UnsupportedComicException("CBR (RAR) archives are omitted in the F-Droid FLOSS build to comply with F-Droid policy. Convert to CBZ (ZIP), or download the full release from GitHub.")
     }
 
     override val pageCount: Int get() = 0

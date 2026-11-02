@@ -1,11 +1,11 @@
-Leaf is a panel-by-panel comic reader. Open a CBZ, CBR, or PDF file and Leaf detects the panels on each
+Leaf is a panel-by-panel comic reader. Open a CBZ or CBR comic file and Leaf detects the panels on each
 page with an on-device machine-learning model, then guides you through them one tap at a time:
 page, then panel by panel, then back out to the whole page before turning to the next one. It turns
 pinch-and-squint full-page reading into a comfortable, guided experience on a phone or tablet.
 
 Features:
 
-* Reads CBZ and CBR archives, including RAR5.
+* Reads CBZ (ZIP) archives in all builds, and CBR (RAR/RAR5) archives in full releases.
 * On-device panel detection — a small neural model finds panels and speech balloons. Fully offline;
   nothing is uploaded.
 * Smart grouping — tiny adjacent panels are merged into one comfortable zoom, and oversized panels

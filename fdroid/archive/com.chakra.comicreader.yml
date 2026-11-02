@@ -1,8 +1,6 @@
-# F-Droid main-repo recipe TEMPLATE for Leaf (forked from Chika).
-# To submit Leaf to the F-Droid main repo, copy this to
-# metadata/com.chakra.comicreader.yml in a fork of https://gitlab.com/fdroid/fdroiddata and open a
-# merge request. F-Droid maintainers will refine it. F-Droid builds assembleRelease (unsigned, since
-# the keystore env vars are absent) and signs the result with the F-Droid key.
+# ARCHIVED / OBSOLETE RECIPE
+# This legacy template for com.chakra.comicreader is archived.
+# The active recipe for Leaf Reader is metadata/net.digitalbc.leafreader.yml.
 
 Categories:
   - Reading

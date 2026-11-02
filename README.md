@@ -124,8 +124,8 @@ Leaf is licensed under the **Mozilla Public License 2.0** — see [`LICENSE`](LI
 
 Third-party libraries, bundled models, and fonts retain their respective licenses:
 - **Chika upstream base:** [batunii/chika](https://github.com/batunii/chika) (MPL 2.0)
-- **Panel Detection Model:** [`leoxs22/manga-panel-detector-yolo26n`](https://huggingface.co/leoxs22/manga-panel-detector-yolo26n) (Apache-2.0, trained on Manga109-s)
+- **Panel Detection Model:** [`leoxs22/manga-panel-detector-yolo26n`](https://huggingface.co/leoxs22/manga-panel-detector-yolo26n) (GNU AGPL-3.0, derived from Ultralytics YOLO; trained on Manga109-s + COMICS)
 - **Fonts:** [Anton](https://fonts.google.com/specimen/Anton) and [Archivo](https://fonts.google.com/specimen/Archivo) (SIL Open Font License 1.1)
-- **Libraries:** TensorFlow Lite, Apache Commons Compress, 7-Zip-JBinding (LGPL), SMBJ
+- **Libraries:** TensorFlow Lite, Apache Commons Compress, 7-Zip-JBinding (LGPL-2.1, full flavor), SMBJ
 
 Detailed license audits and source disclosures are documented in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

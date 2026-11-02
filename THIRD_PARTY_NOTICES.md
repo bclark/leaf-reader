@@ -78,6 +78,8 @@ Upstream Source: https://github.com/omicronapps/7-Zip-JBinding-4Android (wraps 7
 
 ## Bundled Panel-Detection Model & Training Data
 
+Full text: [`THIRD_PARTY_LICENSES/AGPL-3.0.txt`](THIRD_PARTY_LICENSES/AGPL-3.0.txt)
+
 - **Model Asset:** `manga_panel_detector_int8.tflite` (bundled in `app/src/main/assets/` on Android and `iosApp/Sources/` on iOS).
 - **Provenance & Model License (AGPL-3.0):**
   - Originates from [`leoxs22/manga-panel-detector-yolo26n`](https://huggingface.co/leoxs22/manga-panel-detector-yolo26n).
