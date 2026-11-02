@@ -31,10 +31,12 @@ android {
         }
     }
 
-    // Release signing is configured only when a keystore is supplied via environment variables
-    // (the CI release workflow decodes it from repo secrets). Local builds without these vars are
-    // unaffected — debug builds use the default debug key, and `assembleRelease` stays unsigned.
-    val releaseKeystore = System.getenv("KEYSTORE_FILE")?.let { file(it) }
+    // Release signing is configured only when a valid keystore file is supplied via environment variables
+    // (the CI release workflow decodes it from repo secrets). If not configured or empty, builds stay unsigned.
+    val releaseKeystore = System.getenv("KEYSTORE_FILE")
+        ?.takeIf { it.isNotBlank() }
+        ?.let { file(it) }
+        ?.takeIf { it.exists() && it.length() > 0 }
     signingConfigs {
         if (releaseKeystore != null) {
             create("release") {

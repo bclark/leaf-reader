@@ -210,7 +210,7 @@ struct MenuView: View {
                         SectionLabel("SUPPORT LEAF")
                         Spacer().frame(height: 10)
                         Text("Enjoying Leaf? You can leave an optional tip to support development. All features remain free.")
-                            .font(.archivo(12, weight: .medium))
+                            .font(.archivo(12, weight: 500))
                             .lineSpacing(4)
                             .foregroundColor(Leaf.cream)
                         Spacer().frame(height: 12)
@@ -239,7 +239,7 @@ struct MenuView: View {
                         Spacer().frame(height: 6)
                         Link(destination: Self.kofiURL) {
                             Text("ko-fi.com/bryanclark")
-                                .font(.archivo(11, weight: .semibold))
+                                .font(.archivo(11, weight: 600))
                                 .foregroundColor(Leaf.ochre)
                         }
 
@@ -247,7 +247,7 @@ struct MenuView: View {
 
                         // ---- Support Upstream --------------------------------------------
                         Text("Support the upstream creator of Chika:")
-                            .font(.archivo(12, weight: .medium))
+                            .font(.archivo(12, weight: 500))
                             .lineSpacing(3)
                             .foregroundColor(Leaf.creamMuted)
                         Spacer().frame(height: 12)
@@ -274,7 +274,7 @@ struct MenuView: View {
                         Spacer().frame(height: 6)
                         Link(destination: Self.upstreamURL) {
                             Text("github.com/batunii/chika")
-                                .font(.archivo(11, weight: .semibold))
+                                .font(.archivo(11, weight: 600))
                                 .foregroundColor(Leaf.ochre)
                         }
                     }
