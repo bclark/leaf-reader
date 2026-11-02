@@ -111,6 +111,7 @@ import net.digitalbc.leafreader.ui.theme.Ink
 import net.digitalbc.leafreader.ui.theme.LeafAccent
 import net.digitalbc.leafreader.ui.theme.LeafPrimary
 import net.digitalbc.leafreader.ui.theme.Ochre
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -150,117 +151,88 @@ fun ReaderScreen(
     val isSpread = state.isSpread && state.secondPage != null
     val scope = rememberCoroutineScope()
 
-    val nextBitmap by produceState<Bitmap?>(
-        initialValue = viewModel.getCachedPageBitmap(pageIndex + 1),
-        key1 = pageIndex,
-    ) {
-        if (pageIndex < pageCount - 1) {
-            value = viewModel.getCachedPageBitmap(pageIndex + 1) ?: viewModel.loadPageBitmap(pageIndex + 1)
+    // Keep document indices with decoded images: produceState retains its previous value
+    // when keys change, so unlabelled adjacent images can briefly belong to the old spread.
+    val adjacentPages by produceState<Map<Int, Bitmap>>(emptyMap(), pageIndex, isSpread, pageCount) {
+        value = emptyMap()
+        for (index in (pageIndex - 2..pageIndex + 3)) {
+            if (index in 0 until pageCount && index != pageIndex) {
+                val page = viewModel.getCachedPageBitmap(index) ?: viewModel.loadPageBitmap(index)
+                if (page != null) value = value + (index to page)
+            }
         }
     }
-    val prevBitmap by produceState<Bitmap?>(
-        initialValue = viewModel.getCachedPageBitmap(pageIndex - 1),
-        key1 = pageIndex,
-    ) {
-        if (pageIndex > 0) {
-            value = viewModel.getCachedPageBitmap(pageIndex - 1) ?: viewModel.loadPageBitmap(pageIndex - 1)
-        }
-    }
-
-    val nextSpreadP1Bitmap by produceState<Bitmap?>(
-        initialValue = viewModel.getCachedPageBitmap(pageIndex + 2),
-        key1 = pageIndex,
-    ) {
-        if (isSpread && pageIndex + 2 < pageCount) {
-            value = viewModel.getCachedPageBitmap(pageIndex + 2) ?: viewModel.loadPageBitmap(pageIndex + 2)
-        }
-    }
-    val nextSpreadP2Bitmap by produceState<Bitmap?>(
-        initialValue = viewModel.getCachedPageBitmap(pageIndex + 3),
-        key1 = pageIndex,
-    ) {
-        if (isSpread && pageIndex + 3 < pageCount) {
-            value = viewModel.getCachedPageBitmap(pageIndex + 3) ?: viewModel.loadPageBitmap(pageIndex + 3)
-        }
-    }
-    val prevSpreadP1Index = if (pageIndex % 2 == 1) (pageIndex - 2).coerceAtLeast(0) else pageIndex - 1
-    val prevSpreadP1Bitmap by produceState<Bitmap?>(
-        initialValue = if (pageIndex > 0) viewModel.getCachedPageBitmap(prevSpreadP1Index) else null,
-        key1 = pageIndex,
-    ) {
-        if (isSpread && pageIndex > 0 && prevSpreadP1Index >= 0) {
-            value = viewModel.getCachedPageBitmap(prevSpreadP1Index) ?: viewModel.loadPageBitmap(prevSpreadP1Index)
-        }
-    }
-    val prevSpreadP2Index = if (prevSpreadP1Index > 0 && prevSpreadP1Index + 1 < pageIndex) prevSpreadP1Index + 1 else null
-    val prevSpreadP2Bitmap by produceState<Bitmap?>(
-        initialValue = prevSpreadP2Index?.let { viewModel.getCachedPageBitmap(it) },
-        key1 = pageIndex,
-    ) {
-        if (isSpread && prevSpreadP2Index != null) {
-            value = viewModel.getCachedPageBitmap(prevSpreadP2Index) ?: viewModel.loadPageBitmap(prevSpreadP2Index)
-        }
-    }
-
-    val getPageBitmap: (Int?) -> Bitmap? = { docIndex ->
-        when (docIndex) {
+    val getPageBitmap: (Int?) -> Bitmap? = { index ->
+        when (index) {
             null -> null
             pageIndex -> state.page
-            pageIndex + 1 -> if (state.secondPage != null) state.secondPage else (nextBitmap ?: viewModel.getCachedPageBitmap(docIndex))
-            pageIndex - 1 -> prevBitmap ?: viewModel.getCachedPageBitmap(docIndex)
-            pageIndex + 2 -> nextSpreadP1Bitmap ?: viewModel.getCachedPageBitmap(docIndex)
-            pageIndex + 3 -> nextSpreadP2Bitmap ?: viewModel.getCachedPageBitmap(docIndex)
-            prevSpreadP1Index -> prevSpreadP1Bitmap ?: viewModel.getCachedPageBitmap(docIndex)
-            prevSpreadP2Index -> prevSpreadP2Bitmap ?: viewModel.getCachedPageBitmap(docIndex)
-            else -> viewModel.getCachedPageBitmap(docIndex)
+            pageIndex + 1 -> state.secondPage ?: adjacentPages[index] ?: viewModel.getCachedPageBitmap(index)
+            else -> adjacentPages[index] ?: viewModel.getCachedPageBitmap(index)
         }
     }
+    val nextBitmap = getPageBitmap(pageIndex + 1)
+    val prevBitmap = getPageBitmap(pageIndex - 1)
 
-    var curlDirection by remember { mutableStateOf<CurlDirection?>(null) }
-    var curlProgress by remember { mutableFloatStateOf(0f) }
+    var curlDirection by remember(pageIndex, rtl, fitMode, spreadActive, isSpread, configuration.screenWidthDp, configuration.screenHeightDp) { mutableStateOf<CurlDirection?>(null) }
+    var curlProgress by remember(pageIndex, rtl, fitMode, spreadActive, isSpread, configuration.screenWidthDp, configuration.screenHeightDp) { mutableFloatStateOf(0f) }
 
+    val canAnimateTurn: (CurlDirection) -> Boolean = { direction ->
+        val mapping = computeSpreadTurnMapping(pageIndex, if (isSpread) pageIndex + 1 else null,
+            pageCount, rtl, direction == CurlDirection.FORWARD)
+        if (mapping != null) {
+            getPageBitmap(mapping.movingBackDocIndex) != null &&
+                (mapping.underneathDocIndex == null || getPageBitmap(mapping.underneathDocIndex) != null)
+        } else if (direction == CurlDirection.FORWARD) nextBitmap != null else prevBitmap != null
+    }
     val canTurnForward = if (isSpread) pageIndex + 2 < pageCount else pageIndex < pageCount - 1
     val canTurnBackward = pageIndex > 0
 
-    val turnForward: () -> Unit = {
-        if (canTurnForward && curlDirection == null) {
-            curlDirection = CurlDirection.FORWARD
-            scope.launch {
-                animate(0f, 1f, animationSpec = tween(280, easing = FastOutSlowInEasing)) { value, _ ->
-                    curlProgress = value
-                }
-                val oldIndex = viewModel.state.value.pageIndex
-                viewModel.nextPage()
-                delay(60)
-                if (viewModel.state.value.pageIndex == oldIndex) {
-                    curlProgress = 0f
-                    curlDirection = null
-                }
-            }
-        }
+    var turnJob by remember { mutableStateOf<Job?>(null) }
+    DisposableEffect(pageIndex, rtl, fitMode, spreadActive, isSpread, configuration.screenWidthDp, configuration.screenHeightDp) {
+        onDispose { turnJob?.cancel() }
     }
-
-    val turnBackward: () -> Unit = {
-        if (canTurnBackward && curlDirection == null) {
-            curlDirection = CurlDirection.BACKWARD
-            scope.launch {
-                animate(0f, 1f, animationSpec = tween(280, easing = FastOutSlowInEasing)) { value, _ ->
-                    curlProgress = value
-                }
-                val oldIndex = viewModel.state.value.pageIndex
-                viewModel.previousPage()
-                delay(60)
-                if (viewModel.state.value.pageIndex == oldIndex) {
-                    curlProgress = 0f
-                    curlDirection = null
-                }
-            }
-        }
-    }
-
-    LaunchedEffect(state.pageIndex) {
-        curlProgress = 0f
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val interruptTurn by rememberUpdatedState<() -> Unit>({
+        turnJob?.cancel()
         curlDirection = null
+        curlProgress = 0f
+    })
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                interruptTurn()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val settleTurn: (CurlDirection, Float, Boolean) -> Unit = { direction, from, complete ->
+        turnJob?.cancel()
+        turnJob = scope.launch {
+            animate(from, if (complete) 1f else 0f,
+                animationSpec = tween(if (complete) 260 else 180, easing = FastOutSlowInEasing)) { value, _ ->
+                curlProgress = value
+            }
+            if (complete) {
+                if (direction == CurlDirection.FORWARD) viewModel.nextPage() else viewModel.previousPage()
+                // Hold the final sheet until decoding/navigation has published the destination.
+                viewModel.state.first { it.pageIndex != pageIndex || it.error != null }
+            }
+            curlProgress = 0f
+            curlDirection = null
+        }
+    }
+    val turnForward: () -> Unit = {
+        if (canTurnForward && curlDirection == null && canAnimateTurn(CurlDirection.FORWARD)) {
+            curlDirection = CurlDirection.FORWARD
+            settleTurn(CurlDirection.FORWARD, 0f, true)
+        }
+    }
+    val turnBackward: () -> Unit = {
+        if (canTurnBackward && curlDirection == null && canAnimateTurn(CurlDirection.BACKWARD)) {
+            curlDirection = CurlDirection.BACKWARD
+            settleTurn(CurlDirection.BACKWARD, 0f, true)
+        }
     }
 
     // Go fully immersive (hide the status/nav bars, incl. the battery/clock icons) while reading;
@@ -303,8 +275,8 @@ fun ReaderScreen(
                 },
                 onTurnForward = turnForward,
                 onTurnBackward = turnBackward,
-                onNextPage = viewModel::nextPage,
-                onPrevPage = viewModel::previousPage,
+                onSettleTurn = settleTurn,
+                canAnimateTurn = canAnimateTurn,
                 onToggleChrome = { chromeVisible = !chromeVisible },
                 onShowFullPage = viewModel::showFullPage,
             )
@@ -819,295 +791,57 @@ private fun DrawScope.drawSpreadCurlTurn(
     if (staticBitmap.isRecycled || movingFrontBitmap.isRecycled) return
     val cx = size.width / 2f
     val cy = size.height / 2f
+    val left = cx + (spread.left1 - cx) * userScale + userPanX
+    val spine = cx + (spread.left2 - cx) * userScale + userPanX
+    val top = cy + (spread.top1 - cy) * userScale + userPanY
+    val leftWidth = spread.width1 * userScale
+    val rightWidth = spread.width2 * userScale
+    val height = spread.height1 * userScale
+    val fromRight = mapping.isPeelingFromRight
+    val width = if (fromRight) rightWidth else leftWidth
+    val t = progress.coerceIn(0f, 1f)
+    val radius = width * 0.16f * kotlin.math.sin(t * kotlin.math.PI.toFloat()).coerceAtLeast(0f)
+    val fold = computeSpreadCurlFold(width, t, radius)
+    val faceBoundary = (fold + radius * kotlin.math.PI.toFloat() / 2f).coerceIn(0f, width)
 
-    val l1 = cx + (spread.left1 - cx) * userScale + userPanX
-    val t1 = cy + (spread.top1 - cy) * userScale + userPanY
-    val w1 = spread.width1 * userScale
-    val h1 = spread.height1 * userScale
-
-    val l2 = cx + (spread.left2 - cx) * userScale + userPanX
-    val t2 = cy + (spread.top2 - cy) * userScale + userPanY
-    val w2 = spread.width2 * userScale
-    val h2 = spread.height2 * userScale
-
-    val spineX = l2
-    val t = progress.coerceIn(0.001f, 0.999f)
-
-    if (mapping.isPeelingFromRight) {
-        val w = w2
-        val h = h2
-        val maxR = w * 0.16f
-        val r = (maxR * kotlin.math.sin(t * Math.PI.toFloat())).coerceAtLeast(2.dp.toPx())
-        val sFold = w * (1f - t)
-        val xFold = spineX + sFold
-        val xApex = xFold + r
-
-        // 1. Static page on the left: stays in place until covered
-        val staticSrc = Rect(0, 0, staticBitmap.width, staticBitmap.height)
-        val staticDst = Rect(l1.roundToInt(), t1.roundToInt(), (l1 + w1).roundToInt(), (t1 + h1).roundToInt())
+    fun drawFlat(bitmap: Bitmap?, x: Float, w: Float) {
+        if (bitmap == null || bitmap.isRecycled) return
         drawIntoCanvas { canvas ->
-            canvas.nativeCanvas.drawBitmap(staticBitmap, staticSrc, staticDst, meshPaint)
-        }
-
-        // 2. Underneath page revealed on the right as the sheet lifts
-        if (underneathBitmap != null && !underneathBitmap.isRecycled) {
-            val underSrc = Rect(0, 0, underneathBitmap.width, underneathBitmap.height)
-            val underDst = Rect(l2.roundToInt(), t2.roundToInt(), (l2 + w2).roundToInt(), (t2 + h2).roundToInt())
-            drawIntoCanvas { canvas ->
-                canvas.nativeCanvas.drawBitmap(underneathBitmap, underSrc, underDst, meshPaint)
-            }
-        }
-
-        // 3. Crease shadow onto the revealed underneath page (falling to the left of xFold)
-        val shadowWidth = (r * 1.5f).coerceAtLeast(10.dp.toPx())
-        val shadowAlpha = (0.5f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.55f)
-        if (shadowAlpha > 0.02f) {
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0.0f to Color.Transparent,
-                    0.6f to Color.Black.copy(alpha = shadowAlpha * 0.4f),
-                    1.0f to Color.Black.copy(alpha = shadowAlpha),
-                    startX = (xFold - shadowWidth).coerceAtLeast(spineX),
-                    endX = xFold,
-                ),
-                topLeft = Offset((xFold - shadowWidth).coerceAtLeast(spineX), t2),
-                size = Size(xFold - (xFold - shadowWidth).coerceAtLeast(spineX), h),
-            )
-        }
-
-        // 4. Moving front sheet (lifts from right edge, curls around cylinder)
-        var fIdx = 0
-        for (row in 0..MESH_ROWS) {
-            val v = row.toFloat() / MESH_ROWS
-            val y = t2 + v * h
-            for (col in 0..MESH_COLS) {
-                val u = col.toFloat() / MESH_COLS
-                val s = u * w
-                val x = computeSpreadCurlX(s, sFold, r, spineX, isPeelingFromRight = true)
-                vertsFront[fIdx++] = x
-                vertsFront[fIdx++] = y
-            }
-        }
-        clipRect(left = spineX, top = t2 - 2f, right = xApex + 1f, bottom = t2 + h + 2f) {
-            drawIntoCanvas { canvas ->
-                canvas.nativeCanvas.drawBitmapMesh(
-                    movingFrontBitmap,
-                    MESH_COLS,
-                    MESH_ROWS,
-                    vertsFront,
-                    0,
-                    null,
-                    0,
-                    meshPaint,
-                )
-            }
-        }
-
-        // 5. Moving back sheet (reverse face, becomes visible as sheet turns over, upright and readable)
-        if (movingBackBitmap != null && !movingBackBitmap.isRecycled) {
-            var bIdx = 0
-            for (row in 0..MESH_ROWS) {
-                val v = row.toFloat() / MESH_ROWS
-                val y = t1 + v * h1
-                for (col in 0..MESH_COLS) {
-                    val u = col.toFloat() / MESH_COLS
-                    val s = (1f - u) * w
-                    val x = computeSpreadCurlX(s, sFold, r, spineX, isPeelingFromRight = true)
-                    vertsBack[bIdx++] = x
-                    vertsBack[bIdx++] = y
-                }
-            }
-            clipRect(left = l1 - 20f, top = minOf(t1, t2) - 2f, right = xApex, bottom = maxOf(t1 + h1, t2 + h) + 2f) {
-                drawIntoCanvas { canvas ->
-                    canvas.nativeCanvas.drawBitmapMesh(
-                        movingBackBitmap,
-                        MESH_COLS,
-                        MESH_ROWS,
-                        vertsBack,
-                        0,
-                        null,
-                        0,
-                        meshPaint,
-                    )
-                }
-            }
-        }
-
-        // 6. Landing shadow cast onto the static page on the left
-        val landingAlpha = (0.35f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.4f)
-        if (landingAlpha > 0.02f && t > 0.35f) {
-            val minTurnedX = computeSpreadCurlX(w, sFold, r, spineX, isPeelingFromRight = true)
-            val landingW = (r * 1.6f).coerceAtLeast(12.dp.toPx())
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0.0f to Color.Transparent,
-                    0.7f to Color.Black.copy(alpha = landingAlpha * 0.5f),
-                    1.0f to Color.Black.copy(alpha = landingAlpha),
-                    startX = (minTurnedX - landingW).coerceAtLeast(l1),
-                    endX = minTurnedX,
-                ),
-                topLeft = Offset((minTurnedX - landingW).coerceAtLeast(l1), t1),
-                size = Size(minTurnedX - (minTurnedX - landingW).coerceAtLeast(l1), h1),
-            )
-        }
-
-        // 7. Specular highlight along apex of the roll
-        val highlightWidth = r * 0.7f
-        val highlightAlpha = (0.28f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.3f)
-        if (highlightAlpha > 0.02f) {
-            val hlLeft = xApex - highlightWidth * 0.5f
-            val hlRight = xApex + highlightWidth * 0.5f
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0.0f to Color.Transparent,
-                    0.5f to Color.White.copy(alpha = highlightAlpha),
-                    1.0f to Color.Transparent,
-                    startX = hlLeft,
-                    endX = hlRight,
-                ),
-                topLeft = Offset(hlLeft, minOf(t1, t2)),
-                size = Size(hlRight - hlLeft, maxOf(h1, h)),
-            )
-        }
-    } else {
-        // Peeling from Left to Right
-        val w = w1
-        val h = h1
-        val maxR = w * 0.16f
-        val r = (maxR * kotlin.math.sin(t * Math.PI.toFloat())).coerceAtLeast(2.dp.toPx())
-        val sFold = w * (1f - t)
-        val xFold = spineX - sFold
-        val xApex = xFold - r
-
-        // 1. Static page on the right: stays in place until covered
-        val staticSrc = Rect(0, 0, staticBitmap.width, staticBitmap.height)
-        val staticDst = Rect(l2.roundToInt(), t2.roundToInt(), (l2 + w2).roundToInt(), (t2 + h2).roundToInt())
-        drawIntoCanvas { canvas ->
-            canvas.nativeCanvas.drawBitmap(staticBitmap, staticSrc, staticDst, meshPaint)
-        }
-
-        // 2. Underneath page revealed on the left as the sheet lifts
-        if (underneathBitmap != null && !underneathBitmap.isRecycled) {
-            val underSrc = Rect(0, 0, underneathBitmap.width, underneathBitmap.height)
-            val underDst = Rect(l1.roundToInt(), t1.roundToInt(), (l1 + w1).roundToInt(), (t1 + h1).roundToInt())
-            drawIntoCanvas { canvas ->
-                canvas.nativeCanvas.drawBitmap(underneathBitmap, underSrc, underDst, meshPaint)
-            }
-        }
-
-        // 3. Crease shadow onto revealed underneath page (falling to the right of xFold)
-        val shadowWidth = (r * 1.5f).coerceAtLeast(10.dp.toPx())
-        val shadowAlpha = (0.5f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.55f)
-        if (shadowAlpha > 0.02f) {
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0.0f to Color.Black.copy(alpha = shadowAlpha),
-                    0.4f to Color.Black.copy(alpha = shadowAlpha * 0.4f),
-                    1.0f to Color.Transparent,
-                    startX = xFold,
-                    endX = (xFold + shadowWidth).coerceAtMost(spineX),
-                ),
-                topLeft = Offset(xFold, t1),
-                size = Size((xFold + shadowWidth).coerceAtMost(spineX) - xFold, h),
-            )
-        }
-
-        // 4. Moving front sheet (lifts from left edge, curls toward spine)
-        var fIdx = 0
-        for (row in 0..MESH_ROWS) {
-            val v = row.toFloat() / MESH_ROWS
-            val y = t1 + v * h
-            for (col in 0..MESH_COLS) {
-                val u = col.toFloat() / MESH_COLS
-                val s = (1f - u) * w
-                val x = computeSpreadCurlX(s, sFold, r, spineX, isPeelingFromRight = false)
-                vertsFront[fIdx++] = x
-                vertsFront[fIdx++] = y
-            }
-        }
-        clipRect(left = xApex - 1f, top = t1 - 2f, right = spineX, bottom = t1 + h + 2f) {
-            drawIntoCanvas { canvas ->
-                canvas.nativeCanvas.drawBitmapMesh(
-                    movingFrontBitmap,
-                    MESH_COLS,
-                    MESH_ROWS,
-                    vertsFront,
-                    0,
-                    null,
-                    0,
-                    meshPaint,
-                )
-            }
-        }
-
-        // 5. Moving back sheet (reverse face, becomes visible as sheet turns over, upright and readable)
-        if (movingBackBitmap != null && !movingBackBitmap.isRecycled) {
-            var bIdx = 0
-            for (row in 0..MESH_ROWS) {
-                val v = row.toFloat() / MESH_ROWS
-                val y = t2 + v * h2
-                for (col in 0..MESH_COLS) {
-                    val u = col.toFloat() / MESH_COLS
-                    val s = u * w
-                    val x = computeSpreadCurlX(s, sFold, r, spineX, isPeelingFromRight = false)
-                    vertsBack[bIdx++] = x
-                    vertsBack[bIdx++] = y
-                }
-            }
-            clipRect(left = xApex, top = minOf(t1, t2) - 2f, right = l2 + w2 + 20f, bottom = maxOf(t1 + h, t2 + h2) + 2f) {
-                drawIntoCanvas { canvas ->
-                    canvas.nativeCanvas.drawBitmapMesh(
-                        movingBackBitmap,
-                        MESH_COLS,
-                        MESH_ROWS,
-                        vertsBack,
-                        0,
-                        null,
-                        0,
-                        meshPaint,
-                    )
-                }
-            }
-        }
-
-        // 6. Landing shadow cast onto the static page on the right
-        val landingAlpha = (0.35f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.4f)
-        if (landingAlpha > 0.02f && t > 0.35f) {
-            val maxTurnedX = computeSpreadCurlX(w, sFold, r, spineX, isPeelingFromRight = false)
-            val landingW = (r * 1.6f).coerceAtLeast(12.dp.toPx())
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0.0f to Color.Black.copy(alpha = landingAlpha),
-                    0.3f to Color.Black.copy(alpha = landingAlpha * 0.5f),
-                    1.0f to Color.Transparent,
-                    startX = maxTurnedX,
-                    endX = (maxTurnedX + landingW).coerceAtMost(l2 + w2),
-                ),
-                topLeft = Offset(maxTurnedX, t2),
-                size = Size((maxTurnedX + landingW).coerceAtMost(l2 + w2) - maxTurnedX, h2),
-            )
-        }
-
-        // 7. Specular highlight along apex of the roll
-        val highlightWidth = r * 0.7f
-        val highlightAlpha = (0.28f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.3f)
-        if (highlightAlpha > 0.02f) {
-            val hlLeft = xApex - highlightWidth * 0.5f
-            val hlRight = xApex + highlightWidth * 0.5f
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0.0f to Color.Transparent,
-                    0.5f to Color.White.copy(alpha = highlightAlpha),
-                    1.0f to Color.Transparent,
-                    startX = hlLeft,
-                    endX = hlRight,
-                ),
-                topLeft = Offset(hlLeft, minOf(t1, t2)),
-                size = Size(hlRight - hlLeft, maxOf(h, h2)),
-            )
+            canvas.nativeCanvas.drawBitmap(bitmap, Rect(0, 0, bitmap.width, bitmap.height),
+                android.graphics.RectF(x, top, x + w, top + height), meshPaint)
         }
     }
+    drawFlat(staticBitmap, if (fromRight) left else spine, if (fromRight) leftWidth else rightWidth)
+    drawFlat(underneathBitmap, if (fromRight) spine else left, width)
+
+    // The cylinder's surface normal changes sign at the apex. Collapse the hidden
+    // part of each face to that boundary, rather than painting two whole images
+    // over the same mesh (which showed the back before the sheet had turned).
+    fun drawFace(bitmap: Bitmap?, back: Boolean, vertices: FloatArray) {
+        if (bitmap == null || bitmap.isRecycled) return
+        var i = 0
+        for (row in 0..MESH_ROWS) {
+            for (col in 0..MESH_COLS) {
+                val u = col.toFloat() / MESH_COLS
+                vertices[i++] = computeSpreadCurlFaceX(u, width, fold, radius, spine, fromRight, back)
+                vertices[i++] = top + row.toFloat() / MESH_ROWS * height
+            }
+        }
+        drawIntoCanvas { canvas ->
+            canvas.nativeCanvas.drawBitmapMesh(bitmap, MESH_COLS, MESH_ROWS, vertices, 0, null, 0, meshPaint)
+        }
+    }
+    drawFace(movingFrontBitmap, false, vertsFront)
+    drawFace(movingBackBitmap, true, vertsBack)
+    if (radius > 1f) {
+        val apex = computeSpreadCurlX(faceBoundary, fold, radius, spine, fromRight)
+        val highlight = radius * 0.35f
+        drawRect(Brush.horizontalGradient(listOf(Color.Transparent, Color.White.copy(alpha = 0.15f), Color.Transparent),
+            startX = apex - highlight, endX = apex + highlight),
+            Offset(apex - highlight, top), Size(highlight * 2f, height))
+    }
 }
+
 
 @Composable
 private fun PageViewer(
@@ -1121,8 +855,8 @@ private fun PageViewer(
     onUpdateCurl: (CurlDirection?, Float) -> Unit,
     onTurnForward: () -> Unit,
     onTurnBackward: () -> Unit,
-    onNextPage: () -> Unit,
-    onPrevPage: () -> Unit,
+    onSettleTurn: (CurlDirection, Float, Boolean) -> Unit,
+    canAnimateTurn: (CurlDirection) -> Boolean,
     onToggleChrome: () -> Unit,
     onShowFullPage: () -> Unit,
 ) {
@@ -1178,159 +912,184 @@ private fun PageViewer(
     val vertsBack = remember { FloatArray(MESH_VERT_COUNT) }
     val verts = vertsFront
 
+    val viewport = androidx.compose.ui.platform.LocalConfiguration.current
+    val currentCurlDirection by rememberUpdatedState(curlDirection)
+    val currentCanAnimateTurn by rememberUpdatedState(canAnimateTurn)
+    val currentSettleTurn by rememberUpdatedState(onSettleTurn)
     var pendingTap by remember { mutableStateOf<Job?>(null) }
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) pendingTap?.cancel()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            pendingTap?.cancel()
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(pageIndex, pageCount, rtl, fitMode, isSpread) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    val downPos = down.position
-                    var pan = Offset.Zero
-                    var zoom = 1f
-                    var maxPointers = 1
-                    var pastSlop = false
-                    var isCurlDrag = false
-                    var activeDirection: CurlDirection? = null
-                    var curDragT = 0f
-                    val slop = viewConfiguration.touchSlop
-                    val velocityTracker = VelocityTracker()
-                    velocityTracker.addPosition(down.uptimeMillis, down.position)
-
-                    do {
-                        val event = awaitPointerEvent()
-                        maxPointers = maxOf(maxPointers, event.changes.count { it.pressed })
-                        val zoomChange = event.calculateZoom()
-                        val panChange = event.calculatePan()
-                        pan += panChange
-                        zoom *= zoomChange
-
-                        event.changes.firstOrNull { it.id == down.id }?.let {
-                            velocityTracker.addPosition(it.uptimeMillis, it.position)
+            .pointerInput(pageIndex, pageCount, rtl, fitMode, isSpread, viewport.screenWidthDp, viewport.screenHeightDp) {
+                try {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = true)
+                        if (currentCurlDirection != null) {
+                            do { val event = awaitPointerEvent() } while (event.changes.any { it.pressed })
+                            return@awaitEachGesture
                         }
+                        val downPos = down.position
+                        var pan = Offset.Zero
+                        var zoom = 1f
+                        var maxPointers = 1
+                        var pastSlop = false
+                        var cancelled = false
+                        var isCurlDrag = false
+                        var activeDirection: CurlDirection? = null
+                        var curDragT = 0f
+                        val slop = viewConfiguration.touchSlop
+                        val velocityTracker = VelocityTracker()
+                        velocityTracker.addPosition(down.uptimeMillis, down.position)
 
-                        if (!pastSlop && (abs(zoom - 1f) > 0.02f || pan.getDistance() > slop)) {
-                            pastSlop = true
-                            if (maxPointers == 1 && userScale <= 1.05f && abs(pan.x) > abs(pan.y)) {
-                                val dir = if (!rtl) {
-                                    if (pan.x < 0f) CurlDirection.FORWARD else CurlDirection.BACKWARD
-                                } else {
-                                    if (pan.x > 0f) CurlDirection.FORWARD else CurlDirection.BACKWARD
-                                }
-                                val canTurn = when (dir) {
-                                    CurlDirection.FORWARD -> (if (isSpread) pageIndex + 2 < pageCount else pageIndex < pageCount - 1)
-                                    CurlDirection.BACKWARD -> pageIndex > 0
-                                }
-                                if (canTurn) {
-                                    isCurlDrag = true
-                                    activeDirection = dir
-                                    onUpdateCurl(dir, 0f)
-                                }
+                        do {
+                            val event = awaitPointerEvent()
+                            if (event.changes.any { it.isConsumed }) {
+                                cancelled = true
+                                break
                             }
-                        }
+                            maxPointers = maxOf(maxPointers, event.changes.count { it.pressed })
+                            val zoomChange = event.calculateZoom()
+                            val panChange = event.calculatePan()
+                            pan += panChange
+                            zoom *= zoomChange
 
-                        if (pastSlop) {
-                            if (isCurlDrag && activeDirection != null) {
-                                event.changes.forEach { if (it.positionChanged()) it.consume() }
-                                val containerW = size.width.toFloat()
-                                val rawT = if (!rtl) {
-                                    if (activeDirection == CurlDirection.FORWARD) -pan.x / containerW else pan.x / containerW
-                                } else {
-                                    if (activeDirection == CurlDirection.FORWARD) pan.x / containerW else -pan.x / containerW
-                                }
-                                curDragT = rawT.coerceIn(0f, 1f)
-                                onUpdateCurl(activeDirection, curDragT)
-                            } else {
-                                val newScale = (userScale * zoomChange).coerceIn(1f, 5f)
-                                userScale = newScale
-                                val cw = size.width.toFloat()
-                                val ch = size.height.toFloat()
-                                if (isSpread) {
-                                    val spread = computeSpreadDraw(
-                                        page1W = leftBitmap.width,
-                                        page1H = leftBitmap.height,
-                                        page2W = rightBitmap.width,
-                                        page2H = rightBitmap.height,
-                                        containerW = cw,
-                                        containerH = ch,
-                                        fitMode = fitMode,
-                                    )
-                                    val effectiveW = spread.totalWidth * newScale
-                                    val effectiveH = spread.totalHeight * newScale
-                                    val baseLeft = cw / 2f + (spread.boundLeft - cw / 2f) * newScale
-                                    val baseTop = ch / 2f + (spread.boundTop - ch / 2f) * newScale
-                                    userPanX = if (effectiveW > cw) clampPan(userPanX + panChange.x, baseLeft, effectiveW, cw) else 0f
-                                    userPanY = if (effectiveH > ch) clampPan(userPanY + panChange.y, baseTop, effectiveH, ch) else 0f
-                                } else {
-                                    val draw = computePageDraw(
-                                        camera = camera.value,
-                                        bitmapW = image.width,
-                                        bitmapH = image.height,
-                                        containerW = cw,
-                                        containerH = ch,
-                                        fitMode = fitMode,
-                                    )
-                                    val effectiveW = draw.scaledWidth * newScale
-                                    val effectiveH = draw.scaledHeight * newScale
-                                    val baseLeft = cw / 2f + (draw.left - cw / 2f) * newScale
-                                    val baseTop = ch / 2f + (draw.top - ch / 2f) * newScale
-                                    userPanX = if (effectiveW > cw) clampPan(userPanX + panChange.x, baseLeft, effectiveW, cw) else 0f
-                                    userPanY = if (effectiveH > ch) clampPan(userPanY + panChange.y, baseTop, effectiveH, ch) else 0f
-                                }
-                                event.changes.forEach { if (it.positionChanged()) it.consume() }
+                            event.changes.firstOrNull { it.id == down.id }?.let {
+                                velocityTracker.addPosition(it.uptimeMillis, it.position)
                             }
-                        }
-                    } while (event.changes.any { it.pressed })
 
-                    if (!pastSlop) {
-                        val w = size.width
-                        val tapX = downPos.x
-                        val inFlight = pendingTap
-                        if (inFlight != null && inFlight.isActive) {
-                            inFlight.cancel()
-                            pendingTap = null
-                            onShowFullPage()
-                            resetView()
-                        } else {
-                            pendingTap = scope.launch {
-                                delay(DOUBLE_TAP_WINDOW_MS)
-                                if (userScale > 1.05f) {
-                                    onToggleChrome()
-                                } else {
-                                    when {
-                                        tapX < w / 3f -> if (rtl) onTurnForward() else onTurnBackward()
-                                        tapX > w * 2f / 3f -> if (rtl) onTurnBackward() else onTurnForward()
-                                        else -> onToggleChrome()
+                            if (!pastSlop && (abs(zoom - 1f) > 0.02f || pan.getDistance() > slop)) {
+                                pastSlop = true
+                                if (maxPointers == 1 && userScale <= 1.05f && abs(pan.x) > abs(pan.y)) {
+                                    val dir = if (!rtl) {
+                                        if (pan.x < 0f) CurlDirection.FORWARD else CurlDirection.BACKWARD
+                                    } else {
+                                        if (pan.x > 0f) CurlDirection.FORWARD else CurlDirection.BACKWARD
+                                    }
+                                    val canTurn = when (dir) {
+                                        CurlDirection.FORWARD -> (if (isSpread) pageIndex + 2 < pageCount else pageIndex < pageCount - 1)
+                                        CurlDirection.BACKWARD -> pageIndex > 0
+                                    }
+                                    if (canTurn && currentCanAnimateTurn(dir)) {
+                                        pendingTap?.cancel()
+                                        isCurlDrag = true
+                                        activeDirection = dir
+                                        onUpdateCurl(dir, 0f)
                                     }
                                 }
+                            }
+
+                            if (isCurlDrag && maxPointers > 1) {
+                                onUpdateCurl(null, 0f)
+                                isCurlDrag = false
+                                activeDirection = null
+                            }
+                            if (pastSlop) {
+                                pendingTap?.cancel()
+                                if (isCurlDrag && activeDirection != null) {
+                                    event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                    val containerW = size.width.toFloat()
+                                    val rawT = if (!rtl) {
+                                        if (activeDirection == CurlDirection.FORWARD) -pan.x / containerW else pan.x / containerW
+                                    } else {
+                                        if (activeDirection == CurlDirection.FORWARD) pan.x / containerW else -pan.x / containerW
+                                    }
+                                    curDragT = rawT.coerceIn(0f, 1f)
+                                    onUpdateCurl(activeDirection, curDragT)
+                                } else {
+                                    val newScale = (userScale * zoomChange).coerceIn(1f, 5f)
+                                    userScale = newScale
+                                    val cw = size.width.toFloat()
+                                    val ch = size.height.toFloat()
+                                    if (isSpread) {
+                                        val spread = computeSpreadDraw(
+                                            page1W = leftBitmap.width,
+                                            page1H = leftBitmap.height,
+                                            page2W = rightBitmap.width,
+                                            page2H = rightBitmap.height,
+                                            containerW = cw,
+                                            containerH = ch,
+                                            fitMode = fitMode,
+                                        )
+                                        val effectiveW = spread.totalWidth * newScale
+                                        val effectiveH = spread.totalHeight * newScale
+                                        val baseLeft = cw / 2f + (spread.boundLeft - cw / 2f) * newScale
+                                        val baseTop = ch / 2f + (spread.boundTop - ch / 2f) * newScale
+                                        userPanX = if (effectiveW > cw) clampPan(userPanX + panChange.x, baseLeft, effectiveW, cw) else 0f
+                                        userPanY = if (effectiveH > ch) clampPan(userPanY + panChange.y, baseTop, effectiveH, ch) else 0f
+                                    } else {
+                                        val draw = computePageDraw(
+                                            camera = camera.value,
+                                            bitmapW = image.width,
+                                            bitmapH = image.height,
+                                            containerW = cw,
+                                            containerH = ch,
+                                            fitMode = fitMode,
+                                        )
+                                        val effectiveW = draw.scaledWidth * newScale
+                                        val effectiveH = draw.scaledHeight * newScale
+                                        val baseLeft = cw / 2f + (draw.left - cw / 2f) * newScale
+                                        val baseTop = ch / 2f + (draw.top - ch / 2f) * newScale
+                                        userPanX = if (effectiveW > cw) clampPan(userPanX + panChange.x, baseLeft, effectiveW, cw) else 0f
+                                        userPanY = if (effectiveH > ch) clampPan(userPanY + panChange.y, baseTop, effectiveH, ch) else 0f
+                                    }
+                                    event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                }
+                            }
+                        } while (event.changes.any { it.pressed })
+
+                        if (cancelled) {
+                            onUpdateCurl(null, 0f)
+                        } else if (!pastSlop) {
+                            val w = size.width
+                            val tapX = downPos.x
+                            val inFlight = pendingTap
+                            if (inFlight != null && inFlight.isActive) {
+                                inFlight.cancel()
                                 pendingTap = null
-                            }
-                        }
-                    } else if (isCurlDrag && activeDirection != null) {
-                        val velocity = velocityTracker.calculateVelocity().x
-                        val velInTurnDir = if (!rtl) {
-                            if (activeDirection == CurlDirection.FORWARD) -velocity else velocity
-                        } else {
-                            if (activeDirection == CurlDirection.FORWARD) velocity else -velocity
-                        }
-                        val settleForward = (curDragT > 0.35f || velInTurnDir > 700f) && velInTurnDir > -600f
-                        scope.launch {
-                            if (settleForward) {
-                                animate(curDragT, 1f, animationSpec = tween(220, easing = FastOutSlowInEasing)) { value, _ ->
-                                    onUpdateCurl(activeDirection, value)
-                                }
-                                if (activeDirection == CurlDirection.FORWARD) onNextPage() else onPrevPage()
-                                delay(60)
-                                onUpdateCurl(null, 0f)
+                                onShowFullPage()
+                                resetView()
                             } else {
-                                animate(curDragT, 0f, animationSpec = tween(180, easing = FastOutSlowInEasing)) { value, _ ->
-                                    onUpdateCurl(activeDirection, value)
+                                pendingTap = scope.launch {
+                                    delay(DOUBLE_TAP_WINDOW_MS)
+                                    if (userScale > 1.05f) {
+                                        onToggleChrome()
+                                    } else {
+                                        when {
+                                            tapX < w / 3f -> if (rtl) onTurnForward() else onTurnBackward()
+                                            tapX > w * 2f / 3f -> if (rtl) onTurnBackward() else onTurnForward()
+                                            else -> onToggleChrome()
+                                        }
+                                    }
+                                    pendingTap = null
                                 }
-                                onUpdateCurl(null, 0f)
                             }
+                        } else if (isCurlDrag && activeDirection != null) {
+                            val velocity = velocityTracker.calculateVelocity().x
+                            val velInTurnDir = if (!rtl) {
+                                if (activeDirection == CurlDirection.FORWARD) -velocity else velocity
+                            } else {
+                                if (activeDirection == CurlDirection.FORWARD) velocity else -velocity
+                            }
+                            val settleForward = (curDragT > 0.35f || velInTurnDir > 700f) && velInTurnDir > -600f
+                            currentSettleTurn(activeDirection, curDragT, settleForward)
                         }
                     }
+                } finally {
+                    pendingTap?.cancel()
+                    onUpdateCurl(null, 0f)
                 }
             },
     ) {

@@ -269,3 +269,23 @@ fun computeSpreadCurlX(
         }
     }
 }
+
+/** Texture-coordinate projection with the hidden face collapsed at the roll's apex. */
+fun computeSpreadCurlFaceX(
+    u: Float,
+    width: Float,
+    fold: Float,
+    radius: Float,
+    spine: Float,
+    fromRight: Boolean,
+    back: Boolean,
+): Float {
+    val boundary = (fold + radius * kotlin.math.PI.toFloat() / 2f).coerceIn(0f, width)
+    val distance = (if (fromRight != back) u else 1f - u) * width
+    val visible = if (back) maxOf(distance, boundary) else minOf(distance, boundary)
+    return computeSpreadCurlX(visible, fold, radius, spine, fromRight)
+}
+
+/** Account for the rolled arc so the outer edge follows a drag across both pages. */
+fun computeSpreadCurlFold(width: Float, progress: Float, radius: Float): Float =
+    (width * (1f - progress.coerceIn(0f, 1f)) - kotlin.math.PI.toFloat() * radius / 2f).coerceAtLeast(0f)

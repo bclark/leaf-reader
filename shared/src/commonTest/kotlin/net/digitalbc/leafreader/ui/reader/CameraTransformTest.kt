@@ -224,4 +224,60 @@ class CameraTransformTest {
         assertNear(spineX, xTurned0)
         assertNear(spineX - w, xTurnedW)
     }
+
+    @Test
+    fun spreadFacesCullHiddenTextureAndSettleReadableInBothDirections() {
+        for (right in listOf(false, true)) {
+            val w = 400f
+            val spine = 500f
+            // At rest the back has zero area; at completion the front has zero area.
+            for (u in listOf(0f, 0.25f, 0.5f, 0.75f, 1f)) {
+                assertNear(computeSpreadCurlFaceX(0f, w, w, 0f, spine, right, true),
+                    computeSpreadCurlFaceX(u, w, w, 0f, spine, right, true))
+                assertNear(spine, computeSpreadCurlFaceX(u, w, 0f, 0f, spine, right, false))
+                val expected = if (right) spine - w + u * w else spine + u * w
+                assertNear(expected, computeSpreadCurlFaceX(u, w, 0f, 0f, spine, right, true))
+            }
+            // Both texture faces run left-to-right everywhere they are visible.
+            for (step in 0..100) {
+                val t = step / 100f
+                val r = w * 0.16f * kotlin.math.sin(t * kotlin.math.PI.toFloat()).coerceAtLeast(0f)
+                for (back in listOf(false, true)) {
+                    var previous = Float.NEGATIVE_INFINITY
+                    for (col in 0..100) {
+                        val x = computeSpreadCurlFaceX(col / 100f, w, computeSpreadCurlFold(w, t, r), r, spine, right, back)
+                        assertTrue(x.isFinite() && x >= previous - 0.001f, "t=$t back=$back right=$right")
+                        previous = x
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun rtlReverseMirrorsPlacementAndBoundariesDoNotInventPages() {
+        val mapping = requireNotNull(computeSpreadTurnMapping(5, 6, 10, true, false))
+        assertEquals(6, mapping.staticPageDocIndex)
+        assertEquals(5, mapping.movingFrontDocIndex)
+        assertEquals(4, mapping.movingBackDocIndex)
+        assertEquals(3, mapping.underneathDocIndex)
+        assertTrue(mapping.isPeelingFromRight)
+        assertEquals(null, computeSpreadTurnMapping(0, null, 10, false, false))
+        assertEquals(null, computeSpreadTurnMapping(7, 8, 9, false, true))
+        val last = requireNotNull(computeSpreadTurnMapping(7, 8, 10, false, true))
+        assertEquals(9, last.movingBackDocIndex)
+        assertEquals(null, last.underneathDocIndex)
+    }
+
+    @Test
+    fun sheetEdgeTracksDragAcrossTheSpreadWithoutLag() {
+        val width = 400f
+        for (step in 0..100) {
+            val t = step / 100f
+            val r = width * 0.16f * kotlin.math.sin(t * kotlin.math.PI.toFloat()).coerceAtLeast(0f)
+            val fold = computeSpreadCurlFold(width, t, r)
+            assertNear(width * (1f - 2f * t), computeSpreadCurlX(width, fold, r, 0f, true))
+            assertNear(-width * (1f - 2f * t), computeSpreadCurlX(width, fold, r, 0f, false))
+        }
+    }
 }
