@@ -1,6 +1,7 @@
 package net.digitalbc.leafreader.ui.library
 
 import android.graphics.BitmapFactory
+import android.util.LruCache
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -9,13 +10,25 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -88,6 +101,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -2129,48 +2143,137 @@ private fun SmbEntryRow(
     }
 }
 
+private val coverBitmapCache = LruCache<String, ImageBitmap>(200)
+
 @Composable
 internal fun rememberCover(path: String?): ImageBitmap? {
-    val state by produceState<ImageBitmap?>(initialValue = null, key1 = path) {
-        value = if (path == null) null else withContext(Dispatchers.IO) {
-            runCatching {
-                val file = File(path)
-                if (file.exists()) BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap() else null
-            }.getOrNull()
+    if (path == null) return null
+    var bitmap by remember(path) { mutableStateOf(coverBitmapCache[path]) }
+    if (bitmap == null) {
+        LaunchedEffect(path) {
+            val fromCache = coverBitmapCache[path]
+            if (fromCache != null) {
+                bitmap = fromCache
+                return@LaunchedEffect
+            }
+            val loaded = withContext(Dispatchers.IO) {
+                runCatching {
+                    val file = File(path)
+                    if (file.exists()) BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap() else null
+                }.getOrNull()
+            }
+            if (loaded != null) {
+                coverBitmapCache.put(path, loaded)
+                bitmap = loaded
+            }
         }
     }
-    return state
+    return bitmap
 }
 
-private fun Modifier.twoPointerSwipeToFlip(
+private fun lerp(start: Float, stop: Float, fraction: Float): Float =
+    start + fraction * (stop - start)
+
+@Composable
+private fun Modifier.onePointerCoverPeel(
     enabled: Boolean = true,
-    onFlipNext: () -> Unit,
-    onFlipPrev: () -> Unit,
-): Modifier = pointerInput(enabled) {
-    if (!enabled) return@pointerInput
-    awaitEachGesture {
-        var totalDragY = 0f
-        var isTwoPointers = false
+    cardHeightPx: Float,
+    offsetY: Animatable<Float, AnimationVector1D>,
+    coroutineScope: CoroutineScope,
+    onThresholdMet: () -> Unit,
+    onClick: () -> Unit,
+): Modifier {
+    val currentOnThresholdMet by rememberUpdatedState(onThresholdMet)
+    val currentOnClick by rememberUpdatedState(onClick)
+    return pointerInput(enabled, cardHeightPx) {
+        if (!enabled) return@pointerInput
+        var animJob: Job? = null
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val downId = down.id
+            val downX = down.position.x
+            val downY = down.position.y
+            val slop = viewConfiguration.touchSlop
+            val tracker = VelocityTracker()
+            tracker.addPosition(down.uptimeMillis, down.position)
 
-        while (true) {
-            val event = awaitPointerEvent()
-            if (event.changes.size >= 2) {
-                isTwoPointers = true
-                val dragAmount = event.changes[0].position.y - event.changes[0].previousPosition.y
-                totalDragY += dragAmount
+            animJob?.cancel()
+            animJob = coroutineScope.launch {
+                offsetY.stop()
+            }
 
-                event.changes.forEach { it.consume() }
+            var isDraggingDown = false
+            var isCanceled = false
+            var lastChange: PointerInputChange? = null
+            var currentDragY = 0f
 
-                if (totalDragY < -35f) {
-                    onFlipNext()
-                    totalDragY = 0f
-                } else if (totalDragY > 35f) {
-                    onFlipPrev()
-                    totalDragY = 0f
+            while (true) {
+                val event = awaitPointerEvent()
+                val change = event.changes.firstOrNull { it.id == downId } ?: break
+                lastChange = change
+                tracker.addPosition(change.uptimeMillis, change.position)
+
+                val totalDx = change.position.x - downX
+                val totalDy = change.position.y - downY
+
+                if (!isDraggingDown) {
+                    if (abs(totalDy) > slop || abs(totalDx) > slop) {
+                        if (totalDy > slop && totalDy > abs(totalDx)) {
+                            isDraggingDown = true
+                        } else {
+                            // Upwards or horizontal drag: leave unconsumed so parent LazyVerticalGrid can scroll
+                            isCanceled = true
+                            break
+                        }
+                    }
                 }
-            } else {
-                if (isTwoPointers && event.changes.all { !it.pressed }) {
+
+                if (isDraggingDown) {
+                    change.consume()
+                    currentDragY = (totalDy - slop).coerceIn(0f, if (cardHeightPx > 0f) cardHeightPx * 1.25f else 1000f)
+                    animJob?.cancel()
+                    animJob = coroutineScope.launch {
+                        offsetY.snapTo(currentDragY)
+                    }
+                }
+
+                if (!change.pressed) {
+                    if (isDraggingDown) {
+                        change.consume()
+                    }
                     break
+                }
+            }
+
+            if (!isDraggingDown && !isCanceled) {
+                // Tapped without dragging past slop -> Consume UP event and trigger click
+                lastChange?.consume()
+                currentOnClick()
+            } else if (isDraggingDown) {
+                val velocityY = tracker.calculateVelocity().y
+                val currentOffset = currentDragY
+                val threshold = if (cardHeightPx > 0f) cardHeightPx * 0.35f else 180f
+                val isThresholdMet = currentOffset >= threshold
+                val isFlickDown = velocityY > 600f && currentOffset > (if (cardHeightPx > 0f) cardHeightPx * 0.15f else 60f)
+                val isCancelingUp = velocityY < -1000f
+                val shouldCycle = (isThresholdMet && !isCancelingUp) || isFlickDown
+
+                animJob?.cancel()
+                animJob = coroutineScope.launch {
+                    if (shouldCycle) {
+                        val targetY = if (cardHeightPx > 0f) cardHeightPx * 1.15f else 1000f
+                        offsetY.animateTo(
+                            targetValue = targetY,
+                            animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+                        )
+                        currentOnThresholdMet()
+                        offsetY.snapTo(0f)
+                    } else {
+                        offsetY.animateTo(
+                            targetValue = 0f,
+                            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+                        )
+                    }
                 }
             }
         }
@@ -2188,7 +2291,7 @@ private fun ComicStackCard(
     val shadowOffset = if (columns >= 4) 3.dp else 5.dp
     val progressHeight = if (columns >= 4) 5.dp else 7.dp
 
-    var topIndex by remember(stack.issues) { mutableIntStateOf(0) }
+    var topIndex by rememberSaveable(stack.seriesName, stack.volume) { mutableIntStateOf(0) }
     val issueCount = stack.issues.size
     val currentTopComic = remember(stack.issues, topIndex) {
         if (issueCount > 0) stack.issues[(topIndex % issueCount + issueCount) % issueCount]
@@ -2203,20 +2306,30 @@ private fun ComicStackCard(
         else null
     }
 
+    val coroutineScope = rememberCoroutineScope()
+    val offsetY = remember { Animatable(0f) }
+    var cardHeightPx by remember { mutableFloatStateOf(0f) }
+    val progress = if (cardHeightPx > 0f) (offsetY.value / cardHeightPx).coerceIn(0f, 1f) else 0f
+
     Column(
-        Modifier
-            .twoPointerSwipeToFlip(
-                enabled = stack.totalIssues > 1,
-                onFlipNext = { topIndex++ },
-                onFlipPrev = { topIndex-- },
-            )
-            .clickable(onClick = onClick)
+        Modifier.clickable(onClick = onClick)
     ) {
         Box(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(0.7f)
                 .padding(top = if (stack.totalIssues > 1) 8.dp else 0.dp)
+                .onSizeChanged { cardHeightPx = it.height.toFloat() }
+                .onePointerCoverPeel(
+                    enabled = stack.totalIssues > 1,
+                    cardHeightPx = cardHeightPx,
+                    offsetY = offsetY,
+                    coroutineScope = coroutineScope,
+                    onThresholdMet = {
+                        topIndex = if (issueCount > 0) (topIndex + 1) % issueCount else topIndex + 1
+                    },
+                    onClick = onClick,
+                )
         ) {
             // Neat Stack Layer 3 (for 3+ issues) - highest top offset
             if (stack.totalIssues >= 3) {
@@ -2225,8 +2338,8 @@ private fun ComicStackCard(
                     Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                            translationY = (-8).dp.toPx()
-                            scaleX = 0.93f
+                            translationY = lerp((-8).dp.toPx(), (-4).dp.toPx(), progress)
+                            scaleX = lerp(0.93f, 0.96f, progress)
                         }
                         .clip(RoundedCornerShape(4.dp))
                         .background(InkSoft)
@@ -2245,15 +2358,42 @@ private fun ComicStackCard(
                     Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                            translationY = (-4).dp.toPx()
-                            scaleX = 0.96f
+                            translationY = lerp((-4).dp.toPx(), 0f, progress)
+                            scaleX = lerp(0.96f, 1f, progress)
                         }
+                        .comicShadow(offset = (shadowOffset.value * progress).dp, color = Color(0xB3000000))
                         .clip(RoundedCornerShape(4.dp))
-                        .background(DeepInkSurface)
-                        .border(1.5.dp, Ochre, RoundedCornerShape(4.dp))
+                        .background(if (progress > 0.5f) InkSoft else DeepInkSurface)
+                        .border(
+                            width = lerp(1.5f, borderWidth.value, progress).dp,
+                            color = if (progress > 0.5f) Ink else Ochre,
+                            shape = RoundedCornerShape(4.dp)
+                        )
                 ) {
                     if (cover2 != null) {
                         Image(cover2, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    }
+
+                    val layer2IssueNum = if (issueCount > 0) ((topIndex + 1) % issueCount + issueCount) % issueCount + 1 else 2
+                    Box(
+                        modifier = Modifier
+                            .padding(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Ink.copy(alpha = 0.85f))
+                            .border(1.dp, Ochre, RoundedCornerShape(3.dp))
+                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "ISSUE $layer2IssueNum OF ${stack.totalIssues}",
+                            fontFamily = Anton,
+                            fontSize = 9.sp,
+                            color = Cream,
+                        )
+                    }
+
+                    Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(progressHeight).background(Ink)) {
+                        Box(Modifier.fillMaxWidth(pct).fillMaxHeight().background(Ochre))
                     }
                 }
             }
@@ -2262,6 +2402,10 @@ private fun ComicStackCard(
             Box(
                 Modifier
                     .fillMaxSize()
+                    .graphicsLayer {
+                        translationY = offsetY.value
+                        alpha = if (progress > 0.75f) (1f - (progress - 0.75f) / 0.25f).coerceIn(0f, 1f) else 1f
+                    }
                     .comicShadow(offset = shadowOffset, color = Color(0xB3000000))
                     .clip(RoundedCornerShape(4.dp))
                     .background(InkSoft)
@@ -2327,7 +2471,7 @@ private fun ReadingListCard(
     val borderWidth = if (columns >= 4) 2.dp else 3.dp
     val shadowOffset = if (columns >= 4) 3.dp else 5.dp
 
-    var topIndex by remember(item.previewComics) { mutableIntStateOf(0) }
+    var topIndex by rememberSaveable(item.readingList.id) { mutableIntStateOf(0) }
     val totalCount = item.previewComics.size
     val currentTopComic = remember(item.previewComics, topIndex) {
         if (totalCount > 0) item.previewComics[(topIndex % totalCount + totalCount) % totalCount]
@@ -2342,14 +2486,13 @@ private fun ReadingListCard(
         else null
     }
 
+    val coroutineScope = rememberCoroutineScope()
+    val offsetY = remember { Animatable(0f) }
+    var cardHeightPx by remember { mutableFloatStateOf(0f) }
+    val progress = if (cardHeightPx > 0f) (offsetY.value / cardHeightPx).coerceIn(0f, 1f) else 0f
+
     Column(
-        Modifier
-            .twoPointerSwipeToFlip(
-                enabled = item.itemCount > 1,
-                onFlipNext = { topIndex++ },
-                onFlipPrev = { topIndex-- },
-            )
-            .clickable(onClick = onClick)
+        Modifier.clickable(onClick = onClick)
     ) {
         Box(
             Modifier
@@ -2359,6 +2502,17 @@ private fun ReadingListCard(
                     horizontal = if (item.itemCount > 1) 6.dp else 0.dp,
                     vertical = if (item.itemCount > 1) 4.dp else 0.dp,
                 )
+                .onSizeChanged { cardHeightPx = it.height.toFloat() }
+                .onePointerCoverPeel(
+                    enabled = item.itemCount > 1,
+                    cardHeightPx = cardHeightPx,
+                    offsetY = offsetY,
+                    coroutineScope = coroutineScope,
+                    onThresholdMet = {
+                        topIndex = if (totalCount > 0) (topIndex + 1) % totalCount else topIndex + 1
+                    },
+                    onClick = onClick,
+                )
         ) {
             // Messy Layer 3 (Rotated Left) - for 3+ items
             if (item.itemCount >= 3) {
@@ -2367,9 +2521,9 @@ private fun ReadingListCard(
                     Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                            rotationZ = -6f
-                            translationX = (-6).dp.toPx()
-                            translationY = (-4).dp.toPx()
+                            rotationZ = lerp(-6f, 5f, progress)
+                            translationX = lerp((-6).dp.toPx(), 7.dp.toPx(), progress)
+                            translationY = lerp((-4).dp.toPx(), (-3).dp.toPx(), progress)
                         }
                         .clip(RoundedCornerShape(4.dp))
                         .background(InkSoft)
@@ -2394,13 +2548,18 @@ private fun ReadingListCard(
                     Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                            rotationZ = 5f
-                            translationX = 7.dp.toPx()
-                            translationY = (-3).dp.toPx()
+                            rotationZ = lerp(5f, 0f, progress)
+                            translationX = lerp(7.dp.toPx(), 0f, progress)
+                            translationY = lerp((-3).dp.toPx(), 0f, progress)
                         }
+                        .comicShadow(offset = (shadowOffset.value * progress).dp, color = Color(0xB3000000))
                         .clip(RoundedCornerShape(4.dp))
                         .background(DeepInkSurface)
-                        .border(1.5.dp, Ochre, RoundedCornerShape(4.dp))
+                        .border(
+                            width = lerp(1.5f, borderWidth.value, progress).dp,
+                            color = Ochre,
+                            shape = RoundedCornerShape(4.dp)
+                        )
                 ) {
                     if (midCover != null) {
                         Image(
@@ -2408,7 +2567,25 @@ private fun ReadingListCard(
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
-                            alpha = 0.85f,
+                            alpha = lerp(0.85f, 1f, progress),
+                        )
+                    }
+
+                    val layer2ItemNum = if (totalCount > 0) ((topIndex + 1) % totalCount + totalCount) % totalCount + 1 else 2
+                    Box(
+                        modifier = Modifier
+                            .padding(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Ink.copy(alpha = 0.85f))
+                            .border(1.dp, Ochre, RoundedCornerShape(3.dp))
+                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "ITEM $layer2ItemNum OF ${item.itemCount}",
+                            fontFamily = Anton,
+                            fontSize = 9.sp,
+                            color = Cream,
                         )
                     }
                 }
@@ -2419,6 +2596,10 @@ private fun ReadingListCard(
             Box(
                 Modifier
                     .fillMaxSize()
+                    .graphicsLayer {
+                        translationY = offsetY.value
+                        alpha = if (progress > 0.75f) (1f - (progress - 0.75f) / 0.25f).coerceIn(0f, 1f) else 1f
+                    }
                     .comicShadow(offset = shadowOffset, color = Color(0xB3000000))
                     .clip(RoundedCornerShape(4.dp))
                     .background(DeepInkSurface)
