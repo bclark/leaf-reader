@@ -176,47 +176,18 @@ fun computeSpreadTurnMapping(
     pageCount: Int,
     rightToLeft: Boolean,
     isForward: Boolean,
+    destination: ReaderSpread? = null,
 ): SpreadTurnMapping? {
     if (secondPageIndex == null) return null
-    val rtl = rightToLeft
-    val currentLeft = if (rtl) secondPageIndex else pageIndex
-    val currentRight = if (rtl) pageIndex else secondPageIndex
-
-    return if (isForward) {
-        val target = pageIndex + 2
-        if (target >= pageCount) return null
-        val nextP1 = target
-        val nextP2 = if (target + 1 < pageCount) target + 1 else null
-        val nextLeft = if (!rtl) nextP1 else nextP2
-        val nextRight = if (!rtl) nextP2 else nextP1
-        val movingBack = if (!rtl) (nextLeft ?: nextP1) else (nextRight ?: nextP1)
-        val underneath = if (!rtl) nextRight else nextLeft
-
-        SpreadTurnMapping(
-            staticPageDocIndex = if (!rtl) currentLeft else currentRight,
-            movingFrontDocIndex = if (!rtl) currentRight else currentLeft,
-            movingBackDocIndex = movingBack,
-            underneathDocIndex = underneath,
-            isPeelingFromRight = !rtl,
-        )
-    } else {
-        if (pageIndex <= 0) return null
-        val target = if (pageIndex % 2 == 1) (pageIndex - 2).coerceAtLeast(0) else pageIndex - 1
-        val prevP1 = target
-        val prevP2 = if (target > 0 && target + 1 < pageIndex) target + 1 else null
-        val prevLeft = if (!rtl) (if (prevP2 != null) prevP1 else null) else prevP2
-        val prevRight = if (!rtl) (prevP2 ?: prevP1) else prevP1
-        val movingBack = if (!rtl) prevRight else (prevLeft ?: prevRight)
-        val underneath = if (!rtl) prevLeft else (if (prevP2 != null) prevRight else null)
-
-        SpreadTurnMapping(
-            staticPageDocIndex = if (!rtl) currentRight else currentLeft,
-            movingFrontDocIndex = if (!rtl) currentLeft else currentRight,
-            movingBackDocIndex = movingBack,
-            underneathDocIndex = underneath,
-            isPeelingFromRight = rtl,
-        )
-    }
+    val target = destination ?: resolveReaderSpread(
+        if (isForward) secondPageIndex + 1 else pageIndex - 1, pageCount, emptySet()) ?: return null
+    return SpreadTurnMapping(
+        staticPageDocIndex = if (isForward) pageIndex else secondPageIndex,
+        movingFrontDocIndex = if (isForward) secondPageIndex else pageIndex,
+        movingBackDocIndex = if (isForward) target.first else target.second ?: target.first,
+        underneathDocIndex = if (isForward) target.second else if (target.second != null) target.first else null,
+        isPeelingFromRight = isForward != rightToLeft,
+    )
 }
 
 /**
@@ -289,3 +260,43 @@ fun computeSpreadCurlFaceX(
 /** Account for the rolled arc so the outer edge follows a drag across both pages. */
 fun computeSpreadCurlFold(width: Float, progress: Float, radius: Float): Float =
     (width * (1f - progress.coerceIn(0f, 1f)) - kotlin.math.PI.toFloat() * radius / 2f).coerceAtLeast(0f)
+
+/** Canonical contiguous reading unit; cover and landscape scans always stand alone. */
+data class ReaderSpread(val first: Int, val second: Int? = null) {
+    val after: Int get() = (second ?: first) + 1
+}
+
+/** Resolve any page/jump against the same partition used for forward and reverse turns. */
+fun resolveReaderSpread(page: Int, pageCount: Int, widePages: Set<Int>): ReaderSpread? {
+    if (page !in 0 until pageCount) return null
+    var first = 0
+    while (first < pageCount) {
+        val second = (first + 1).takeIf {
+            first > 0 && it < pageCount && first !in widePages && it !in widePages
+        }
+        val spread = ReaderSpread(first, second)
+        if (page < spread.after) return spread
+        first = spread.after
+    }
+    return null
+}
+
+/** Morph the viewport continuously; both endpoints are the ordinary resting page layout. */
+fun lerpSpreadDraw(from: SpreadDraw, to: SpreadDraw, progress: Float): SpreadDraw {
+    val t = progress.coerceIn(0f, 1f)
+    if (t == 0f) return from
+    if (t == 1f) return to
+    fun l(a: Float, b: Float) = a + (b - a) * t
+    return SpreadDraw(l(from.left1, to.left1), l(from.top1, to.top1),
+        l(from.width1, to.width1), l(from.height1, to.height1),
+        l(from.left2, to.left2), l(from.top2, to.top2),
+        l(from.width2, to.width2), l(from.height2, to.height2),
+        l(from.totalWidth, to.totalWidth), l(from.totalHeight, to.totalHeight),
+        l(from.boundLeft, to.boundLeft), l(from.boundTop, to.boundTop))
+}
+
+fun spreadTurnSheetWidth(from: SpreadDraw, to: SpreadDraw, progress: Float, fromRight: Boolean): Float {
+    val start = if (fromRight) from.width2 else from.width1
+    val end = if (fromRight) to.width1 else to.width2
+    return start + (end - start) * progress.coerceIn(0f, 1f)
+}

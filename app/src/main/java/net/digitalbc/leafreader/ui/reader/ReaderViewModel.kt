@@ -126,21 +126,7 @@ class ReaderViewModel(
         val s = _state.value
         if (s.loading || s.error != null) return
         if (s.pageIndex <= 0) return
-        val loader = pageLoader
-        if (landscapeSpread && loader != null && s.pageIndex > 1) {
-            val prevPageIndex = s.pageIndex - 1
-            val prevIsWide = loader.getCachedPage(prevPageIndex)?.let { it.width > it.height } ?: false
-            val target = if (prevIsWide) {
-                prevPageIndex
-            } else if (s.pageIndex % 2 == 1) {
-                (s.pageIndex - 2).coerceAtLeast(0)
-            } else {
-                prevPageIndex
-            }
-            goToPage(target, targetSlot = 0)
-        } else {
-            goToPage(s.pageIndex - 1, targetSlot = 0)
-        }
+        goToPage(s.pageIndex - 1, targetSlot = 0)
     }
 
     /** Zoom back out to the whole current page (full-page view). */
@@ -191,124 +177,61 @@ class ReaderViewModel(
         navJob?.cancel()
         val isExperiment = ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING
 
-        // In landscape spread mode, page 0 is standalone (cover); odd pages (1, 3, 5...) start spreads.
-        // If an even page > 0 is requested, snap to page - 1 if page - 1 is not a wide scan.
-        val resolvedPage = if (landscapeSpread && page > 0 && page % 2 == 0) {
-            val candCached = loader.getCachedPage(page - 1)
-            val candIsWide = candCached?.let { it.width > it.height } ?: false
-            if (!candIsWide) page - 1 else page
-        } else {
-            page
-        }
-
-        val cachedPage = loader.getCachedPage(resolvedPage)
-        val cachedPanels = if (isExperiment) listOf(Panel.FULL_PAGE) else panelCache[resolvedPage]
-        var cachedSecond: Bitmap? = null
-        var cachedSpread = false
-        if (landscapeSpread && resolvedPage > 0 && resolvedPage + 1 < _state.value.pageCount) {
-            if (cachedPage != null && cachedPage.width <= cachedPage.height) {
-                val partner = loader.getCachedPage(resolvedPage + 1)
-                if (partner != null && partner.width <= partner.height) {
-                    cachedSecond = partner
-                    cachedSpread = true
-                }
-            }
-        }
-
-        if (cachedPage != null) {
-            val panels = cachedPanels ?: listOf(Panel.FULL_PAGE)
-            val resolvedSlot = if (isExperiment) 0 else when (targetSlot) {
-                ENTER_AT_OUTRO -> panels.size + 1
-                else -> targetSlot.coerceIn(0, panels.size + 1)
-            }
-            _state.update {
-                it.copy(
-                    loading = false,
-                    detecting = !isExperiment && cachedPanels == null,
-                    pageIndex = resolvedPage,
-                    page = cachedPage,
-                    secondPage = cachedSecond,
-                    isSpread = cachedSpread,
-                    panels = panels,
-                    slot = resolvedSlot,
-                    error = null,
-                )
-            }
-        }
         navJob = viewModelScope.launch {
-            if (cachedPage == null) {
-                _state.update { it.copy(loading = it.page == null, detecting = !isExperiment, error = null) }
+            if (_state.value.page == null) {
+                _state.update { it.copy(loading = true, error = null) }
             }
             try {
-                val bitmap = cachedPage ?: loader.loadPage(resolvedPage)
-                var secondBitmap: Bitmap? = null
-                var isSpread = false
-                val isWide = bitmap.width > bitmap.height
-                if (landscapeSpread && resolvedPage > 0 && !isWide && resolvedPage + 1 < _state.value.pageCount) {
-                    val partner = loader.getCachedPage(resolvedPage + 1) ?: loader.loadPage(resolvedPage + 1)
-                    if (partner.width <= partner.height) {
-                        secondBitmap = partner
-                        isSpread = true
-                    }
-                }
-
-                if (cachedPage == null) {
-                    val initialPanels = cachedPanels ?: listOf(Panel.FULL_PAGE)
-                    val initialSlot = if (isExperiment) 0 else when (targetSlot) {
-                        ENTER_AT_OUTRO -> initialPanels.size + 1
-                        else -> targetSlot.coerceIn(0, initialPanels.size + 1)
-                    }
-                    _state.update {
-                        it.copy(
-                            loading = false,
-                            detecting = !isExperiment && cachedPanels == null,
-                            pageIndex = resolvedPage,
-                            page = bitmap,
-                            secondPage = secondBitmap,
-                            isSpread = isSpread,
-                            panels = initialPanels,
-                            slot = initialSlot,
-                            error = null,
-                        )
-                    }
-                }
-                val panels = panelsFor(resolvedPage, bitmap)
-                val resolvedSlot = if (isExperiment) 0 else when (targetSlot) {
+                val spread = resolveSpread(page) ?: return@launch
+                val resolvedPage = spread.first
+                val bitmap = loader.getCachedPage(resolvedPage) ?: loader.loadPage(resolvedPage)
+                val secondBitmap = spread.second?.let { loader.getCachedPage(it) ?: loader.loadPage(it) }
+                val previous = resolveSpread(resolvedPage - 1)
+                val next = resolveSpread(spread.after)
+                val cachedPanels = if (isExperiment) listOf(Panel.FULL_PAGE) else panelCache[resolvedPage]
+                val initialPanels = cachedPanels ?: listOf(Panel.FULL_PAGE)
+                fun slotFor(panels: List<Panel>) = if (isExperiment) 0 else when (targetSlot) {
                     ENTER_AT_OUTRO -> panels.size + 1
                     else -> targetSlot.coerceIn(0, panels.size + 1)
                 }
                 _state.update {
-                    it.copy(
-                        loading = false,
-                        detecting = false,
-                        pageIndex = resolvedPage,
-                        page = bitmap,
-                        secondPage = secondBitmap,
-                        isSpread = isSpread,
-                        panels = panels,
-                        slot = resolvedSlot,
-                        error = null,
-                    )
+                    it.copy(loading = false, detecting = !isExperiment && cachedPanels == null,
+                        pageIndex = resolvedPage, page = bitmap, secondPage = secondBitmap,
+                        isSpread = secondBitmap != null, previousSpread = previous, nextSpread = next,
+                        panels = initialPanels, slot = slotFor(initialPanels), error = null)
                 }
+                val panels = panelsFor(resolvedPage, bitmap)
+                _state.update { it.copy(detecting = false, panels = panels, slot = slotFor(panels)) }
                 persistProgress()
-                if (isSpread) {
-                    prefetch(resolvedPage + 2)
-                    prefetch(resolvedPage + 3)
-                    if (resolvedPage > 2) {
-                        prefetch(resolvedPage - 2)
-                        prefetch(resolvedPage - 1)
-                    }
-                } else {
-                    prefetch(resolvedPage + 1)
-                    if (resolvedPage > 0) prefetch(resolvedPage - 1)
+                for (neighbor in listOfNotNull(previous, next)) {
+                    prefetch(neighbor.first)
+                    neighbor.second?.let(::prefetch)
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 _state.update {
-                    it.copy(loading = false, detecting = false, error = "Failed to load page ${resolvedPage + 1}: ${t.message}")
+                    it.copy(loading = false, detecting = false, error = "Failed to load page ${page + 1}: ${t.message}")
                 }
             }
         }
+    }
+
+    private val widePages = mutableSetOf<Int>()
+    private var sizesKnownThrough = 0
+
+    private suspend fun resolveSpread(page: Int): ReaderSpread? {
+        val loader = pageLoader ?: return null
+        if (page !in 0 until loader.pageCount) return null
+        if (!landscapeSpread) return ReaderSpread(page)
+        // Read only bounds and retain the prefix so navigation never depends on bitmap-cache residency.
+        while (sizesKnownThrough < minOf(page + 1, loader.pageCount - 1)) {
+            val index = sizesKnownThrough + 1
+            val cached = loader.getCachedPage(index)
+            val size = if (cached != null) intArrayOf(cached.width, cached.height) else loader.pageSize(index)
+            if (size[0] > size[1]) widePages += index
+            sizesKnownThrough = index
+        }
+        return resolveReaderSpread(page, loader.pageCount, widePages)
     }
 
     private suspend fun panelsFor(page: Int, bitmap: Bitmap): List<Panel> {
@@ -372,6 +295,8 @@ data class ReaderUiState(
     val pageCount: Int = 0,
     val page: Bitmap? = null,
     val secondPage: Bitmap? = null,
+    val previousSpread: ReaderSpread? = null,
+    val nextSpread: ReaderSpread? = null,
     val isSpread: Boolean = false,
     val panels: List<Panel> = listOf(Panel.FULL_PAGE),
     val slot: Int = 0,

@@ -178,7 +178,8 @@ fun ReaderScreen(
 
     val canAnimateTurn: (CurlDirection) -> Boolean = { direction ->
         val mapping = computeSpreadTurnMapping(pageIndex, if (isSpread) pageIndex + 1 else null,
-            pageCount, rtl, direction == CurlDirection.FORWARD)
+            pageCount, rtl, direction == CurlDirection.FORWARD,
+            if (direction == CurlDirection.FORWARD) state.nextSpread else state.previousSpread)
         if (mapping != null) {
             getPageBitmap(mapping.movingBackDocIndex) != null &&
                 (mapping.underneathDocIndex == null || getPageBitmap(mapping.underneathDocIndex) != null)
@@ -775,6 +776,7 @@ private fun DrawScope.drawCurlTurn(
  */
 private fun DrawScope.drawSpreadCurlTurn(
     spread: SpreadDraw,
+    destinationSpread: SpreadDraw,
     staticBitmap: Bitmap,
     movingFrontBitmap: Bitmap,
     movingBackBitmap: Bitmap?,
@@ -789,17 +791,18 @@ private fun DrawScope.drawSpreadCurlTurn(
     meshPaint: Paint,
 ) {
     if (staticBitmap.isRecycled || movingFrontBitmap.isRecycled) return
+    val t = progress.coerceIn(0f, 1f)
+    val frame = lerpSpreadDraw(spread, destinationSpread, t)
     val cx = size.width / 2f
     val cy = size.height / 2f
-    val left = cx + (spread.left1 - cx) * userScale + userPanX
-    val spine = cx + (spread.left2 - cx) * userScale + userPanX
-    val top = cy + (spread.top1 - cy) * userScale + userPanY
-    val leftWidth = spread.width1 * userScale
-    val rightWidth = spread.width2 * userScale
-    val height = spread.height1 * userScale
+    val left = cx + (frame.left1 - cx) * userScale + userPanX
+    val spine = cx + (frame.left2 - cx) * userScale + userPanX
+    val top = cy + (frame.top1 - cy) * userScale + userPanY
+    val leftWidth = frame.width1 * userScale
+    val rightWidth = frame.width2 * userScale
+    val height = frame.height1 * userScale
     val fromRight = mapping.isPeelingFromRight
-    val width = if (fromRight) rightWidth else leftWidth
-    val t = progress.coerceIn(0f, 1f)
+    val width = spreadTurnSheetWidth(spread, destinationSpread, t, fromRight) * userScale
     val radius = width * 0.16f * kotlin.math.sin(t * kotlin.math.PI.toFloat()).coerceAtLeast(0f)
     val fold = computeSpreadCurlFold(width, t, radius)
     val faceBoundary = (fold + radius * kotlin.math.PI.toFloat() / 2f).coerceIn(0f, width)
@@ -812,7 +815,7 @@ private fun DrawScope.drawSpreadCurlTurn(
         }
     }
     drawFlat(staticBitmap, if (fromRight) left else spine, if (fromRight) leftWidth else rightWidth)
-    drawFlat(underneathBitmap, if (fromRight) spine else left, width)
+    drawFlat(underneathBitmap, if (fromRight) spine else left, if (fromRight) rightWidth else leftWidth)
 
     // The cylinder's surface normal changes sign at the apex. Collapse the hidden
     // part of each face to that boundary, rather than painting two whole images
@@ -1113,6 +1116,7 @@ private fun PageViewer(
                         pageCount = pageCount,
                         rightToLeft = rtl,
                         isForward = isForward,
+                        destination = if (isForward) state.nextSpread else state.previousSpread,
                     )
                     if (mapping != null) {
                         val staticBitmap = getPageBitmap(mapping.staticPageDocIndex)
@@ -1121,8 +1125,28 @@ private fun PageViewer(
                         val underneathBitmap = mapping.underneathDocIndex?.let { getPageBitmap(it) }
 
                         if (staticBitmap != null && movingFrontBitmap != null) {
+                            val target = if (isForward) state.nextSpread else state.previousSpread
+                            val targetFirst = getPageBitmap(target?.first)
+                            val targetSecond = getPageBitmap(target?.second)
+                            if (targetFirst == null) return@Canvas
+                            val destinationSpread = if (targetSecond != null) {
+                                val targetLeft = if (rtl) targetSecond else targetFirst
+                                val targetRight = if (rtl) targetFirst else targetSecond
+                                computeSpreadDraw(targetLeft.width, targetLeft.height, targetRight.width, targetRight.height,
+                                    size.width, size.height, fitMode = fitMode)
+                            } else {
+                                val draw = computePageDraw(Panel.FULL_PAGE, targetFirst.width, targetFirst.height,
+                                    size.width, size.height, fitMode = fitMode)
+                                // A standalone destination occupies the landing side; the other side closes to zero.
+                                val landingLeft = mapping.isPeelingFromRight
+                                val spine = if (landingLeft) draw.left + draw.scaledWidth else draw.left
+                                SpreadDraw(draw.left, draw.top, if (landingLeft) draw.scaledWidth else 0f, draw.scaledHeight,
+                                    spine, draw.top, if (landingLeft) 0f else draw.scaledWidth, draw.scaledHeight,
+                                    draw.scaledWidth, draw.scaledHeight, draw.left, draw.top)
+                            }
                             drawSpreadCurlTurn(
                                 spread = spread,
+                                destinationSpread = destinationSpread,
                                 staticBitmap = staticBitmap,
                                 movingFrontBitmap = movingFrontBitmap,
                                 movingBackBitmap = movingBackBitmap,
