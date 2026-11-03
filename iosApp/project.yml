@@ -3,6 +3,9 @@
 # The Kotlin :shared framework is built by a pre-build script phase (and explicitly in CI), so
 # opening the generated project in Xcode "just works" as long as a JDK is on PATH.
 name: Leaf
+configFiles:
+  Debug: Config.xcconfig
+  Release: Config.xcconfig
 options:
   bundleIdPrefix: com.chakra
   deploymentTarget:
@@ -16,9 +19,10 @@ settings:
     # per App Store Connect upload.
     MARKETING_VERSION: "0.3.2"
     CURRENT_PROJECT_VERSION: "1"
-    # Automatic signing. Set your Apple Developer Team ID here (Xcode → Settings → Accounts),
-    # or override with xcodebuild DEVELOPMENT_TEAM=XXXXXXXXXX for CI/App Store archives.
+    # Automatic signing. Set your Apple Developer Team ID in Local.xcconfig (or override with
+    # xcodebuild DEVELOPMENT_TEAM=XXXXXXXXXX for CI/App Store archives).
     CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)
 
 packages:
   ZIPFoundation:
@@ -94,7 +98,8 @@ targets:
                 - cbr
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.chakra.comicreader
+        PRODUCT_BUNDLE_IDENTIFIER: $(PRODUCT_BUNDLE_IDENTIFIER)
+        DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)
         TARGETED_DEVICE_FAMILY: "1,2"
         # $(inherited) keeps the values CocoaPods injects via its xcconfig (needed to link
         # TensorFlowLite) alongside our Kotlin-framework search path / link flag.
