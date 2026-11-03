@@ -62,4 +62,20 @@ final class CbzArchive {
             return data
         }
     }
+
+    /// Reads optional ComicInfo.xml metadata file from the root/subfolders of the archive if present.
+    func readComicInfoXml() -> String? {
+        switch backend {
+        case .zip(let archive, _):
+            guard let entry = archive.first(where: {
+                let clean = $0.path.split(separator: "/").last.map(String.init) ?? $0.path
+                return clean.caseInsensitiveCompare("ComicInfo.xml") == .orderedSame
+            }) else { return nil }
+            var data = Data()
+            _ = try? archive.extract(entry, skipCRC32: true) { data.append($0) }
+            return String(data: data, encoding: .utf8)
+        case .pdf:
+            return nil
+        }
+    }
 }
