@@ -2474,7 +2474,6 @@ private fun ReadingListCard(
     columns: Int = 2,
     onClick: () -> Unit,
 ) {
-    val borderWidth = if (columns >= 4) 2.dp else 3.dp
     val shadowOffset = if (columns >= 4) 3.dp else 5.dp
 
     var topIndex by rememberSaveable(item.readingList.id) { mutableIntStateOf(0) }
@@ -2533,7 +2532,6 @@ private fun ReadingListCard(
                         }
                         .clip(RoundedCornerShape(4.dp))
                         .background(InkSoft)
-                        .border(1.5.dp, LeafSecondary, RoundedCornerShape(4.dp))
                 ) {
                     if (backCover != null) {
                         Image(
@@ -2561,11 +2559,6 @@ private fun ReadingListCard(
                         .comicShadow(offset = (shadowOffset.value * progress).dp, color = Color(0xB3000000))
                         .clip(RoundedCornerShape(4.dp))
                         .background(DeepInkSurface)
-                        .border(
-                            width = lerp(1.5f, borderWidth.value, progress).dp,
-                            color = Ochre,
-                            shape = RoundedCornerShape(4.dp)
-                        )
                 ) {
                     if (midCover != null) {
                         Image(
@@ -2580,17 +2573,18 @@ private fun ReadingListCard(
                     val layer2ItemNum = if (totalCount > 0) ((topIndex + 1) % totalCount + totalCount) % totalCount + 1 else 2
                     Box(
                         modifier = Modifier
-                            .padding(6.dp)
+                            .align(Alignment.BottomStart)
+                            .padding(if (columns >= 4) 4.dp else 6.dp)
                             .clip(RoundedCornerShape(3.dp))
                             .background(Ink.copy(alpha = 0.85f))
                             .border(1.dp, Ochre, RoundedCornerShape(3.dp))
-                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                            .padding(horizontal = if (columns >= 4) 4.dp else 5.dp, vertical = 2.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             text = "ITEM $layer2ItemNum OF ${item.itemCount}",
                             fontFamily = Anton,
-                            fontSize = 9.sp,
+                            fontSize = if (columns >= 4) 7.sp else 8.sp,
                             color = Cream,
                         )
                     }
@@ -2608,8 +2602,7 @@ private fun ReadingListCard(
                     }
                     .comicShadow(offset = shadowOffset, color = Color(0xB3000000))
                     .clip(RoundedCornerShape(4.dp))
-                    .background(DeepInkSurface)
-                    .border(width = borderWidth, color = Ochre, shape = RoundedCornerShape(4.dp)),
+                    .background(DeepInkSurface),
             ) {
                 if (topCover != null) {
                     Image(
@@ -2622,21 +2615,21 @@ private fun ReadingListCard(
                     GeneratedCover(item.readingList.name, columns = columns)
                 }
 
-                // Top-left badge matching Series Stack style
                 Box(
                     modifier = Modifier
-                        .padding(6.dp)
+                        .align(Alignment.BottomStart)
+                        .padding(if (columns >= 4) 4.dp else 6.dp)
                         .clip(RoundedCornerShape(3.dp))
                         .background(Ink.copy(alpha = 0.85f))
                         .border(1.dp, Ochre, RoundedCornerShape(3.dp))
-                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                        .padding(horizontal = if (columns >= 4) 4.dp else 5.dp, vertical = 2.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     val currentItemNum = if (totalCount > 0) (topIndex % totalCount + totalCount) % totalCount + 1 else 1
                     Text(
                         text = if (item.itemCount > 1) "ITEM $currentItemNum OF ${item.itemCount}" else "${item.itemCount} ${if (item.itemCount == 1) "ITEM" else "ITEMS"}",
                         fontFamily = Anton,
-                        fontSize = 9.sp,
+                        fontSize = if (columns >= 4) 7.sp else 8.sp,
                         color = Cream,
                     )
                 }
