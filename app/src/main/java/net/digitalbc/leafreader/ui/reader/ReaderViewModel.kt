@@ -15,11 +15,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -38,7 +41,13 @@ class ReaderViewModel(
     private val comicId: Long,
     private val repository: LibraryRepository,
     private val panelSource: PanelSource,
+    private val progressScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) : ViewModel() {
+
+    private data class ProgressRecord(val page: Int, val slot: Int)
+    private val progressMutex = Mutex()
+    @Volatile private var latestProgressTarget: ProgressRecord? = null
+    @Volatile private var lastSavedProgress: ProgressRecord? = null
 
     private val _state = MutableStateFlow(ReaderUiState())
     val state: StateFlow<ReaderUiState> = _state.asStateFlow()
@@ -101,8 +110,14 @@ class ReaderViewModel(
             }
         }
         pageLoader = PageLoader(archive)
+        if (archive.pageCount != comic.pageCount) {
+            repository.updateComicPageCount(comicId, archive.pageCount)
+        }
         _state.update { it.copy(title = comic.title, pageCount = archive.pageCount, rightToLeft = rightToLeft) }
-        goToPage((lastRequestedPage ?: comic.lastPage).coerceIn(0, archive.pageCount - 1), comic.lastSlot)
+        val requestedPage = lastRequestedPage ?: comic.lastPage
+        val targetPage = requestedPage.coerceIn(0, archive.pageCount - 1)
+        val targetSlot = if (targetPage != comic.lastPage) 0 else comic.lastSlot
+        goToPage(targetPage, targetSlot)
     }
 
     fun setSpreadEnabled(enabled: Boolean) {
@@ -236,9 +251,12 @@ class ReaderViewModel(
                         panels = initialPanels, slot = slotFor(initialPanels), error = null)
                 }
                 openingWatchdog?.cancel()
+                persistProgress()
                 val panels = panelsFor(resolvedPage, bitmap)
                 _state.update { it.copy(detecting = false, panels = panels, slot = slotFor(panels)) }
-                persistProgress()
+                if (!isExperiment) {
+                    persistProgress()
+                }
                 prefetchJob = viewModelScope.launch {
                     suspend fun neighbor(index: Int): ReaderSpread? {
                         if (index !in 0 until loader.pageCount) return null
@@ -299,12 +317,28 @@ class ReaderViewModel(
 
     private fun persistProgress() {
         val s = _state.value
+        if (s.pageCount <= 0 || s.readingPageIndex !in 0 until s.pageCount) return
         val slotToSave = if (ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) 0 else s.slot
-        viewModelScope.launch { repository.saveProgress(comicId, s.readingPageIndex, slotToSave) }
+        val target = ProgressRecord(s.readingPageIndex, slotToSave)
+        latestProgressTarget = target
+
+        progressScope.launch {
+            progressMutex.withLock {
+                val current = latestProgressTarget ?: return@withLock
+                if (current == lastSavedProgress) return@withLock
+                try {
+                    repository.saveProgress(comicId, current.page, current.slot)
+                    lastSavedProgress = current
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                }
+            }
+        }
     }
 
     override fun onCleared() {
         openingWatchdog?.cancel()
+        persistProgress()
         pageLoader?.let { loader -> CoroutineScope(Dispatchers.IO).launch { loader.close() } }
         pageLoader = null
     }

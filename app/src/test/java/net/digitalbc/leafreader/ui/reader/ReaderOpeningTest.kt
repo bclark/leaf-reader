@@ -125,6 +125,53 @@ class ReaderOpeningTest {
         loader.close()
     }
 
+    @Test fun pageSettlementPersistsProgressPromptlyWithoutWaitingForPrefetch() {
+        val dao = dao(archive(List(8) { image() }), 0)
+        val vm = reader(dao)
+        ready(vm)
+        vm.jumpToPage(3)
+        await(vm) { it.pageIndex == 3 && it.readingPageIndex == 3 }
+        runBlocking { withTimeout(5_000) { while (dao.comic.lastPage != 3) delay(10) } }
+        assertEquals(3, dao.comic.lastPage)
+    }
+
+    @Test fun rapidNavigationSerializesAndPersistsLatestSettledPage() {
+        val dao = dao(archive(List(8) { image() }), 0)
+        val vm = reader(dao)
+        ready(vm)
+        vm.jumpToPage(1)
+        vm.jumpToPage(2)
+        vm.jumpToPage(5)
+        vm.jumpToPage(7)
+        await(vm) { it.pageIndex == 7 && it.readingPageIndex == 7 && !it.loading }
+        runBlocking { withTimeout(5_000) { while (dao.comic.lastPage != 7) delay(10) } }
+        assertEquals(7, dao.comic.lastPage)
+    }
+
+    @Test fun archivePageCountChangeUpdatesDatabaseAndClampsProgress() {
+        val file = archive(List(5) { image() })
+        val dao = FakeDao(ComicEntity(id = 1, title = "Changed count", filePath = file.path,
+            coverPath = null, format = "cbz", pageCount = 10, lastPage = 8, dateAdded = 0, lastOpened = 0))
+        val vm = reader(dao)
+        val state = ready(vm)
+        assertEquals(5, state.pageCount)
+        assertEquals(4, state.readingPageIndex)
+        runBlocking { withTimeout(5_000) { while (dao.comic.pageCount != 5 || dao.comic.lastPage != 4) delay(10) } }
+        assertEquals(5, dao.comic.pageCount)
+        assertEquals(4, dao.comic.lastPage)
+    }
+
+    @Test fun progressPersistsAcrossViewModelClear() {
+        val dao = dao(archive(List(8) { image() }), 0)
+        val vm = reader(dao)
+        ready(vm)
+        vm.jumpToPage(4)
+        await(vm) { it.pageIndex == 4 && it.readingPageIndex == 4 }
+        stores.forEach { it.clear() }
+        runBlocking { withTimeout(5_000) { while (dao.comic.lastPage != 4) delay(10) } }
+        assertEquals(4, dao.comic.lastPage)
+    }
+
     private class FakeDao(var comic: ComicEntity) : ComicDao {
         var gate: CompletableDeferred<Unit>? = null
         override fun observeAll() = flowOf(listOf(comic))
@@ -132,6 +179,9 @@ class ReaderOpeningTest {
         override suspend fun insert(comic: ComicEntity): Long { this.comic = comic; return comic.id }
         override suspend fun updateProgress(id: Long, page: Int, slot: Int, openedAt: Long): Int {
             comic = comic.copy(lastPage = page, lastSlot = slot); return 1
+        }
+        override suspend fun updatePageCount(id: Long, pageCount: Int): Int {
+            comic = comic.copy(pageCount = pageCount); return 1
         }
         override suspend fun updateReadingDirection(id: Long, rtl: Boolean): Int { comic = comic.copy(rightToLeft = rtl); return 1 }
         override suspend fun updateMetadata(id: Long, series: String?, volume: String?, issueNumber: Float?) {}

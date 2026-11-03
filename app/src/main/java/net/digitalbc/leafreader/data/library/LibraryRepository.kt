@@ -23,6 +23,7 @@ import net.digitalbc.leafreader.data.smb.SmbEntry
 import net.digitalbc.leafreader.data.smb.SmbTransferProgress
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.withContext
@@ -94,8 +95,15 @@ class LibraryRepository(
 
     suspend fun getComic(id: Long): ComicEntity? = dao.getById(id)
 
-    suspend fun saveProgress(id: Long, page: Int, slot: Int) =
-        dao.updateProgress(id, page, slot, System.currentTimeMillis())
+    suspend fun saveProgress(id: Long, page: Int, slot: Int): Int =
+        withContext(NonCancellable + Dispatchers.IO) {
+            dao.updateProgress(id, page, slot, System.currentTimeMillis())
+        }
+
+    suspend fun updateComicPageCount(id: Long, pageCount: Int): Int =
+        withContext(NonCancellable + Dispatchers.IO) {
+            dao.updatePageCount(id, pageCount)
+        }
 
     suspend fun setReadingDirection(id: Long, rightToLeft: Boolean) =
         dao.updateReadingDirection(id, rightToLeft)
