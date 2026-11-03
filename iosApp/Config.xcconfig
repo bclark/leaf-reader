@@ -1,0 +1,8 @@
+// Base Leaf iOS Configuration (committed to git)
+// Default open-source fallback settings
+PRODUCT_BUNDLE_IDENTIFIER = com.chakra.comicreader
+DEVELOPMENT_TEAM =
+
+// Include optional local developer overrides (ignored by git).
+// If Local.xcconfig exists, its settings override the defaults above.
+#include? "Local.xcconfig"

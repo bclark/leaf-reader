@@ -2,12 +2,14 @@ import Foundation
 import UniformTypeIdentifiers
 import LeafShared
 
-/// Comics live as plain .cbz files in Documents/Comics. Importing a CBZ/ZIP copies it in; importing
-/// a CBR/RAR converts it to CBZ first (see CbrConverter) so the reader only handles ZIP. The list
-/// is a directory scan; per-comic resume lives in ReadingProgress.
+/// Comics live as plain .cbz/.pdf files in Documents/Comics. Importing a CBZ/ZIP copies it in;
+/// importing a CBR/RAR converts it to CBZ first (see CbrConverter). Metadata and reading lists
+/// are synchronized reactively with the local file store.
 @MainActor
 final class LibraryStore: ObservableObject {
     @Published private(set) var comics: [URL] = []
+    @Published private(set) var metadata: [String: ComicMetadataRecord] = [:]
+    @Published private(set) var readingLists: [ReadingListRecord] = []
     @Published var importing = false
     @Published var importError: String?
 
@@ -32,7 +34,7 @@ final class LibraryStore: ObservableObject {
 
     func refresh() {
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-        comics = files
+        let comicFiles = files
             .filter { ["cbz", "zip", "pdf"].contains($0.pathExtension.lowercased()) }
             // Most-recently-opened first (Android's `ORDER BY lastOpened DESC`), then natural filename.
             .sorted {
@@ -40,25 +42,32 @@ final class LibraryStore: ObservableObject {
                 if ta != tb { return ta > tb }
                 return $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
             }
+        comics = comicFiles
+
+        // Backfill metadata for newly discovered or existing files
+        var metaMap = ComicMetadataStore.all()
+        for file in comicFiles {
+            let name = file.lastPathComponent
+            if metaMap[name] == nil {
+                let parsed = ComicMetadataStore.parseAndStoreIfNeeded(file)
+                metaMap[name] = parsed
+            }
+        }
+        metadata = metaMap
+        readingLists = ReadingListStore.all()
     }
 
     func importComic(from url: URL) {
-        // .fileImporter hands back security-scoped URLs (NOT owned copies). Open the scope, copy
-        // synchronously into our sandbox, then relinquish it. Never move — we don't own the source.
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
         let ext = url.pathExtension.lowercased()
         let baseName = url.deletingPathExtension().lastPathComponent
 
-        // Route by magic bytes (extension is only the fallback), matching Android's
-        // ComicArchiveFactory exactly — so a mislabeled ".cbz" that is really a RAR is converted,
-        // not copied in broken. Detection logic itself lives in the shared ComicFormatDetector.
         let format = ComicFormatDetector.shared.detect(head: Self.leadingBytes(of: url), fileExtension: ext)
         let dest = dir.appendingPathComponent(baseName + (format == .pdf ? ".pdf" : ".cbz"))
 
         if format == .cbr {
-            // Stage a local copy first so conversion isn't reading a scoped URL on a background Task.
             let staged = FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
             do {
@@ -72,17 +81,20 @@ final class LibraryStore: ObservableObject {
                 defer { try? FileManager.default.removeItem(at: staged) }
                 do {
                     try await CbrConverter.convertToCbz(source: staged, destination: dest)
-                    ReadingProgress.markOpened(dest)   // fresh import sorts to the top
-                } catch { importError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)" }
+                    ReadingProgress.markOpened(dest)
+                    _ = ComicMetadataStore.parseAndStoreIfNeeded(dest)
+                } catch {
+                    importError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)"
+                }
                 importing = false
                 refresh()
             }
         } else {
-            // CBZ/ZIP: copy the same container in under a .cbz name so refresh()'s scan finds it.
             do {
                 try? FileManager.default.removeItem(at: dest)
                 try FileManager.default.copyItem(at: url, to: dest)
-                ReadingProgress.markOpened(dest)   // fresh import sorts to the top
+                ReadingProgress.markOpened(dest)
+                _ = ComicMetadataStore.parseAndStoreIfNeeded(dest)
             } catch {
                 importError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)"
             }
@@ -93,6 +105,9 @@ final class LibraryStore: ObservableObject {
     func delete(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
         ReadingProgress.clear(url)
+        for list in readingLists {
+            ReadingListStore.removeComic(from: list.id, filename: url.lastPathComponent)
+        }
         refresh()
     }
 
@@ -100,12 +115,205 @@ final class LibraryStore: ObservableObject {
         for url in urls {
             try? FileManager.default.removeItem(at: url)
             ReadingProgress.clear(url)
+            for list in readingLists {
+                ReadingListStore.removeComic(from: list.id, filename: url.lastPathComponent)
+            }
         }
         refresh()
     }
 
-    /// The first few bytes of [url] as a Kotlin byte array, for shared magic-byte format detection.
-    /// Returns empty (→ extension fallback) if the file can't be read.
+    // MARK: - Metadata & Series Operations
+
+    func setSeries(urls: [URL], series: String?, volume: String?) {
+        ComicMetadataStore.updateSeries(for: urls, series: series, volume: volume)
+        refresh()
+    }
+
+    func markComicsRead(urls: [URL], read: Bool) {
+        for url in urls {
+            let current = ReadingProgress.get(url)
+            let total = current?.total ?? 1
+            let dir = ReadingProgress.readingDirection(url)
+            ReadingProgress.set(url, page: read ? max(0, total - 1) : 0, step: -1, total: total, rtl: dir)
+        }
+        refresh()
+    }
+
+    // MARK: - Reading List Operations
+
+    @discardableResult
+    func createReadingList(name: String, urls: [URL] = []) -> ReadingListRecord {
+        let list = ReadingListStore.createList(name: name, itemFilenames: urls.map { $0.lastPathComponent })
+        refresh()
+        return list
+    }
+
+    func renameReadingList(id: String, newName: String) {
+        ReadingListStore.renameList(id: id, newName: newName)
+        refresh()
+    }
+
+    func deleteReadingList(id: String) {
+        ReadingListStore.deleteList(id: id)
+        refresh()
+    }
+
+    func addComicsToReadingList(listId: String, urls: [URL]) {
+        ReadingListStore.addComics(to: listId, filenames: urls.map { $0.lastPathComponent })
+        refresh()
+    }
+
+    func removeComicFromReadingList(listId: String, url: URL) {
+        ReadingListStore.removeComic(from: listId, filename: url.lastPathComponent)
+        refresh()
+    }
+
+    // MARK: - Item Resolution for Library UI
+
+    func libraryItems(filter: LibraryFilter, searchQuery: String) -> [LibraryItem] {
+        let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let comicMap = Dictionary(uniqueKeysWithValues: comics.map { ($0.lastPathComponent, $0) })
+
+        let filteredComics: [URL] = {
+            if q.isEmpty { return comics }
+            return comics.filter { url in
+                let filename = url.lastPathComponent.lowercased()
+                let title = url.deletingPathExtension().lastPathComponent.lowercased()
+                let series = metadata[url.lastPathComponent]?.series?.lowercased() ?? ""
+                return filename.contains(q) || title.contains(q) || series.contains(q)
+            }
+        }()
+
+        switch filter {
+        case .all:
+            var seriesGroups: [String: [URL]] = [:]
+            for url in filteredComics {
+                if let s = metadata[url.lastPathComponent]?.series, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let v = metadata[url.lastPathComponent]?.volume ?? ""
+                    let key = "\(s)__\(v)".lowercased()
+                    seriesGroups[key, default: []].append(url)
+                }
+            }
+
+            var handled = Set<URL>()
+            var items: [LibraryItem] = []
+
+            for url in filteredComics {
+                if handled.contains(url) { continue }
+                if let s = metadata[url.lastPathComponent]?.series, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let v = metadata[url.lastPathComponent]?.volume ?? ""
+                    let key = "\(s)__\(v)".lowercased()
+                    if let group = seriesGroups[key], group.count >= 2 {
+                        let sortedIssues = sortIssues(group)
+                        let nextIssue = sortedIssues.first { u in
+                            let p = ReadingProgress.get(u)
+                            let tot = p?.total ?? 1
+                            let pg = p?.page ?? 0
+                            return tot > 0 && pg < tot - 1
+                        } ?? sortedIssues.first ?? url
+
+                        let completedCount = sortedIssues.count { u in
+                            let p = ReadingProgress.get(u)
+                            let tot = p?.total ?? 1
+                            let pg = p?.page ?? 0
+                            return tot > 0 && pg >= tot - 1
+                        }
+                        let unreadCount = sortedIssues.count { (ReadingProgress.get($0)?.page ?? 0) == 0 }
+
+                        items.append(
+                            .seriesStack(
+                                seriesName: metadata[group[0].lastPathComponent]?.series ?? "Series",
+                                volume: metadata[group[0].lastPathComponent]?.volume,
+                                issues: sortedIssues,
+                                topCoverComic: nextIssue,
+                                totalIssues: sortedIssues.count,
+                                unreadIssues: unreadCount,
+                                progressFraction: sortedIssues.isEmpty ? 0 : Double(completedCount) / Double(sortedIssues.count)
+                            )
+                        )
+                        for u in group { handled.insert(u) }
+                        continue
+                    }
+                }
+                items.append(.singleComic(url: url, metadata: metadata[url.lastPathComponent]))
+                handled.insert(url)
+            }
+            return items
+
+        case .series:
+            var seriesGroups: [String: [URL]] = [:]
+            for url in filteredComics {
+                if let s = metadata[url.lastPathComponent]?.series, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let v = metadata[url.lastPathComponent]?.volume ?? ""
+                    let key = "\(s)__\(v)".lowercased()
+                    seriesGroups[key, default: []].append(url)
+                }
+            }
+
+            return seriesGroups.values.map { group in
+                let sortedIssues = sortIssues(group)
+                let nextIssue = sortedIssues.first { u in
+                    let p = ReadingProgress.get(u)
+                    let tot = p?.total ?? 1
+                    let pg = p?.page ?? 0
+                    return tot > 0 && pg < tot - 1
+                } ?? sortedIssues.first ?? group[0]
+
+                let completedCount = sortedIssues.count { u in
+                    let p = ReadingProgress.get(u)
+                    let tot = p?.total ?? 1
+                    let pg = p?.page ?? 0
+                    return tot > 0 && pg >= tot - 1
+                }
+                let unreadCount = sortedIssues.count { (ReadingProgress.get($0)?.page ?? 0) == 0 }
+
+                return LibraryItem.seriesStack(
+                    seriesName: metadata[group[0].lastPathComponent]?.series ?? "Series",
+                    volume: metadata[group[0].lastPathComponent]?.volume,
+                    issues: sortedIssues,
+                    topCoverComic: nextIssue,
+                    totalIssues: sortedIssues.count,
+                    unreadIssues: unreadCount,
+                    progressFraction: sortedIssues.isEmpty ? 0 : Double(completedCount) / Double(sortedIssues.count)
+                )
+            }.sorted {
+                if case .seriesStack(let s1, _, _, _, _, _, _) = $0,
+                   case .seriesStack(let s2, _, _, _, _, _, _) = $1 {
+                    return s1.localizedStandardCompare(s2) == .orderedAscending
+                }
+                return false
+            }
+
+        case .readingLists:
+            let filteredLists = q.isEmpty ? readingLists : readingLists.filter { $0.name.lowercased().contains(q) }
+            return filteredLists.map { list in
+                let previewUrls = list.itemFilenames.compactMap { comicMap[$0] }
+                return .readingListItem(
+                    list: list,
+                    previewUrls: Array(previewUrls.prefix(4)),
+                    itemCount: previewUrls.count
+                )
+            }
+
+        case .unread:
+            let unread = filteredComics.filter { (ReadingProgress.get($0)?.page ?? 0) == 0 }
+            return unread.map { .singleComic(url: $0, metadata: metadata[$0.lastPathComponent]) }
+        }
+    }
+
+    private func sortIssues(_ urls: [URL]) -> [URL] {
+        urls.sorted { a, b in
+            let ma = metadata[a.lastPathComponent]
+            let mb = metadata[b.lastPathComponent]
+            let numA = ma?.issueNumber ?? Float.greatestFiniteMagnitude
+            let numB = mb?.issueNumber ?? Float.greatestFiniteMagnitude
+            if numA != numB {
+                return numA < numB
+            }
+            return a.lastPathComponent.localizedStandardCompare(b.lastPathComponent) == .orderedAscending
+        }
+    }
+
     private static func leadingBytes(of url: URL, count: Int = 8) -> KotlinByteArray {
         let data: Data = {
             guard let handle = try? FileHandle(forReadingFrom: url) else { return Data() }
