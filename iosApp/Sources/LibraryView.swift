@@ -135,7 +135,9 @@ struct LibraryView: View {
                 }
             }
             .fullScreenCover(isPresented: $showMenu) {
-                MenuView().environmentObject(settings)
+                MenuView()
+                    .environmentObject(settings)
+                    .environmentObject(library)
             }
             .fileImporter(
                 isPresented: $showPicker,

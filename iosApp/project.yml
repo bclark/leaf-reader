@@ -127,11 +127,36 @@ targets:
           fi
         basedOnDependencyAnalysis: false
 
+  LeafTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: Leaf
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]":
+          - "$(inherited)"
+          - "$(SRCROOT)/../shared/build/bin/iosArm64/releaseFramework"
+        "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]":
+          - "$(inherited)"
+          - "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/releaseFramework"
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-framework"
+          - "LeafShared"
+
 schemes:
   Leaf:
     build:
       targets:
         Leaf: all
+        LeafTests: [test]
+    test:
+      targets:
+        - LeafTests
     run:
       config: Debug
     archive:

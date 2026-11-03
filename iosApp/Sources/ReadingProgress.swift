@@ -200,6 +200,21 @@ enum ReadingProgress {
         }
     }
 
+    /// Sets explicit last-opened timestamp (e.g. when restoring from backup).
+    static func setOpenedAt(_ url: URL, timestamp: Double) {
+        initializeLifecycleObservers()
+        lock.lock()
+        if inMemoryOpened == nil { _ = inMemoryOpenedLocked() }
+        inMemoryOpened?[url.lastPathComponent] = timestamp
+        let currentMap = inMemoryOpened ?? [:]
+        lock.unlock()
+        ioQueue.async {
+            if let data = try? JSONEncoder().encode(currentMap) {
+                defaults.set(data, forKey: openedKey)
+            }
+        }
+    }
+
     /// Last-opened timestamp for a comic (0 if never opened) — the library sort key.
     static func openedAt(_ url: URL) -> Double {
         lock.lock(); defer { lock.unlock() }
