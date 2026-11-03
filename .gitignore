@@ -43,3 +43,7 @@ training/*.npy
 # Model training documentation / roadmap (Option A)
 MODEL_TRAINING_GUIDE.md
 docs/REPLACEMENT_PANEL_DETECTOR_PLAN_AND_HANDOFF.md
+
+# iOS roadmap & planning docs
+docs/IOS_REMAINING_PHASES.md
+iosApp/IOS_REMAINING_PHASES.md
