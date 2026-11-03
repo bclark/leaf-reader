@@ -18,6 +18,7 @@ final class PageLoader {
     // ZIPFoundation's Archive isn't thread-safe; serialize reads (and avoid decoding a page twice
     // when the current load and a prefetch race for it).
     private let lock = NSLock()
+    private var sizeCache: [Int: CGSize] = [:]
 
     static let defaultMaxDimension = Int(PageConstants.shared.maxPageDimension)
 
@@ -28,6 +29,42 @@ final class PageLoader {
     }
 
     var pageCount: Int { archive.pageCount }
+
+    /// Returns the pixel dimensions of a page without decoding the full bitmap.
+    func pageSize(_ index: Int) -> CGSize {
+        let key = NSNumber(value: index)
+        if let hit = cache.object(forKey: key) {
+            return CGSize(width: hit.size.width * hit.scale, height: hit.size.height * hit.scale)
+        }
+        lock.lock()
+        if let sz = sizeCache[index] {
+            lock.unlock()
+            return sz
+        }
+        guard let data = try? archive.readPage(index) else {
+            lock.unlock()
+            return .zero
+        }
+        lock.unlock()
+
+        guard let src = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+              let w = props[kCGImagePropertyPixelWidth] as? Int,
+              let h = props[kCGImagePropertyPixelHeight] as? Int else {
+            return .zero
+        }
+        let size = CGSize(width: w, height: h)
+        lock.lock()
+        sizeCache[index] = size
+        lock.unlock()
+        return size
+    }
+
+    /// Whether this page is wider than it is tall (landscape scan), meaning it stands alone in spreads.
+    func isWidePage(_ index: Int) -> Bool {
+        let size = pageSize(index)
+        return size.width > size.height && size.height > 0
+    }
 
     /// Returns the (possibly cached) decoded image for [index], downsampled to the long-edge limit.
     func loadPage(_ index: Int) -> UIImage? {

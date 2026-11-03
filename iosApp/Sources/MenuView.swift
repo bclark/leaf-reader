@@ -62,47 +62,104 @@ struct MenuView: View {
                         // ---- Reading -----------------------------------------------------
                         SectionLabel("READING")
                         Spacer().frame(height: 10)
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Reading Mode")
-                                .font(.archivo(14, weight: 700))
-                                .foregroundColor(Leaf.cream)
-                            Text(settings.pageSlideEnabled
-                                 ? "Turn full pages with a smooth slide transition."
-                                 : "Guided reading that automatically zooms and steps through each detected panel.")
-                                .font(.archivo(12, weight: 400))
-                                .foregroundColor(Leaf.creamMuted)
+                        VStack(alignment: .leading, spacing: 16) {
+                            // Reading Mode
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Reading Mode")
+                                    .font(.archivo(14, weight: 700))
+                                    .foregroundColor(Leaf.cream)
+                                Text(settings.pageSlideEnabled
+                                     ? "Turn full pages with a smooth slide transition."
+                                     : "Guided reading that automatically zooms and steps through each detected panel.")
+                                    .font(.archivo(12, weight: 400))
+                                    .foregroundColor(Leaf.creamMuted)
 
-                            HStack(spacing: 2) {
-                                Button {
-                                    settings.pageSlideEnabled = true
-                                } label: {
-                                    Text("PAGE FLIP")
-                                        .font(.archivo(12, weight: 700))
-                                        .foregroundColor(settings.pageSlideEnabled ? Leaf.ink : Leaf.creamMuted)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 8)
-                                        .background(settings.pageSlideEnabled ? Leaf.ochre : Color.clear)
-                                        .clipShape(RoundedCornerShape(cornerRadius: 3))
-                                }
-                                .buttonStyle(.plain)
+                                HStack(spacing: 2) {
+                                    Button {
+                                        settings.pageSlideEnabled = true
+                                    } label: {
+                                        Text("PAGE FLIP")
+                                            .font(.archivo(12, weight: 700))
+                                            .foregroundColor(settings.pageSlideEnabled ? Leaf.ink : Leaf.creamMuted)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 8)
+                                            .background(settings.pageSlideEnabled ? Leaf.ochre : Color.clear)
+                                            .clipShape(RoundedCornerShape(cornerRadius: 3))
+                                    }
+                                    .buttonStyle(.plain)
 
-                                Button {
-                                    settings.pageSlideEnabled = false
-                                } label: {
-                                    Text("PANEL BY PANEL")
-                                        .font(.archivo(12, weight: 700))
-                                        .foregroundColor(!settings.pageSlideEnabled ? Leaf.ink : Leaf.creamMuted)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 8)
-                                        .background(!settings.pageSlideEnabled ? Leaf.ochre : Color.clear)
-                                        .clipShape(RoundedCornerShape(cornerRadius: 3))
+                                    Button {
+                                        settings.pageSlideEnabled = false
+                                    } label: {
+                                        Text("PANEL BY PANEL")
+                                            .font(.archivo(12, weight: 700))
+                                            .foregroundColor(!settings.pageSlideEnabled ? Leaf.ink : Leaf.creamMuted)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 8)
+                                            .background(!settings.pageSlideEnabled ? Leaf.ochre : Color.clear)
+                                            .clipShape(RoundedCornerShape(cornerRadius: 3))
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
+                                .padding(2)
+                                .background(Leaf.ink)
+                                .clipShape(RoundedCornerShape(cornerRadius: 4))
+                                .padding(.top, 4)
                             }
-                            .padding(2)
-                            .background(Leaf.ink)
-                            .clipShape(RoundedCornerShape(cornerRadius: 4))
-                            .padding(.top, 4)
+
+                            // Page Fit
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Page Fit")
+                                    .font(.archivo(14, weight: 700))
+                                    .foregroundColor(Leaf.cream)
+                                Text(settings.pageFitMode == .fitWidth
+                                     ? "Fit page to screen width for easier reading of small text and speech bubbles."
+                                     : "Fit the entire page on screen.")
+                                    .font(.archivo(12, weight: 400))
+                                    .foregroundColor(Leaf.creamMuted)
+
+                                HStack(spacing: 2) {
+                                    Button {
+                                        settings.pageFitMode = .fitPage
+                                    } label: {
+                                        Text("FIT TO PAGE")
+                                            .font(.archivo(12, weight: 700))
+                                            .foregroundColor(settings.pageFitMode == .fitPage ? Leaf.ink : Leaf.creamMuted)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 8)
+                                            .background(settings.pageFitMode == .fitPage ? Leaf.ochre : Color.clear)
+                                            .clipShape(RoundedCornerShape(cornerRadius: 3))
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    Button {
+                                        settings.pageFitMode = .fitWidth
+                                    } label: {
+                                        Text("FIT TO WIDTH")
+                                            .font(.archivo(12, weight: 700))
+                                            .foregroundColor(settings.pageFitMode == .fitWidth ? Leaf.ink : Leaf.creamMuted)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 8)
+                                            .background(settings.pageFitMode == .fitWidth ? Leaf.ochre : Color.clear)
+                                            .clipShape(RoundedCornerShape(cornerRadius: 3))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(2)
+                                .background(Leaf.ink)
+                                .clipShape(RoundedCornerShape(cornerRadius: 4))
+                                .padding(.top, 4)
+                            }
+
+                            // Portrait layout
+                            LayoutChoiceView(title: "Portrait layout", isSpread: $settings.portraitSpread)
+
+                            // Landscape layout
+                            LayoutChoiceView(title: "Landscape layout", isSpread: $settings.landscapeSpread)
+
+                            Text("The cover and wide pages stay single in either layout.")
+                                .font(.archivo(11, weight: 400))
+                                .foregroundColor(Leaf.creamMuted)
                         }
                         .padding(16)
                         .background(Leaf.inkSoft)
@@ -338,5 +395,50 @@ private struct LeafSwitch: View {
         }
         .frame(width: 46, height: 28)
         .onTapGesture { withAnimation(.easeInOut(duration: 0.15)) { isOn.toggle() } }
+    }
+}
+
+/// Two-option layout selector (Single page vs Two-page spread), matching Android's LayoutChoice.
+private struct LayoutChoiceView: View {
+    let title: String
+    @Binding var isSpread: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.archivo(14, weight: 700))
+                .foregroundColor(Leaf.cream)
+            HStack(spacing: 2) {
+                Button {
+                    isSpread = false
+                } label: {
+                    Text("Single page")
+                        .font(.archivo(12, weight: 700))
+                        .foregroundColor(!isSpread ? Leaf.ink : Leaf.creamMuted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(!isSpread ? Leaf.ochre : Color.clear)
+                        .clipShape(RoundedCornerShape(cornerRadius: 3))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    isSpread = true
+                } label: {
+                    Text("Two-page spread")
+                        .font(.archivo(12, weight: 700))
+                        .foregroundColor(isSpread ? Leaf.ink : Leaf.creamMuted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(isSpread ? Leaf.ochre : Color.clear)
+                        .clipShape(RoundedCornerShape(cornerRadius: 3))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(2)
+            .background(Leaf.ink)
+            .clipShape(RoundedCornerShape(cornerRadius: 4))
+            .padding(.top, 4)
+        }
     }
 }
