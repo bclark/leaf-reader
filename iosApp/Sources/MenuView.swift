@@ -83,50 +83,6 @@ struct MenuView: View {
                         SectionLabel("READING")
                         Spacer().frame(height: 10)
                         VStack(alignment: .leading, spacing: 16) {
-                            // Reading Mode
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Reading Mode")
-                                    .font(.archivo(14, weight: 700))
-                                    .foregroundColor(Leaf.cream)
-                                Text(settings.pageSlideEnabled
-                                     ? "Turn full pages with a smooth slide transition."
-                                     : "Guided reading that automatically zooms and steps through each detected panel.")
-                                    .font(.archivo(12, weight: 400))
-                                    .foregroundColor(Leaf.creamMuted)
-
-                                HStack(spacing: 2) {
-                                    Button {
-                                        settings.pageSlideEnabled = true
-                                    } label: {
-                                        Text("PAGE FLIP")
-                                            .font(.archivo(12, weight: 700))
-                                            .foregroundColor(settings.pageSlideEnabled ? Leaf.ink : Leaf.creamMuted)
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 8)
-                                            .background(settings.pageSlideEnabled ? Leaf.ochre : Color.clear)
-                                            .clipShape(RoundedCornerShape(cornerRadius: 3))
-                                    }
-                                    .buttonStyle(.plain)
-
-                                    Button {
-                                        settings.pageSlideEnabled = false
-                                    } label: {
-                                        Text("PANEL BY PANEL")
-                                            .font(.archivo(12, weight: 700))
-                                            .foregroundColor(!settings.pageSlideEnabled ? Leaf.ink : Leaf.creamMuted)
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 8)
-                                            .background(!settings.pageSlideEnabled ? Leaf.ochre : Color.clear)
-                                            .clipShape(RoundedCornerShape(cornerRadius: 3))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                .padding(2)
-                                .background(Leaf.ink)
-                                .clipShape(RoundedCornerShape(cornerRadius: 4))
-                                .padding(.top, 4)
-                            }
-
                             // Page Fit
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Page Fit")
