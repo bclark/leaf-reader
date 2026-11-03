@@ -77,6 +77,14 @@ import net.digitalbc.leafreader.ui.theme.LeafSecondary
 import net.digitalbc.leafreader.ui.theme.Ochre
 import net.digitalbc.leafreader.ui.theme.PaperWhite
 import net.digitalbc.leafreader.ui.theme.PaperWhiteMuted
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import net.digitalbc.leafreader.data.backup.BackupConflictStrategy
+import net.digitalbc.leafreader.data.backup.BackupPreview
+import net.digitalbc.leafreader.data.library.LibraryRepository
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -100,6 +108,7 @@ fun MenuScreen(
     landscapeSpread: Boolean = false,
     onSetLandscapeSpread: (Boolean) -> Unit = {},
     settings: AppSettings,
+    repository: LibraryRepository? = null,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -112,6 +121,65 @@ fun MenuScreen(
     var smbValid by remember { mutableStateOf<Boolean?>(null) }
     var smbStatusMessage by remember { mutableStateOf<String?>(null) }
     var showLicensesDialog by remember { mutableStateOf(false) }
+
+    var isExporting by remember { mutableStateOf(false) }
+    var isImporting by remember { mutableStateOf(false) }
+    var pendingBackupJson by remember { mutableStateOf<String?>(null) }
+    var restorePreview by remember { mutableStateOf<BackupPreview?>(null) }
+    var selectedStrategy by remember { mutableStateOf(BackupConflictStrategy.MOST_RECENT) }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        if (uri == null || repository == null) return@rememberLauncherForActivityResult
+        isExporting = true
+        scope.launch {
+            try {
+                val appVer = runCatching {
+                    context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                }.getOrNull() ?: "0.3.4"
+                val json = repository.exportBackup(appVer)
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(json.toByteArray(Charsets.UTF_8))
+                    }
+                }
+                Toast.makeText(context, "✓ Backup exported successfully", Toast.LENGTH_SHORT).show()
+            } catch (t: Throwable) {
+                Toast.makeText(context, "✕ Export failed: ${t.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                isExporting = false
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null || repository == null) return@rememberLauncherForActivityResult
+        isImporting = true
+        scope.launch {
+            try {
+                val json = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        stream.bufferedReader(Charsets.UTF_8).readText()
+                    }
+                } ?: throw IllegalArgumentException("Could not read backup file")
+                val previewResult = repository.previewBackup(json)
+                if (previewResult.isSuccess) {
+                    pendingBackupJson = json
+                    restorePreview = previewResult.getOrThrow()
+                } else {
+                    val err = previewResult.exceptionOrNull()?.message ?: "Unknown error"
+                    Toast.makeText(context, "✕ Invalid backup: $err", Toast.LENGTH_LONG).show()
+                }
+            } catch (t: Throwable) {
+                Toast.makeText(context, "✕ Failed to open backup: ${t.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                isImporting = false
+            }
+        }
+    }
 
     val version = remember {
         runCatching {
@@ -501,6 +569,74 @@ fun MenuScreen(
 
             Spacer(Modifier.size(32.dp))
 
+            if (repository != null) {
+                // ---- Backup & Restore ----------------------------------------------------
+                SectionLabel("BACKUP & RESTORE")
+                Spacer(Modifier.size(10.dp))
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(InkSoft)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        "Export or restore reading progress, reading lists, and app preferences. Secrets (such as SMB passwords) and internal file paths are strictly excluded.",
+                        fontFamily = Archivo,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        color = CreamMuted,
+                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(if (isExporting) Ink else Ochre)
+                                .clickable(enabled = !isExporting && !isImporting) {
+                                    val fileName = "leaf_backup_${SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())}.json"
+                                    exportLauncher.launch(fileName)
+                                }
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                if (isExporting) "EXPORTING…" else "EXPORT BACKUP",
+                                fontFamily = Anton,
+                                fontSize = 13.sp,
+                                letterSpacing = 0.5.sp,
+                                color = if (isExporting) CreamMuted else Ink,
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(DeepInkSurface)
+                                .border(1.5.dp, Ochre, RoundedCornerShape(4.dp))
+                                .clickable(enabled = !isExporting && !isImporting) {
+                                    importLauncher.launch(arrayOf("application/json", "*/*"))
+                                }
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                if (isImporting) "READING…" else "RESTORE…",
+                                fontFamily = Anton,
+                                fontSize = 13.sp,
+                                letterSpacing = 0.5.sp,
+                                color = PaperWhite,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.size(32.dp))
+            }
+
             // ---- About ---------------------------------------------------------------
             SectionLabel("ABOUT")
             Spacer(Modifier.size(16.dp))
@@ -707,6 +843,119 @@ fun MenuScreen(
             dismissButton = {
                 TextButton(onClick = { showLicensesDialog = false }) {
                     Text("CLOSE", color = PaperWhiteMuted)
+                }
+            },
+            containerColor = DeepInkSurface,
+        )
+    }
+
+    restorePreview?.let { preview ->
+        AlertDialog(
+            onDismissRequest = {
+                restorePreview = null
+                pendingBackupJson = null
+            },
+            title = {
+                Text(
+                    text = "RESTORE BACKUP (v${preview.version})",
+                    fontFamily = Anton,
+                    fontSize = 18.sp,
+                    color = PaperWhite,
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Exported: ${SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()).format(Date(preview.exportedAt))} (Leaf v${preview.appVersion})",
+                        fontFamily = Archivo,
+                        fontSize = 12.sp,
+                        color = CreamMuted,
+                    )
+                    Text(
+                        text = "• ${preview.totalComicsInBackup} comics in backup (${preview.matchingComicsCount} match existing library)\n" +
+                                "• ${preview.readingListsCount} reading lists\n" +
+                                "• App settings: ${if (preview.hasSettings) "Included" else "None"}",
+                        fontFamily = Archivo,
+                        fontSize = 13.sp,
+                        lineHeight = 19.sp,
+                        color = Cream,
+                    )
+                    Spacer(Modifier.size(4.dp))
+                    Text(
+                        text = "Progress Conflict Strategy:",
+                        fontFamily = Archivo,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = Ochre,
+                    )
+                    Column(
+                        Modifier.selectableGroup(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        listOf(
+                            BackupConflictStrategy.MOST_RECENT to "Most Recent (Recommended: updates if backup is newer)",
+                            BackupConflictStrategy.OVERWRITE to "Overwrite (Always replace local progress with backup)",
+                            BackupConflictStrategy.KEEP_LOCAL to "Keep Local (Retain local progress; restore lists & settings)",
+                        ).forEach { (strat, label) ->
+                            val isSelected = selectedStrategy == strat
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (isSelected) Ink else Color.Transparent)
+                                    .selectable(
+                                        selected = isSelected,
+                                        onClick = { selectedStrategy = strat },
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(14.dp)
+                                        .clip(CircleShape)
+                                        .border(2.dp, if (isSelected) Ochre else CreamMuted, CircleShape)
+                                        .background(if (isSelected) Ochre else Color.Transparent)
+                                )
+                                Spacer(Modifier.size(8.dp))
+                                Text(
+                                    text = label,
+                                    fontFamily = Archivo,
+                                    fontSize = 12.sp,
+                                    color = if (isSelected) PaperWhite else CreamMuted,
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val json = pendingBackupJson
+                        if (json != null && repository != null) {
+                            scope.launch {
+                                val result = repository.applyBackup(json, selectedStrategy)
+                                result.onSuccess { count ->
+                                    Toast.makeText(context, "✓ Restored progress for $count comic(s)", Toast.LENGTH_SHORT).show()
+                                }.onFailure { err ->
+                                    Toast.makeText(context, "✕ Restore failed: ${err.message}", Toast.LENGTH_LONG).show()
+                                }
+                                restorePreview = null
+                                pendingBackupJson = null
+                            }
+                        }
+                    }
+                ) {
+                    Text("APPLY RESTORE", color = Ochre, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    restorePreview = null
+                    pendingBackupJson = null
+                }) {
+                    Text("CANCEL", color = PaperWhiteMuted)
                 }
             },
             containerColor = DeepInkSurface,

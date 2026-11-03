@@ -11,6 +11,9 @@ interface ComicDao {
     @Query("SELECT * FROM comics ORDER BY lastOpened DESC")
     fun observeAll(): Flow<List<ComicEntity>>
 
+    @Query("SELECT * FROM comics")
+    suspend fun getAll(): List<ComicEntity>
+
     @Query("SELECT * FROM comics WHERE id = :id")
     suspend fun getById(id: Long): ComicEntity?
 

@@ -175,6 +175,7 @@ class ReaderOpeningTest {
     private class FakeDao(var comic: ComicEntity) : ComicDao {
         var gate: CompletableDeferred<Unit>? = null
         override fun observeAll() = flowOf(listOf(comic))
+        override suspend fun getAll(): List<ComicEntity> = listOf(comic)
         override suspend fun getById(id: Long): ComicEntity { gate?.await(); return comic }
         override suspend fun insert(comic: ComicEntity): Long { this.comic = comic; return comic.id }
         override suspend fun updateProgress(id: Long, page: Int, slot: Int, openedAt: Long): Int {
