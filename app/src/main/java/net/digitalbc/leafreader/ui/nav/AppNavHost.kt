@@ -90,6 +90,7 @@ fun AppNavHost() {
                 onSetPortraitSpread = app::setPortraitSpread,
                 onSetLandscapeSpread = app::setLandscapeSpread,
                 settings = app.settings,
+                repository = app.libraryRepository,
                 onBack = { navController.popBackStack() },
             )
         }

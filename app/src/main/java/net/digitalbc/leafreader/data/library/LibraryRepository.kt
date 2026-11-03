@@ -8,10 +8,16 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
+import androidx.room.withTransaction
 import net.digitalbc.leafreader.data.archive.ComicArchiveFactory
 import net.digitalbc.leafreader.data.archive.ComicFormat
 import net.digitalbc.leafreader.data.archive.ComicMetadataParser
 import net.digitalbc.leafreader.data.archive.UnsupportedComicException
+import net.digitalbc.leafreader.data.backup.BackupComic
+import net.digitalbc.leafreader.data.backup.BackupConflictStrategy
+import net.digitalbc.leafreader.data.backup.BackupManager
+import net.digitalbc.leafreader.data.backup.BackupPreview
+import net.digitalbc.leafreader.data.db.AppDatabase
 import net.digitalbc.leafreader.data.db.ComicDao
 import net.digitalbc.leafreader.data.db.ComicEntity
 import net.digitalbc.leafreader.data.db.ReadingListDao
@@ -23,6 +29,7 @@ import net.digitalbc.leafreader.data.smb.SmbEntry
 import net.digitalbc.leafreader.data.smb.SmbTransferProgress
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.withContext
@@ -42,6 +49,7 @@ class LibraryRepository(
     private val dao: ComicDao,
     private val settings: AppSettings,
     private val readingListDao: ReadingListDao? = null,
+    private val db: AppDatabase? = null,
 ) {
     val comics: Flow<List<ComicEntity>> = dao.observeAll()
 
@@ -94,11 +102,124 @@ class LibraryRepository(
 
     suspend fun getComic(id: Long): ComicEntity? = dao.getById(id)
 
-    suspend fun saveProgress(id: Long, page: Int, slot: Int) =
-        dao.updateProgress(id, page, slot, System.currentTimeMillis())
+    suspend fun saveProgress(id: Long, page: Int, slot: Int): Int =
+        withContext(NonCancellable + Dispatchers.IO) {
+            dao.updateProgress(id, page, slot, System.currentTimeMillis())
+        }
+
+    suspend fun updateComicPageCount(id: Long, pageCount: Int): Int =
+        withContext(NonCancellable + Dispatchers.IO) {
+            dao.updatePageCount(id, pageCount)
+        }
 
     suspend fun setReadingDirection(id: Long, rightToLeft: Boolean) =
         dao.updateReadingDirection(id, rightToLeft)
+
+    suspend fun exportBackup(appVersion: String = "0.3.4"): String = withContext(Dispatchers.IO) {
+        val allComics = dao.getAll()
+        val allLists = readingListDao?.getAllLists() ?: emptyList()
+        val allItems = readingListDao?.getAllItems() ?: emptyList()
+        val comicsById = allComics.associateBy { it.id }
+        BackupManager.exportToJson(
+            comics = allComics,
+            readingLists = allLists,
+            readingListItems = allItems,
+            comicsById = comicsById,
+            settings = settings,
+            appVersion = appVersion,
+        )
+    }
+
+    suspend fun previewBackup(jsonString: String): Result<BackupPreview> = withContext(Dispatchers.IO) {
+        BackupManager.parseAndValidate(jsonString).map { payload ->
+            val allComics = dao.getAll()
+            BackupManager.createPreview(payload, allComics)
+        }
+    }
+
+    suspend fun applyBackup(
+        jsonString: String,
+        strategy: BackupConflictStrategy = BackupConflictStrategy.MOST_RECENT,
+    ): Result<Int> = withContext(NonCancellable + Dispatchers.IO) {
+        val payload = BackupManager.parseAndValidate(jsonString).getOrElse { return@withContext Result.failure(it) }
+
+        suspend fun executeApply(): Int {
+            payload.settings?.let { s ->
+                settings.defaultRightToLeft = s.defaultRightToLeft
+                settings.amoledTheme = s.amoledTheme
+                settings.pageSlideEnabled = s.pageSlideEnabled
+                settings.pageFitMode = runCatching {
+                    net.digitalbc.leafreader.ui.reader.PageFitMode.valueOf(s.pageFitMode)
+                }.getOrDefault(net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_PAGE)
+                settings.portraitSpread = s.portraitSpread
+                settings.landscapeSpread = s.landscapeSpread
+                settings.libraryColumns = s.libraryColumns
+            }
+
+            val currentComics = dao.getAll()
+            var updatedCount = 0
+
+            for (backup in payload.comics) {
+                val matched = BackupManager.findMatchingComic(backup, currentComics) ?: continue
+                val shouldUpdate = when (strategy) {
+                    BackupConflictStrategy.OVERWRITE -> true
+                    BackupConflictStrategy.KEEP_LOCAL -> false
+                    BackupConflictStrategy.MOST_RECENT -> backup.lastOpened > matched.lastOpened
+                }
+                if (shouldUpdate) {
+                    val targetPage = backup.lastPage.coerceIn(0, maxOf(0, matched.pageCount - 1))
+                    val targetSlot = if (targetPage == backup.lastPage) backup.lastSlot else 0
+                    dao.updateProgress(matched.id, targetPage, targetSlot, backup.lastOpened)
+                    dao.updateReadingDirection(matched.id, backup.rightToLeft)
+                    updatedCount++
+                }
+            }
+
+            if (readingListDao != null && payload.readingLists.isNotEmpty()) {
+                val existingLists = readingListDao.getAllLists().associateBy { it.name.lowercase() }
+                for (backupList in payload.readingLists) {
+                    val listId = existingLists[backupList.name.lowercase()]?.id
+                        ?: readingListDao.insertList(
+                            ReadingListEntity(
+                                name = backupList.name,
+                                createdAt = backupList.createdAt,
+                                updatedAt = System.currentTimeMillis(),
+                            )
+                        )
+                    for (item in backupList.items) {
+                        val dummy = BackupComic(
+                            title = item.comicTitle,
+                            series = item.series,
+                            issueNumber = item.issueNumber,
+                            format = "",
+                            pageCount = 0,
+                        )
+                        val target = BackupManager.findMatchingComic(dummy, currentComics) ?: continue
+                        readingListDao.insertItem(
+                            ReadingListItemEntity(
+                                listId = listId,
+                                comicId = target.id,
+                                sortOrder = item.sortOrder,
+                            )
+                        )
+                    }
+                }
+            }
+            return updatedCount
+        }
+
+        try {
+            val result = if (db != null) {
+                db.withTransaction { executeApply() }
+            } else {
+                executeApply()
+            }
+            Result.success(result)
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            Result.failure(t)
+        }
+    }
 
     /** Finds all supported comic files within a selected folder URI. */
     fun getUrisFromFolder(treeUri: Uri): List<Uri> {

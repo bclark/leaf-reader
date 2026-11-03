@@ -11,6 +11,9 @@ interface ComicDao {
     @Query("SELECT * FROM comics ORDER BY lastOpened DESC")
     fun observeAll(): Flow<List<ComicEntity>>
 
+    @Query("SELECT * FROM comics")
+    suspend fun getAll(): List<ComicEntity>
+
     @Query("SELECT * FROM comics WHERE id = :id")
     suspend fun getById(id: Long): ComicEntity?
 
@@ -19,6 +22,9 @@ interface ComicDao {
 
     @Query("UPDATE comics SET lastPage = :page, lastSlot = :slot, lastOpened = :openedAt WHERE id = :id")
     suspend fun updateProgress(id: Long, page: Int, slot: Int, openedAt: Long): Int
+
+    @Query("UPDATE comics SET pageCount = :pageCount WHERE id = :id")
+    suspend fun updatePageCount(id: Long, pageCount: Int): Int
 
     @Query("UPDATE comics SET rightToLeft = :rtl WHERE id = :id")
     suspend fun updateReadingDirection(id: Long, rtl: Boolean): Int
