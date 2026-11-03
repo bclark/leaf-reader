@@ -1,9 +1,13 @@
 import SwiftUI
+import LeafShared
 
 /// App-wide UI settings, persisted in UserDefaults — the iOS counterpart to Android's AppSettings.
 final class LeafSettings: ObservableObject {
     private static let amoledKey = "leaf.amoledTheme"
     private static let pageSlideKey = "leaf.pageSlideEnabled"
+    private static let pageFitModeKey = "leaf.pageFitMode"
+    private static let portraitSpreadKey = "leaf.portraitSpread"
+    private static let landscapeSpreadKey = "leaf.landscapeSpread"
     private static let libraryColumnsKey = "leaf.libraryColumns"
     private static let legacyAmoledKey = "chika.amoledTheme"
     private static let legacyPageSlideKey = "chika.pageSlideEnabled"
@@ -17,6 +21,21 @@ final class LeafSettings: ObservableObject {
     /// When true, reading mode is Page Flip (full page slide); when false, Panel by Panel (guided reading).
     @Published var pageSlideEnabled: Bool {
         didSet { defaults.set(pageSlideEnabled, forKey: Self.pageSlideKey) }
+    }
+
+    /// Preferred whole-page framing: fit-to-page (contain, default) or fit-to-width.
+    @Published var pageFitMode: PageFitMode {
+        didSet { defaults.set(pageFitMode == .fitWidth ? "FIT_WIDTH" : "FIT_PAGE", forKey: Self.pageFitModeKey) }
+    }
+
+    /// Independent portrait two-page spread choice.
+    @Published var portraitSpread: Bool {
+        didSet { defaults.set(portraitSpread, forKey: Self.portraitSpreadKey) }
+    }
+
+    /// Two-page spread choice for landscape orientation.
+    @Published var landscapeSpread: Bool {
+        didSet { defaults.set(landscapeSpread, forKey: Self.landscapeSpreadKey) }
     }
 
     /// Number of comic cover columns on the library screen (2, 3, 4, 6).
@@ -39,6 +58,15 @@ final class LeafSettings: ObservableObject {
         } else {
             pageSlideEnabled = true
         }
+
+        if let fitStr = defaults.string(forKey: Self.pageFitModeKey), fitStr == "FIT_WIDTH" {
+            pageFitMode = .fitWidth
+        } else {
+            pageFitMode = .fitPage
+        }
+
+        portraitSpread = defaults.bool(forKey: Self.portraitSpreadKey)
+        landscapeSpread = defaults.bool(forKey: Self.landscapeSpreadKey)
 
         if defaults.object(forKey: Self.libraryColumnsKey) != nil {
             let cols = defaults.integer(forKey: Self.libraryColumnsKey)
