@@ -13,6 +13,20 @@
   <img src="https://img.shields.io/badge/architecture-Kotlin%20Multiplatform-7F52FF.svg" alt="Kotlin Multiplatform">
 </p>
 
+<p align="center">
+  <img src="docs/screens/spread.png" width="850" alt="Two-Page Spread Reading Mode">
+</p>
+
+<p align="center">
+  <img src="docs/screens/library.png" width="22%" alt="Comic Library with Series Stacks">
+  &nbsp;
+  <img src="docs/screens/series.png" width="22%" alt="Series Detail View">
+  &nbsp;
+  <img src="docs/screens/lists.png" width="22%" alt="Reading Lists Stacks">
+  &nbsp;
+  <img src="docs/screens/reader.png" width="22%" alt="In-Reader Navigation & Controls">
+</p>
+
 ---
 
 ## Origin & Upstream Attribution
