@@ -15,6 +15,10 @@ target 'Leaf' do
   # resolved through the CDN.
   pod 'TensorFlowLiteSwift', :podspec => 'podspecs/TensorFlowLiteSwift.podspec.json'
   pod 'TensorFlowLiteC', :podspec => 'podspecs/TensorFlowLiteC.podspec.json'
+
+  target 'LeafTests' do
+    inherit! :search_paths
+  end
 end
 
 post_install do |installer|
