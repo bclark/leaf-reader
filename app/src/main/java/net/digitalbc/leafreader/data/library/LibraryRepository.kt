@@ -11,6 +11,7 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.room.withTransaction
 import net.digitalbc.leafreader.data.archive.ComicArchiveFactory
 import net.digitalbc.leafreader.data.archive.ComicFormat
+import net.digitalbc.leafreader.data.archive.ComicMetadata
 import net.digitalbc.leafreader.data.archive.ComicMetadataParser
 import net.digitalbc.leafreader.data.archive.UnsupportedComicException
 import net.digitalbc.leafreader.data.backup.BackupComic
@@ -93,7 +94,24 @@ class LibraryRepository(
     suspend fun backfillMetadataIfNeeded() = withContext(Dispatchers.IO) {
         val missing = dao.getComicsWithoutSeries()
         for (comic in missing) {
-            val meta = ComicMetadataParser.parseFilename(comic.title)
+            var meta = ComicMetadataParser.parseFilename(comic.title)
+            val archiveFile = File(comic.filePath)
+            if ((meta.series == null || meta.issueNumber == null) && archiveFile.exists()) {
+                val xmlMeta = runCatching {
+                    ComicArchiveFactory.open(archiveFile).use { archive ->
+                        archive.readComicInfoXml()?.let { xml ->
+                            ComicMetadataParser.parseComicInfoXml(xml)
+                        }
+                    }
+                }.getOrNull()
+                if (xmlMeta != null) {
+                    meta = ComicMetadata(
+                        series = xmlMeta.series ?: meta.series,
+                        volume = xmlMeta.volume ?: meta.volume,
+                        issueNumber = xmlMeta.issueNumber ?: meta.issueNumber,
+                    )
+                }
+            }
             if (meta.series != null || meta.issueNumber != null || meta.volume != null) {
                 dao.updateMetadata(comic.id, meta.series, meta.volume, meta.issueNumber)
             }
