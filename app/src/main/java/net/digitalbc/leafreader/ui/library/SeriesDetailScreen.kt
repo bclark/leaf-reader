@@ -115,12 +115,21 @@ fun SeriesDetailScreen(
         )
     }
 
+    val allCompleted = seriesComics.isNotEmpty() && seriesComics.all { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
     val nextUnread = seriesComics.firstOrNull { it.pageCount > 0 && it.lastPage < it.pageCount - 1 }
         ?: seriesComics.firstOrNull()
+
+    val continueButtonText = when {
+        allCompleted && seriesComics.isNotEmpty() -> "READ FROM START: ${seriesComics.first().title.uppercase()}"
+        nextUnread != null && nextUnread.lastPage > 0 -> "CONTINUE: ${nextUnread.title.uppercase()}"
+        nextUnread != null -> "START: ${nextUnread.title.uppercase()}"
+        else -> null
+    }
 
     var showAddComicsDialog by remember { mutableStateOf(false) }
     var selectedToAdd by remember { mutableStateOf(emptySet<Long>()) }
 
+    var selectedComicForOptions by remember { mutableStateOf<ComicEntity?>(null) }
     var comicToRemove by remember { mutableStateOf<ComicEntity?>(null) }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -213,14 +222,15 @@ fun SeriesDetailScreen(
                                             Text("ADD COMICS", fontFamily = Anton, fontSize = 11.sp, color = DeepInk)
                                         }
                                     }
-                                    TextButton(onClick = { viewModel.markSeriesRead(seriesName, volume, true) }) {
-                                        Text("MARK READ", fontFamily = Anton, fontSize = 11.sp, color = Ochre)
+                                    TextButton(onClick = { viewModel.markSeriesRead(seriesName, volume, !allCompleted) }) {
+                                        Text(if (allCompleted) "MARK UNREAD" else "MARK READ", fontFamily = Anton, fontSize = 11.sp, color = Ochre)
                                     }
                                 }
                             }
-                            if (nextUnread != null) {
+                            if (continueButtonText != null && nextUnread != null) {
+                                val targetComic = if (allCompleted && seriesComics.isNotEmpty()) seriesComics.first() else nextUnread
                                 Button(
-                                    onClick = { onOpenComic(nextUnread.id) },
+                                    onClick = { onOpenComic(targetComic.id) },
                                     colors = ButtonDefaults.buttonColors(containerColor = Ochre),
                                     shape = RoundedCornerShape(4.dp),
                                     modifier = Modifier.fillMaxWidth(),
@@ -228,7 +238,7 @@ fun SeriesDetailScreen(
                                     Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Ink)
                                     Spacer(Modifier.width(8.dp))
                                     Text(
-                                        text = "CONTINUE: ${nextUnread.title.uppercase()}",
+                                        text = continueButtonText,
                                         fontFamily = Anton,
                                         fontSize = 13.sp,
                                         color = Ink,
@@ -246,7 +256,7 @@ fun SeriesDetailScreen(
                         comic = comic,
                         columns = actualColumns,
                         onClick = { onOpenComic(comic.id) },
-                        onLongClick = { comicToRemove = comic },
+                        onLongClick = { selectedComicForOptions = comic },
                         onRemove = { comicToRemove = comic },
                     )
                 }
@@ -363,6 +373,93 @@ fun SeriesDetailScreen(
                     selectedToAdd = emptySet()
                 }) {
                     Text("CANCEL", color = PaperWhiteMuted)
+                }
+            },
+            containerColor = DeepInkSurface,
+        )
+    }
+
+    selectedComicForOptions?.let { comic ->
+        val isRead = comic.pageCount > 0 && comic.lastPage >= comic.pageCount - 1
+        AlertDialog(
+            onDismissRequest = { selectedComicForOptions = null },
+            title = {
+                Text(comic.title.uppercase(), fontFamily = Anton, color = PaperWhite, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(DeepInk)
+                            .border(1.dp, LeafSecondary.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                            .clickable {
+                                val id = comic.id
+                                selectedComicForOptions = null
+                                onOpenComic(id)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Ochre, modifier = Modifier.size(18.dp))
+                        Text(if (comic.lastPage > 0) "CONTINUE READING" else "READ COMIC", fontFamily = Anton, fontSize = 13.sp, color = PaperWhite)
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(DeepInk)
+                            .border(1.dp, LeafSecondary.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                            .clickable {
+                                val id = comic.id
+                                selectedComicForOptions = null
+                                viewModel.markComicRead(id, !isRead)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(
+                            if (isRead) Icons.Default.Close else Icons.Default.Check,
+                            contentDescription = null,
+                            tint = Ochre,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            if (isRead) "MARK AS UNREAD" else "MARK AS READ",
+                            fontFamily = Anton,
+                            fontSize = 13.sp,
+                            color = PaperWhite,
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(DeepInk)
+                            .border(1.dp, ComicRose.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                            .clickable {
+                                val target = comic
+                                selectedComicForOptions = null
+                                comicToRemove = target
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = null, tint = ComicRose, modifier = Modifier.size(18.dp))
+                        Text("REMOVE FROM SERIES", fontFamily = Anton, fontSize = 13.sp, color = ComicRose)
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { selectedComicForOptions = null }) {
+                    Text("CLOSE", color = PaperWhiteMuted)
                 }
             },
             containerColor = DeepInkSurface,

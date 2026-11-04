@@ -2291,7 +2291,11 @@ private fun ComicStackCard(
     val shadowOffset = if (columns >= 4) 3.dp else 5.dp
     val progressHeight = if (columns >= 4) 5.dp else 7.dp
 
-    var topIndex by rememberSaveable(stack.seriesName, stack.volume) { mutableIntStateOf(0) }
+    val initialIndex = remember(stack.issues, stack.topCoverComic) {
+        val idx = stack.issues.indexOfFirst { it.id == stack.topCoverComic.id }
+        if (idx >= 0) idx else 0
+    }
+    var topIndex by rememberSaveable(stack.seriesName, stack.volume) { mutableIntStateOf(initialIndex) }
     val issueCount = stack.issues.size
     val currentTopComic = remember(stack.issues, topIndex) {
         if (issueCount > 0) stack.issues[(topIndex % issueCount + issueCount) % issueCount]
@@ -2373,6 +2377,10 @@ private fun ComicStackCard(
                     }
 
                     val layer2IssueNum = if (issueCount > 0) ((topIndex + 1) % issueCount + issueCount) % issueCount + 1 else 2
+                    val layer2BadgeText = layer2Comic?.issueNumber?.let { num ->
+                        val numStr = if (num % 1.0f == 0.0f) "${num.toInt()}" else "$num"
+                        "ISSUE #$numStr OF ${stack.totalIssues}"
+                    } ?: "ISSUE $layer2IssueNum OF ${stack.totalIssues}"
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
@@ -2387,7 +2395,7 @@ private fun ComicStackCard(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            text = "ISSUE $layer2IssueNum OF ${stack.totalIssues}",
+                            text = layer2BadgeText,
                             fontFamily = Anton,
                             fontSize = if (columns >= 4) 7.sp else 8.sp,
                             color = Cream,
@@ -2431,11 +2439,21 @@ private fun ComicStackCard(
                         .background(Ink.copy(alpha = 0.85f))
                         .border(1.dp, Ochre, RoundedCornerShape(3.dp))
                         .padding(horizontal = if (columns >= 4) 4.dp else 5.dp, vertical = 2.dp),
-                    contentAlignment = Alignment.Center,
+                        contentAlignment = Alignment.Center,
                 ) {
                     val currentIssueNum = if (issueCount > 0) (topIndex % issueCount + issueCount) % issueCount + 1 else 1
+                    val frontBadgeText = if (stack.totalIssues > 1) {
+                        currentTopComic.issueNumber?.let { num ->
+                            val numStr = if (num % 1.0f == 0.0f) "${num.toInt()}" else "$num"
+                            "ISSUE #$numStr OF ${stack.totalIssues}"
+                        } ?: "ISSUE $currentIssueNum OF ${stack.totalIssues}"
+                    } else if (stack.volume != null) {
+                        "${stack.seriesName.uppercase()} · ${stack.volume.uppercase()}"
+                    } else {
+                        "1 ISSUE"
+                    }
                     Text(
-                        text = if (stack.totalIssues > 1) "ISSUE $currentIssueNum OF ${stack.totalIssues}" else if (stack.volume != null) "${stack.seriesName.uppercase()} · ${stack.volume.uppercase()}" else "1 ISSUE",
+                        text = frontBadgeText,
                         fontFamily = Anton,
                         fontSize = if (columns >= 4) 7.sp else 8.sp,
                         color = Cream,
