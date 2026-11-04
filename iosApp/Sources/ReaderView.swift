@@ -387,7 +387,7 @@ struct ReaderView: View {
 
     @ViewBuilder
     private func readerBody(_ loader: PageLoader, size: CGSize) -> some View {
-        let isPeeling = (curlAnimator.direction != nil && curlAnimator.progress > 0.001 && zoom <= 1.05)
+        let isPeeling = (curlAnimator.direction != nil && curlAnimator.progress > 0.001 && ReaderTurnLogic.isCurlGestureEnabled(zoom: zoom))
         let activeTurnKind = isPeeling ? (curlAnimator.direction.flatMap { resolveTurnKind(direction: $0, loader: loader, size: size) }) : nil
 
         ZStack(alignment: .topLeading) {
@@ -449,8 +449,7 @@ struct ReaderView: View {
                         let canGoBack = !rightToLeft ? (Int(s?.first ?? Int32(page)) > 0) : (Int(s?.after ?? Int32(page + 1)) < loader.pageCount)
 
                         if curlAnimator.direction == nil {
-                            if abs(t.width) > 6 {
-                                let dir: CurlDirection = !rightToLeft ? (t.width < 0 ? .forward : .backward) : (t.width > 0 ? .forward : .backward)
+                            if let dir = ReaderTurnLogic.resolveDragDirection(translationX: t.width, rightToLeft: rightToLeft) {
                                 let canTurn = (dir == .forward) ? canAdvance : canGoBack
                                 if canTurn {
                                     let isForward = (dir == .forward)
@@ -471,9 +470,8 @@ struct ReaderView: View {
                         }
 
                         if let activeDir = curlAnimator.direction {
-                            let isForward = (activeDir == .forward)
-                            let dragDist = !rightToLeft ? (isForward ? -t.width : t.width) : (isForward ? t.width : -t.width)
-                            let curDragT = min(max(dragDist / size.width, 0.0), 1.0)
+                            let dragDist = ReaderTurnLogic.computeDragDistance(translationX: t.width, direction: activeDir, rightToLeft: rightToLeft)
+                            let curDragT = ReaderTurnLogic.computeDragProgress(dragDistance: dragDist, screenWidth: size.width)
                             curlAnimator.updateInteractive(direction: activeDir, progress: curDragT)
                         }
 
@@ -492,18 +490,23 @@ struct ReaderView: View {
             )
             .frame(width: size.width, height: size.height)
             .contentShape(Rectangle())
+            .accessibilityIdentifier("ReaderCanvas")
         }
     }
 
     private var pageStatus: String {
-        guard let loader = currentLoader else { return "Page \(page + 1)/\(pageCount)" }
+        guard let loader = currentLoader else { return ReaderTurnLogic.formatPageStatus(page: page, pageCount: pageCount) }
         let spreadActive = isSpreadActive(for: UIScreen.main.bounds.size)
         let s = resolveSpread(for: page, in: loader, spreadActive: spreadActive)
-        if let sec = s?.second, isSpread {
-            return "Pages \(s!.first + 1)-\(sec.int32Value + 1)/\(pageCount)"
-        } else {
-            return "Page \(page + 1)/\(pageCount)"
-        }
+        let first = Int(s?.first ?? Int32(page))
+        let second = s?.second != nil ? Int(s!.second!.int32Value) : nil
+        return ReaderTurnLogic.formatPageStatus(
+            page: page,
+            pageCount: pageCount,
+            firstPage: first,
+            secondPage: second,
+            isSpread: isSpread
+        )
     }
 
     private var topBar: some View {
@@ -516,9 +519,14 @@ struct ReaderView: View {
                     .background(Leaf.cream.opacity(0.12))
                     .clipShape(Circle())
             }
+            .accessibilityIdentifier("BackButton")
+            .accessibilityLabel("Back")
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.archivo(14, weight: 800)).foregroundColor(Leaf.cream).lineLimit(1)
+                    .accessibilityIdentifier("TopBarTitle")
                 Text(pageStatus).font(.archivo(10)).tracking(1.4).foregroundColor(Leaf.creamMuted)
+                    .accessibilityIdentifier("PageStatus")
             }
             Spacer()
 
@@ -534,11 +542,13 @@ struct ReaderView: View {
                     loadCurrentAndAdjacent(loader: l, targetPage: page)
                 }
             }
+            .accessibilityIdentifier("SpreadChip")
 
             FitModeChip(fitMode: settings.pageFitMode) {
                 settings.pageFitMode = (settings.pageFitMode == .fitPage ? .fitWidth : .fitPage)
                 resetZoom()
             }
+            .accessibilityIdentifier("FitModeChip")
 
             DirectionChip(rightToLeft: rightToLeft) {
                 rightToLeft.toggle()
@@ -547,6 +557,7 @@ struct ReaderView: View {
                     loadCurrentAndAdjacent(loader: l, targetPage: page)
                 }
             }
+            .accessibilityIdentifier("DirectionChip")
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 18)
         .frame(maxWidth: .infinity)
@@ -565,6 +576,7 @@ struct ReaderView: View {
             HStack {
                 Spacer()
                 PageCoin(page: (scrubbing ? Int(scrub.rounded()) : page) + 1, total: pageCount)
+                    .accessibilityIdentifier("PageCoin")
             }
             ComicScrubberSlider(
                 value: $scrub,
@@ -583,6 +595,7 @@ struct ReaderView: View {
                     }
                 }
             )
+            .accessibilityIdentifier("ComicScrubberSlider")
         }
         .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 12)
         .frame(maxWidth: .infinity)
@@ -751,16 +764,12 @@ struct ReaderView: View {
     // center third toggles chrome. If zoomed in, tap toggles chrome anywhere.
     private func tapZone(x: CGFloat, width: CGFloat, in loader: PageLoader) {
         guard !curlAnimator.isAnimating && curlAnimator.direction == nil else { return }
-        if zoom > 1.05 {
+        if !ReaderTurnLogic.isCurlGestureEnabled(zoom: zoom) {
             withAnimation(.easeInOut(duration: 0.2)) { showChrome.toggle() }
             return
         }
-        let leftBound = width / 3
-        let rightBound = width * 2 / 3
-        if x < leftBound {
-            performTurn(forward: rightToLeft, in: loader, width: width)
-        } else if x > rightBound {
-            performTurn(forward: !rightToLeft, in: loader, width: width)
+        if let dir = ReaderTurnLogic.resolveTapZone(x: x, width: width, rightToLeft: rightToLeft) {
+            performTurn(forward: dir == .forward, in: loader, width: width)
         } else {
             withAnimation(.easeInOut(duration: 0.2)) { showChrome.toggle() }
         }
@@ -865,9 +874,9 @@ struct ReaderView: View {
             }
             let targetSpreadS = (target >= 0 && target < loader.pageCount) ? resolveSpread(for: target, in: loader, spreadActive: spreadActive) : nil
 
-            let dragDist = !rightToLeft ? (isForward ? -dragX : dragX) : (isForward ? dragX : -dragX)
+            let dragDist = ReaderTurnLogic.computeDragDistance(translationX: dragX, direction: activeDir, rightToLeft: rightToLeft)
             let vel = !rightToLeft ? (isForward ? -velX : velX) : (isForward ? velX : -velX)
-            let settle = (dragDist > W * 0.35 || vel > 500) && vel > -400
+            let settle = ReaderTurnLogic.shouldSettle(dragDistance: dragDist, screenWidth: W, velocity: vel)
 
             if settle && target >= 0 && target < loader.pageCount {
                 let remaining = 1.0 - curlAnimator.progress
@@ -1029,6 +1038,7 @@ struct DirectionChip: View {
             .background(Leaf.cream.opacity(0.12))
             .clipShape(Capsule())
         }
+        .accessibilityIdentifier("DirectionChip")
         .buttonStyle(.plain)
     }
 }
@@ -1050,6 +1060,7 @@ struct SpreadChip: View {
             .background(Leaf.cream.opacity(0.12))
             .clipShape(Capsule())
         }
+        .accessibilityIdentifier("SpreadChip")
         .buttonStyle(.plain)
     }
 }
@@ -1071,6 +1082,7 @@ struct FitModeChip: View {
             .background(Leaf.cream.opacity(0.12))
             .clipShape(Capsule())
         }
+        .accessibilityIdentifier("FitModeChip")
         .buttonStyle(.plain)
     }
 }
@@ -1118,5 +1130,6 @@ struct ComicScrubberSlider: View {
             )
         }
         .frame(height: 28)
+        .accessibilityIdentifier("ComicScrubberSlider")
     }
 }
