@@ -11,13 +11,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -37,10 +37,10 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -63,7 +63,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.digitalbc.leafreader.data.db.ComicEntity
-import net.digitalbc.leafreader.ui.brand.OchreBadge
 import net.digitalbc.leafreader.ui.brand.comicShadow
 import net.digitalbc.leafreader.ui.brand.halftone
 import net.digitalbc.leafreader.ui.theme.Anton
@@ -189,137 +188,129 @@ fun SeriesDetailScreen(
             LazyVerticalGrid(
                 columns = GridCells.Fixed(actualColumns),
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
+                contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
                 horizontalArrangement = Arrangement.spacedBy(if (actualColumns >= 4) 12.dp else 16.dp),
                 verticalArrangement = Arrangement.spacedBy(if (actualColumns >= 4) 14.dp else 18.dp),
             ) {
+                // Hero Card Header (Compact, Uncluttered Status Row)
                 item(span = { GridItemSpan(actualColumns) }) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = DeepInkSurface),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .comicShadow(offset = 4.dp, color = Color(0xB3000000)),
+                            .comicShadow(offset = 3.dp, color = Color(0xB3000000)),
                     ) {
-                        Column(
-                            Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            // Top Row: Count Badge + Completed Status
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
+                            // Left Column: Count Chip + Status + Slim Progress Bar
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                OchreBadge("${seriesComics.size} ${if (seriesComics.size == 1) "ISSUE" else "ISSUES"} TOTAL")
-                                if (seriesComics.isNotEmpty()) {
-                                    val completedCount = seriesComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-                                    Text(
-                                        text = if (allCompleted) "ALL COMPLETED" else "$completedCount OF ${seriesComics.size} READ",
-                                        fontFamily = Archivo,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp,
-                                        color = if (allCompleted) LeafAccent else CreamMuted,
-                                    )
-                                }
-                            }
-
-                            // Aggregate Progress Bar
-                            if (seriesComics.isNotEmpty()) {
-                                val completedCount = seriesComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-                                val progressFraction = completedCount.toFloat() / seriesComics.size
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(4.dp)
-                                        .clip(RoundedCornerShape(2.dp))
-                                        .background(InkSoft)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .fillMaxHeight()
-                                            .fillMaxWidth(progressFraction)
-                                            .background(if (allCompleted) LeafAccent else Ochre)
-                                    )
-                                }
-                            }
-
-                            // Primary Action Button (Continue / Start)
-                            if (continueButtonText != null && nextUnread != null) {
-                                val targetComic = if (allCompleted && seriesComics.isNotEmpty()) seriesComics.first() else nextUnread
-                                Button(
-                                    onClick = { onOpenComic(targetComic.id) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Ochre),
-                                    shape = RoundedCornerShape(4.dp),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    contentPadding = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
-                                ) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Ink)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        text = continueButtonText,
-                                        fontFamily = Anton,
-                                        fontSize = 13.5.sp,
-                                        color = Ink,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-
-                            // Action Toolbar Row (Add Comics & Mark Read/Unread)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(LeafAccent)
-                                        .clickable { showAddComicsDialog = true }
-                                        .padding(vertical = 10.dp, horizontal = 12.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(InkSoft)
+                                            .border(1.dp, Ochre.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 7.dp, vertical = 2.dp),
                                     ) {
-                                        Icon(Icons.Default.Add, contentDescription = null, tint = DeepInk, modifier = Modifier.size(15.dp))
-                                        Text("ADD COMICS", fontFamily = Anton, fontSize = 11.5.sp, color = DeepInk, maxLines = 1)
+                                        Text(
+                                            text = "${seriesComics.size} ${if (seriesComics.size == 1) "ISSUE" else "ISSUES"}",
+                                            fontFamily = Anton,
+                                            fontSize = 11.sp,
+                                            color = Ochre,
+                                            letterSpacing = 0.4.sp,
+                                        )
+                                    }
+                                    if (seriesComics.isNotEmpty()) {
+                                        val completedCount = seriesComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
+                                        Text(
+                                            text = if (allCompleted) "ALL COMPLETED" else "$completedCount OF ${seriesComics.size} READ",
+                                            fontFamily = Archivo,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 11.sp,
+                                            color = if (allCompleted) LeafAccent else CreamMuted,
+                                        )
                                     }
                                 }
 
                                 if (seriesComics.isNotEmpty()) {
+                                    val completedCount = seriesComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
+                                    val progressFraction = completedCount.toFloat() / seriesComics.size
                                     Box(
                                         modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(4.dp))
+                                            .fillMaxWidth()
+                                            .height(3.dp)
+                                            .clip(RoundedCornerShape(1.5.dp))
+                                            .background(InkSoft),
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxHeight()
+                                                .fillMaxWidth(progressFraction)
+                                                .background(if (allCompleted) LeafAccent else Ochre),
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Right Row: Mark Read/Unread Icon + Play Icon
+                            if (seriesComics.isNotEmpty()) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    // Mark Read/Unread Icon Button
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(RoundedCornerShape(6.dp))
                                             .background(InkSoft)
-                                            .border(1.dp, if (allCompleted) ComicRose else Ochre, RoundedCornerShape(4.dp))
-                                            .clickable { viewModel.markSeriesRead(seriesName, volume, !allCompleted) }
-                                            .padding(vertical = 10.dp, horizontal = 12.dp),
+                                            .border(
+                                                1.dp,
+                                                if (allCompleted) ComicRose.copy(alpha = 0.6f) else CreamMuted.copy(alpha = 0.4f),
+                                                RoundedCornerShape(6.dp),
+                                            )
+                                            .clickable { viewModel.markSeriesRead(seriesName, volume, !allCompleted) },
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        ) {
-                                            Icon(
-                                                if (allCompleted) Icons.Default.Close else Icons.Default.Check,
-                                                contentDescription = null,
-                                                tint = if (allCompleted) ComicRose else Ochre,
-                                                modifier = Modifier.size(14.dp),
-                                            )
-                                            Text(
-                                                text = if (allCompleted) "MARK UNREAD" else "MARK ALL READ",
-                                                fontFamily = Anton,
-                                                fontSize = 11.5.sp,
-                                                color = if (allCompleted) ComicRose else Ochre,
-                                                maxLines = 1,
-                                            )
-                                        }
+                                        Icon(
+                                            if (allCompleted) Icons.Default.Close else Icons.Default.Check,
+                                            contentDescription = if (allCompleted) "Mark unread" else "Mark all read",
+                                            tint = if (allCompleted) ComicRose else CreamMuted,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+
+                                    // Play / Continue Icon Button
+                                    val targetComic = if (allCompleted) seriesComics.first() else (nextUnread ?: seriesComics.first())
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Ochre)
+                                            .comicShadow(offset = 2.dp, color = Color(0x66000000))
+                                            .clickable { onOpenComic(targetComic.id) },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Default.PlayArrow,
+                                            contentDescription = continueButtonText ?: "Read comic",
+                                            tint = Ink,
+                                            modifier = Modifier.size(22.dp),
+                                        )
                                     }
                                 }
                             }
@@ -337,6 +328,30 @@ fun SeriesDetailScreen(
                     )
                 }
             }
+
+            ExtendedFloatingActionButton(
+                onClick = { showAddComicsDialog = true },
+                containerColor = LeafAccent,
+                contentColor = DeepInk,
+                shape = RoundedCornerShape(4.dp),
+                elevation = FloatingActionButtonDefaults.elevation(6.dp),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(20.dp),
+                icon = {
+                    Icon(Icons.Default.Add, contentDescription = "Add comics", tint = DeepInk)
+                },
+                text = {
+                    Text(
+                        text = "ADD COMICS",
+                        fontFamily = Anton,
+                        fontSize = 14.sp,
+                        color = DeepInk,
+                        letterSpacing = 0.6.sp,
+                    )
+                },
+            )
         }
     }
 
