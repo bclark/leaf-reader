@@ -140,4 +140,52 @@ final class ReaderTurnTests: XCTestCase {
         )
         XCTAssertTrue(spreadFullyReady.isReady)
     }
+
+    func testFastOutSlowInEasingCurve() {
+        XCTAssertEqual(fastOutSlowIn(t: 0.0), 0.0, accuracy: 1e-5)
+        XCTAssertEqual(fastOutSlowIn(t: 1.0), 1.0, accuracy: 1e-5)
+
+        let t0 = fastOutSlowIn(t: 0.0)
+        let t25 = fastOutSlowIn(t: 0.25)
+        let t50 = fastOutSlowIn(t: 0.5)
+        let t75 = fastOutSlowIn(t: 0.75)
+        let t100 = fastOutSlowIn(t: 1.0)
+
+        // Monotonic progression
+        XCTAssertLessThan(t0, t25)
+        XCTAssertLessThan(t25, t50)
+        XCTAssertLessThan(t50, t75)
+        XCTAssertLessThan(t75, t100)
+
+        // FastOutSlowIn has accelerated lead-in (t=0.5 yields ~0.7-0.8)
+        XCTAssertGreaterThan(t50, 0.6)
+    }
+
+    func testCurlAnimatorInteractiveProgress() {
+        let animator = CurlAnimator()
+        XCTAssertNil(animator.direction)
+        XCTAssertEqual(animator.progress, 0.0)
+
+        animator.updateInteractive(direction: .forward, progress: 0.42)
+        XCTAssertEqual(animator.direction, .forward)
+        XCTAssertEqual(animator.progress, 0.42, accuracy: 1e-4)
+
+        // Clamping to [0, 1]
+        animator.updateInteractive(direction: .backward, progress: 1.5)
+        XCTAssertEqual(animator.direction, .backward)
+        XCTAssertEqual(animator.progress, 1.0, accuracy: 1e-4)
+
+        animator.updateInteractive(direction: .backward, progress: -0.25)
+        XCTAssertEqual(animator.progress, 0.0, accuracy: 1e-4)
+
+        // Reset
+        animator.reset()
+        XCTAssertNil(animator.direction)
+        XCTAssertEqual(animator.progress, 0.0)
+        XCTAssertFalse(animator.isAnimating)
+    }
+
+    func testPageCurlRendererAvailability() {
+        XCTAssertTrue(PageCurlRenderer.shared.isAvailable)
+    }
 }

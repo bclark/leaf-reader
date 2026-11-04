@@ -49,9 +49,8 @@ struct ReaderView: View {
     @State private var nextSpread: DisplaySpread?
     @State private var prevSpread: DisplaySpread?
 
-    // Interactive page turn / slide state
-    @State private var slideOffset: CGFloat = 0
-    @State private var isTurning = false
+    // Skeuomorphic 3D page curl state
+    @StateObject private var curlAnimator = CurlAnimator()
 
     @State private var rightToLeft = false
     @State private var showChrome = true
@@ -388,48 +387,25 @@ struct ReaderView: View {
 
     @ViewBuilder
     private func readerBody(_ loader: PageLoader, size: CGSize) -> some View {
+        let isPeeling = (curlAnimator.direction != nil && curlAnimator.progress > 0.001 && zoom <= 1.05)
+        let activeTurnKind = isPeeling ? (curlAnimator.direction.flatMap { resolveTurnKind(direction: $0, loader: loader, size: size) }) : nil
+
         ZStack(alignment: .topLeading) {
-            // Current page / spread
-            if let current = currentSpread {
-                renderDisplaySpread(
-                    current,
-                    panX: (zoom <= 1.01) ? slideOffset : pan.width,
-                    panY: pan.height,
-                    zoom: zoom,
-                    container: size
-                )
-            }
-
-            // Incoming adjacent page/spread sliding in when actively dragging or animating turn
-            if slideOffset != 0 || isTurning {
-                let isNegative = slideOffset < 0
-                let incomingSpread = isNegative
-                    ? (!rightToLeft ? nextSpread : prevSpread)
-                    : (!rightToLeft ? prevSpread : nextSpread)
-                let incomingPanX = isNegative ? (size.width + slideOffset) : (-size.width + slideOffset)
-
-                if let incoming = incomingSpread {
+            // Resting page / spread when not peeling or during initial touch before curl threshold
+            if activeTurnKind == nil {
+                if let current = currentSpread {
                     renderDisplaySpread(
-                        incoming,
-                        panX: incomingPanX,
-                        panY: 0,
-                        zoom: 1,
+                        current,
+                        panX: pan.width,
+                        panY: pan.height,
+                        zoom: zoom,
                         container: size
                     )
                 }
-
-                // Shadow separator along the sliding seam
-                let dividerX = isNegative ? (size.width + slideOffset) : slideOffset
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.black.opacity(0.40), .clear],
-                            startPoint: isNegative ? .leading : .trailing,
-                            endPoint: isNegative ? .trailing : .leading
-                        )
-                    )
-                    .frame(width: 24, height: size.height)
-                    .position(x: isNegative ? (dividerX + 12) : (dividerX - 12), y: size.height / 2)
+            } else if let turnKind = activeTurnKind, let dir = curlAnimator.direction {
+                let effectiveProgress = computeEffectiveProgress(kind: turnKind, direction: dir, rawProgress: curlAnimator.progress)
+                PageCurlView(kind: turnKind, progress: effectiveProgress)
+                    .frame(width: size.width, height: size.height)
                     .allowsHitTesting(false)
             }
         }
@@ -453,7 +429,7 @@ struct ReaderView: View {
                     }
                 },
                 onPinchChanged: { scale in
-                    if !isTurning {
+                    if curlAnimator.direction == nil {
                         zoom = min(max(steadyZoom * scale, 1), 5)
                     }
                 },
@@ -466,19 +442,39 @@ struct ReaderView: View {
                 },
                 onPanChanged: { t in
                     if zoom <= 1.01 {
-                        guard !isTurning else { return }
+                        guard !curlAnimator.isAnimating else { return }
                         let spreadActive = isSpreadActive(for: size)
                         let s = resolveSpread(for: page, in: loader, spreadActive: spreadActive)
                         let canAdvance = !rightToLeft ? (Int(s?.after ?? Int32(page + 1)) < loader.pageCount) : (Int(s?.first ?? Int32(page)) > 0)
                         let canGoBack = !rightToLeft ? (Int(s?.first ?? Int32(page)) > 0) : (Int(s?.after ?? Int32(page + 1)) < loader.pageCount)
 
-                        let isDraggingToAdvance = !rightToLeft ? (t.width < 0) : (t.width > 0)
-                        let isDraggingToGoBack = !rightToLeft ? (t.width > 0) : (t.width < 0)
+                        if curlAnimator.direction == nil {
+                            if abs(t.width) > 6 {
+                                let dir: CurlDirection = !rightToLeft ? (t.width < 0 ? .forward : .backward) : (t.width > 0 ? .forward : .backward)
+                                let canTurn = (dir == .forward) ? canAdvance : canGoBack
+                                if canTurn {
+                                    let isForward = (dir == .forward)
+                                    let target = isForward ? Int(s?.after ?? Int32(page + 1)) : (Int(s?.first ?? Int32(page)) - 1)
+                                    let targetSpreadS = (target >= 0 && target < loader.pageCount) ? resolveSpread(for: target, in: loader, spreadActive: spreadActive) : nil
+                                    if isForward {
+                                        if nextSpread == nil || nextSpread?.firstPage != target || !nextSpread!.isReady {
+                                            nextSpread = syncLoadSpread(loader: loader, spread: targetSpreadS)
+                                        }
+                                    } else {
+                                        if prevSpread == nil || prevSpread?.firstPage != target || !prevSpread!.isReady {
+                                            prevSpread = syncLoadSpread(loader: loader, spread: targetSpreadS)
+                                        }
+                                    }
+                                    curlAnimator.direction = dir
+                                }
+                            }
+                        }
 
-                        if (isDraggingToAdvance && !canAdvance) || (isDraggingToGoBack && !canGoBack) {
-                            slideOffset = t.width * 0.25
-                        } else {
-                            slideOffset = t.width
+                        if let activeDir = curlAnimator.direction {
+                            let isForward = (activeDir == .forward)
+                            let dragDist = !rightToLeft ? (isForward ? -t.width : t.width) : (isForward ? t.width : -t.width)
+                            let curDragT = min(max(dragDist / size.width, 0.0), 1.0)
+                            curlAnimator.updateInteractive(direction: activeDir, progress: curDragT)
                         }
 
                         if settings.pageFitMode == .fitWidth {
@@ -580,7 +576,7 @@ struct ReaderView: View {
                         scrubbing = false
                         let targetPage = Int(scrub.rounded())
                         page = targetPage
-                        slideOffset = 0
+                        curlAnimator.reset()
                         if case .ready(let l) = state {
                             loadCurrentAndAdjacent(loader: l, targetPage: targetPage)
                         }
@@ -601,10 +597,160 @@ struct ReaderView: View {
         .onChange(of: page) { if !scrubbing { scrub = Double($0) } }
     }
 
+    private func computeEffectiveProgress(kind: TurnKind, direction: CurlDirection, rawProgress: CGFloat) -> CGFloat {
+        switch kind {
+        case .single:
+            return (direction == .backward) ? (1.0 - rawProgress) : rawProgress
+        case .spread:
+            return rawProgress
+        }
+    }
+
+    private func resolveTurnKind(direction: CurlDirection, loader: PageLoader, size: CGSize) -> TurnKind? {
+        guard let current = currentSpread, let currFirstImg = current.firstImage else { return nil }
+        let isForward = (direction == .forward)
+
+        if isSpread, let currSecondImg = current.secondImage {
+            let spreadActive = isSpreadActive(for: size)
+            let s = resolveSpread(for: page, in: loader, spreadActive: spreadActive)
+            let targetPage = isForward ? Int(s?.after ?? Int32(page + 1)) : (Int(s?.first ?? Int32(page)) - 1)
+            let destSpread = (targetPage >= 0 && targetPage < loader.pageCount) ? resolveSpread(for: targetPage, in: loader, spreadActive: spreadActive) : nil
+
+            let mapping = CameraTransformKt.computeSpreadTurnMapping(
+                pageIndex: Int32(current.firstPage),
+                secondPageIndex: current.secondPage != nil ? KotlinInt(int: Int32(current.secondPage!)) : nil,
+                pageCount: Int32(loader.pageCount),
+                rightToLeft: rightToLeft,
+                isForward: isForward,
+                destination: destSpread
+            )
+            guard let mapping = mapping else { return nil }
+
+            func getImg(_ docIndex: Int?) -> UIImage? {
+                guard let doc = docIndex, doc >= 0, doc < loader.pageCount else { return nil }
+                if doc == current.firstPage { return current.firstImage }
+                if doc == current.secondPage { return current.secondImage }
+                if let next = nextSpread {
+                    if doc == next.firstPage { return next.firstImage }
+                    if doc == next.secondPage { return next.secondImage }
+                }
+                if let prev = prevSpread {
+                    if doc == prev.firstPage { return prev.firstImage }
+                    if doc == prev.secondPage { return prev.secondImage }
+                }
+                return loader.loadPage(doc)
+            }
+
+            guard let staticImg = getImg(Int(mapping.staticPageDocIndex)),
+                  let movingFrontImg = getImg(Int(mapping.movingFrontDocIndex)) else {
+                return nil
+            }
+            let movingBackImg = getImg(Int(mapping.movingBackDocIndex))
+            let underneathImg = mapping.underneathDocIndex != nil ? getImg(Int(mapping.underneathDocIndex!.int32Value)) : nil
+
+            let leftImg = !rightToLeft ? currFirstImg : currSecondImg
+            let rightImg = !rightToLeft ? currSecondImg : currFirstImg
+            let currDraw = CameraTransformKt.computeSpreadDraw(
+                page1W: Int32(leftImg.cgImage?.width ?? Int(leftImg.size.width)),
+                page1H: Int32(leftImg.cgImage?.height ?? Int(leftImg.size.height)),
+                page2W: Int32(rightImg.cgImage?.width ?? Int(rightImg.size.width)),
+                page2H: Int32(rightImg.cgImage?.height ?? Int(rightImg.size.height)),
+                containerW: Float(size.width),
+                containerH: Float(size.height),
+                fill: 0.98,
+                fitMode: settings.pageFitMode
+            )
+
+            let destTargetSpread = isForward ? nextSpread : prevSpread
+            let destFirstImg = destTargetSpread?.firstImage ?? (destSpread != nil ? loader.loadPage(Int(destSpread!.first)) : nil)
+            let destSecondImg = destTargetSpread?.secondImage ?? (destSpread?.second != nil ? loader.loadPage(Int(destSpread!.second!.int32Value)) : nil)
+
+            let destinationDraw: SpreadDraw
+            if let destFirst = destFirstImg, let destSecond = destSecondImg {
+                let targetLeft = !rightToLeft ? destFirst : destSecond
+                let targetRight = !rightToLeft ? destSecond : destFirst
+                destinationDraw = CameraTransformKt.computeSpreadDraw(
+                    page1W: Int32(targetLeft.cgImage?.width ?? Int(targetLeft.size.width)),
+                    page1H: Int32(targetLeft.cgImage?.height ?? Int(targetLeft.size.height)),
+                    page2W: Int32(targetRight.cgImage?.width ?? Int(targetRight.size.width)),
+                    page2H: Int32(targetRight.cgImage?.height ?? Int(targetRight.size.height)),
+                    containerW: Float(size.width),
+                    containerH: Float(size.height),
+                    fill: 0.98,
+                    fitMode: settings.pageFitMode
+                )
+            } else if let destFirst = destFirstImg {
+                let draw = CameraTransformKt.computePageDraw(
+                    camera: Panel.companion.FULL_PAGE,
+                    bitmapW: Int32(destFirst.cgImage?.width ?? Int(destFirst.size.width)),
+                    bitmapH: Int32(destFirst.cgImage?.height ?? Int(destFirst.size.height)),
+                    containerW: Float(size.width),
+                    containerH: Float(size.height),
+                    fill: 0.98,
+                    fitMode: settings.pageFitMode
+                )
+                let landingLeft = mapping.isPeelingFromRight
+                let spine = landingLeft ? draw.left + draw.scaledWidth : draw.left
+                destinationDraw = SpreadDraw(
+                    left1: draw.left, top1: draw.top,
+                    width1: landingLeft ? draw.scaledWidth : 0, height1: draw.scaledHeight,
+                    left2: spine, top2: draw.top,
+                    width2: landingLeft ? 0 : draw.scaledWidth, height2: draw.scaledHeight,
+                    totalWidth: draw.scaledWidth, totalHeight: draw.scaledHeight,
+                    boundLeft: draw.left, boundTop: draw.top
+                )
+            } else {
+                destinationDraw = currDraw
+            }
+
+            return .spread(
+                spread: currDraw,
+                destinationSpread: destinationDraw,
+                staticImage: staticImg,
+                movingFrontImage: movingFrontImg,
+                movingBackImage: movingBackImg,
+                underneathImage: underneathImg,
+                mapping: mapping,
+                userScale: zoom,
+                userPanX: pan.width,
+                userPanY: pan.height
+            )
+        } else {
+            let draw = CameraTransformKt.computePageDraw(
+                camera: Panel.companion.FULL_PAGE,
+                bitmapW: Int32(currFirstImg.cgImage?.width ?? Int(currFirstImg.size.width)),
+                bitmapH: Int32(currFirstImg.cgImage?.height ?? Int(currFirstImg.size.height)),
+                containerW: Float(size.width),
+                containerH: Float(size.height),
+                fill: 0.98,
+                fitMode: settings.pageFitMode
+            )
+
+            if isForward {
+                let underneathImg = !rightToLeft ? nextSpread?.firstImage : prevSpread?.firstImage
+                return .single(
+                    topImage: currFirstImg,
+                    bottomImage: underneathImg,
+                    draw: draw,
+                    isPeelingFromRight: !rightToLeft
+                )
+            } else {
+                let unrollingImg = !rightToLeft ? prevSpread?.firstImage : nextSpread?.firstImage
+                guard let topImg = unrollingImg else { return nil }
+                return .single(
+                    topImage: topImg,
+                    bottomImage: currFirstImg,
+                    draw: draw,
+                    isPeelingFromRight: !rightToLeft
+                )
+            }
+        }
+    }
+
     // Tap zones: left third turns back (or next if RTL), right third turns forward (or back if RTL),
     // center third toggles chrome. If zoomed in, tap toggles chrome anywhere.
     private func tapZone(x: CGFloat, width: CGFloat, in loader: PageLoader) {
-        guard !isTurning else { return }
+        guard !curlAnimator.isAnimating && curlAnimator.direction == nil else { return }
         if zoom > 1.05 {
             withAnimation(.easeInOut(duration: 0.2)) { showChrome.toggle() }
             return
@@ -621,6 +767,7 @@ struct ReaderView: View {
     }
 
     private func performTurn(forward: Bool, in loader: PageLoader, width: CGFloat) {
+        guard !curlAnimator.isAnimating && curlAnimator.direction == nil else { return }
         let spreadActive = isSpreadActive(for: UIScreen.main.bounds.size)
         let s = resolveSpread(for: page, in: loader, spreadActive: spreadActive)
 
@@ -635,6 +782,8 @@ struct ReaderView: View {
             target = Int(prevS?.first ?? Int32(prevDoc))
         }
 
+        let dir: CurlDirection = forward ? .forward : .backward
+
         // Ensure target spread is loaded before starting transition
         let targetSpreadS = resolveSpread(for: target, in: loader, spreadActive: spreadActive)
         if forward {
@@ -647,71 +796,101 @@ struct ReaderView: View {
             }
         }
 
-        isTurning = true
-        let targetOffset: CGFloat
-        if !rightToLeft {
-            targetOffset = forward ? -width : width
-        } else {
-            targetOffset = forward ? width : -width
-        }
-
-        withAnimation(.easeOut(duration: 0.22)) {
-            slideOffset = targetOffset
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+        guard PageCurlRenderer.shared.isAvailable else {
             let incoming = forward ? self.nextSpread : self.prevSpread
             if let incoming, incoming.isReady {
                 self.currentSpread = incoming
             }
             self.page = target
-            self.slideOffset = 0
-            self.isTurning = false
             self.resetZoom()
             self.persist()
+            self.preloadAdjacent(for: target, targetSpreadS: targetSpreadS, in: loader)
+            return
+        }
 
-            // Preload adjacent in background
-            let newNextTarget = Int(targetSpreadS?.after ?? Int32(target + 1))
-            let newNextS = (newNextTarget < loader.pageCount) ? self.resolveSpread(for: newNextTarget, in: loader, spreadActive: spreadActive) : nil
-            let newPrevTarget = target - 1
-            let newPrevS = (newPrevTarget >= 0) ? self.resolveSpread(for: newPrevTarget, in: loader, spreadActive: spreadActive) : nil
+        curlAnimator.start(from: 0, to: 1.0, duration: 0.26, direction: dir) { completed in
+            if completed {
+                let incoming = forward ? self.nextSpread : self.prevSpread
+                if let incoming, incoming.isReady {
+                    self.currentSpread = incoming
+                }
+                self.page = target
+                self.resetZoom()
+                self.persist()
+                self.curlAnimator.reset()
+                self.preloadAdjacent(for: target, targetSpreadS: targetSpreadS, in: loader)
+            } else {
+                self.curlAnimator.reset()
+            }
+        }
+    }
 
-            self.loadSpreadImages(loader: loader, spread: newNextS) { ds in
-                if self.page == target { self.nextSpread = ds }
-            }
-            self.loadSpreadImages(loader: loader, spread: newPrevS) { ds in
-                if self.page == target { self.prevSpread = ds }
-            }
+    private func preloadAdjacent(for target: Int, targetSpreadS: ReaderSpread?, in loader: PageLoader) {
+        let spreadActive = isSpreadActive(for: UIScreen.main.bounds.size)
+        let newNextTarget = Int(targetSpreadS?.after ?? Int32(target + 1))
+        let newNextS = (newNextTarget < loader.pageCount) ? self.resolveSpread(for: newNextTarget, in: loader, spreadActive: spreadActive) : nil
+        let newPrevTarget = target - 1
+        let newPrevS = (newPrevTarget >= 0) ? self.resolveSpread(for: newPrevTarget, in: loader, spreadActive: spreadActive) : nil
+
+        self.loadSpreadImages(loader: loader, spread: newNextS) { ds in
+            if self.page == target { self.nextSpread = ds }
+        }
+        self.loadSpreadImages(loader: loader, spread: newPrevS) { ds in
+            if self.page == target { self.prevSpread = ds }
         }
     }
 
     private func handlePanEnd(translation: CGSize, velocity: CGSize, maxTouches: Int, in loader: PageLoader, size: CGSize) {
         if zoom <= 1.01 {
-            guard !isTurning else { return }
+            guard !curlAnimator.isAnimating else { return }
+            guard let activeDir = curlAnimator.direction else {
+                curlAnimator.reset()
+                return
+            }
             let dragX = translation.width
             let velX = velocity.width
             let W = size.width
 
             let spreadActive = isSpreadActive(for: size)
             let s = resolveSpread(for: page, in: loader, spreadActive: spreadActive)
-            let canAdvance = !rightToLeft ? (Int(s?.after ?? Int32(page + 1)) < loader.pageCount) : (Int(s?.first ?? Int32(page)) > 0)
-            let canGoBack = !rightToLeft ? (Int(s?.first ?? Int32(page)) > 0) : (Int(s?.after ?? Int32(page + 1)) < loader.pageCount)
+            let isForward = (activeDir == .forward)
 
-            let forwardDragDist = !rightToLeft ? -dragX : dragX
-            let forwardVel = !rightToLeft ? -velX : velX
-            let settleForward = (forwardDragDist > W * 0.35 || forwardVel > 500) && forwardVel > -400
-
-            let backDragDist = !rightToLeft ? dragX : -dragX
-            let backVel = !rightToLeft ? velX : -velX
-            let settleBackward = (backDragDist > W * 0.35 || backVel > 500) && backVel > -400
-
-            if settleForward && canAdvance {
-                performTurn(forward: true, in: loader, width: W)
-            } else if settleBackward && canGoBack {
-                performTurn(forward: false, in: loader, width: W)
+            let target: Int
+            if isForward {
+                target = Int(s?.after ?? Int32(page + 1))
             } else {
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                    slideOffset = 0
+                let prevDoc = Int(s?.first ?? Int32(page)) - 1
+                let prevS = (prevDoc >= 0) ? resolveSpread(for: prevDoc, in: loader, spreadActive: spreadActive) : nil
+                target = Int(prevS?.first ?? Int32(prevDoc))
+            }
+            let targetSpreadS = (target >= 0 && target < loader.pageCount) ? resolveSpread(for: target, in: loader, spreadActive: spreadActive) : nil
+
+            let dragDist = !rightToLeft ? (isForward ? -dragX : dragX) : (isForward ? dragX : -dragX)
+            let vel = !rightToLeft ? (isForward ? -velX : velX) : (isForward ? velX : -velX)
+            let settle = (dragDist > W * 0.35 || vel > 500) && vel > -400
+
+            if settle && target >= 0 && target < loader.pageCount {
+                let remaining = 1.0 - curlAnimator.progress
+                let animDuration = max(0.26 * Double(remaining), 0.10)
+                curlAnimator.start(from: curlAnimator.progress, to: 1.0, duration: animDuration, direction: activeDir) { completed in
+                    if completed {
+                        let incoming = isForward ? self.nextSpread : self.prevSpread
+                        if let incoming, incoming.isReady {
+                            self.currentSpread = incoming
+                        }
+                        self.page = target
+                        self.resetZoom()
+                        self.persist()
+                        self.curlAnimator.reset()
+                        self.preloadAdjacent(for: target, targetSpreadS: targetSpreadS, in: loader)
+                    } else {
+                        self.curlAnimator.reset()
+                    }
+                }
+            } else {
+                let animDuration = max(0.22 * Double(curlAnimator.progress), 0.08)
+                curlAnimator.start(from: curlAnimator.progress, to: 0.0, duration: animDuration, direction: activeDir) { _ in
+                    self.curlAnimator.reset()
                 }
             }
         } else {
