@@ -173,11 +173,12 @@ fun ReadingListDetailScreen(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = "CUSTOM STORYLINE / READING LIST",
+                        text = "CUSTOM READING LIST",
                         fontFamily = Archivo,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 11.sp,
                         color = CreamMuted,
+                        maxLines = 1,
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -237,39 +238,50 @@ fun ReadingListDetailScreen(
                             .fillMaxWidth()
                             .comicShadow(offset = 4.dp, color = Color(0xB3000000)),
                     ) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Column(
+                            Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            // Top Row: Count Badge + Completed Status
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 OchreBadge("${listComics.size} ${if (listComics.size == 1) "COMIC" else "COMICS"} IN LIST")
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(LeafAccent)
-                                            .clickable {
-                                                selectedToAdd = emptySet()
-                                                addSearchQuery = ""
-                                                showAddComicsDialog = true
-                                            }
-                                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            Icon(Icons.Default.Add, contentDescription = null, tint = DeepInk, modifier = Modifier.size(14.dp))
-                                            Text("ADD COMICS", fontFamily = Anton, fontSize = 11.sp, color = DeepInk)
-                                        }
-                                    }
-                                    if (listComics.isNotEmpty()) {
-                                        TextButton(onClick = { viewModel.markReadingListRead(listId, !allCompleted) }) {
-                                            Text(if (allCompleted) "MARK UNREAD" else "MARK READ", fontFamily = Anton, fontSize = 11.sp, color = Ochre)
-                                        }
-                                    }
+                                if (listComics.isNotEmpty()) {
+                                    val completedCount = listComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
+                                    Text(
+                                        text = if (allCompleted) "ALL COMPLETED" else "$completedCount OF ${listComics.size} READ",
+                                        fontFamily = Archivo,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp,
+                                        color = if (allCompleted) LeafAccent else CreamMuted,
+                                    )
                                 }
                             }
 
+                            // Aggregate Progress Bar
+                            if (listComics.isNotEmpty()) {
+                                val completedCount = listComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
+                                val progressFraction = completedCount.toFloat() / listComics.size
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(4.dp)
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(InkSoft)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .fillMaxWidth(progressFraction)
+                                            .background(if (allCompleted) LeafAccent else Ochre)
+                                    )
+                                }
+                            }
+
+                            // Primary Action Button (Continue / Start)
                             if (continueButtonText != null && nextUnread != null) {
                                 val targetComic = if (allCompleted && listComics.isNotEmpty()) listComics.first() else nextUnread
                                 Button(
@@ -277,17 +289,79 @@ fun ReadingListDetailScreen(
                                     colors = ButtonDefaults.buttonColors(containerColor = Ochre),
                                     shape = RoundedCornerShape(4.dp),
                                     modifier = Modifier.fillMaxWidth(),
+                                    contentPadding = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
                                 ) {
                                     Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Ink)
                                     Spacer(Modifier.width(8.dp))
                                     Text(
                                         text = continueButtonText,
                                         fontFamily = Anton,
-                                        fontSize = 13.sp,
+                                        fontSize = 13.5.sp,
                                         color = Ink,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
+                                }
+                            }
+
+                            // Action Toolbar Row (Add Comics & Mark Read/Unread given generous room)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(LeafAccent)
+                                        .clickable {
+                                            selectedToAdd = emptySet()
+                                            addSearchQuery = ""
+                                            showAddComicsDialog = true
+                                        }
+                                        .padding(vertical = 10.dp, horizontal = 12.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = null, tint = DeepInk, modifier = Modifier.size(15.dp))
+                                        Text("ADD COMICS", fontFamily = Anton, fontSize = 11.5.sp, color = DeepInk, maxLines = 1)
+                                    }
+                                }
+
+                                if (listComics.isNotEmpty()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(InkSoft)
+                                            .border(1.dp, if (allCompleted) ComicRose else Ochre, RoundedCornerShape(4.dp))
+                                            .clickable { viewModel.markReadingListRead(listId, !allCompleted) }
+                                            .padding(vertical = 10.dp, horizontal = 12.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        ) {
+                                            Icon(
+                                                if (allCompleted) Icons.Default.Close else Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = if (allCompleted) ComicRose else Ochre,
+                                                modifier = Modifier.size(14.dp),
+                                            )
+                                            Text(
+                                                text = if (allCompleted) "MARK UNREAD" else "MARK ALL READ",
+                                                fontFamily = Anton,
+                                                fontSize = 11.5.sp,
+                                                color = if (allCompleted) ComicRose else Ochre,
+                                                maxLines = 1,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
