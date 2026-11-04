@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.digitalbc.leafreader.data.db.ComicEntity
+import net.digitalbc.leafreader.ui.brand.BookStatusBadgeIcon
 import net.digitalbc.leafreader.ui.brand.comicShadow
 import net.digitalbc.leafreader.ui.brand.halftone
 import net.digitalbc.leafreader.ui.theme.Anton
@@ -273,11 +274,13 @@ fun ReadingListDetailScreen(
                                     if (listComics.isNotEmpty()) {
                                         val completedCount = listComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
                                         Text(
-                                            text = if (allCompleted) "ALL COMPLETED" else "$completedCount OF ${listComics.size} READ",
+                                            text = if (allCompleted) "COMPLETED" else "$completedCount OF ${listComics.size} READ",
                                             fontFamily = Archivo,
                                             fontWeight = FontWeight.SemiBold,
                                             fontSize = 11.sp,
                                             color = if (allCompleted) LeafAccent else CreamMuted,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
                                     }
                                 }
@@ -302,51 +305,70 @@ fun ReadingListDetailScreen(
                                 }
                             }
 
-                            // Right Row: Mark Read/Unread Icon + Play Icon
+                            // Right Row: Mark Read/Unread Book Icon + Compact Start/Continue Pill
                             if (listComics.isNotEmpty()) {
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    // Mark Read/Unread Icon Button
+                                    // Mark Read/Unread Book-Status Icon Button
                                     Box(
                                         modifier = Modifier
-                                            .size(38.dp)
+                                            .size(36.dp)
                                             .clip(RoundedCornerShape(6.dp))
                                             .background(InkSoft)
                                             .border(
                                                 1.dp,
-                                                if (allCompleted) ComicRose.copy(alpha = 0.6f) else CreamMuted.copy(alpha = 0.4f),
+                                                if (allCompleted) ComicRose.copy(alpha = 0.6f) else CreamMuted.copy(alpha = 0.35f),
                                                 RoundedCornerShape(6.dp),
                                             )
                                             .clickable { viewModel.markReadingListRead(listId, !allCompleted) },
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        Icon(
-                                            if (allCompleted) Icons.Default.Close else Icons.Default.Check,
-                                            contentDescription = if (allCompleted) "Mark unread" else "Mark all read",
-                                            tint = if (allCompleted) ComicRose else CreamMuted,
-                                            modifier = Modifier.size(18.dp),
+                                        BookStatusBadgeIcon(
+                                            isAllCompleted = allCompleted,
+                                            bookTint = if (allCompleted) ComicRose else Cream,
+                                            badgeColor = if (allCompleted) ComicRose else LeafAccent,
+                                            badgeGlyphTint = Ink,
                                         )
                                     }
 
-                                    // Play / Continue Icon Button
+                                    // Compact Start / Continue Action Pill
                                     val targetComic = if (allCompleted) listComics.first() else (nextUnread ?: listComics.first())
+                                    val shortActionLabel = when {
+                                        allCompleted -> "RESTART"
+                                        targetComic.lastPage > 0 -> "CONTINUE"
+                                        else -> "START"
+                                    }
                                     Box(
                                         modifier = Modifier
-                                            .size(38.dp)
+                                            .height(36.dp)
                                             .clip(RoundedCornerShape(6.dp))
                                             .background(Ochre)
-                                            .comicShadow(offset = 2.dp, color = Color(0x66000000))
-                                            .clickable { onOpenComic(targetComic.id) },
+                                            .border(1.5.dp, Ink, RoundedCornerShape(6.dp))
+                                            .clickable { onOpenComic(targetComic.id) }
+                                            .padding(horizontal = 11.dp),
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        Icon(
-                                            Icons.Default.PlayArrow,
-                                            contentDescription = continueButtonText ?: "Read comic",
-                                            tint = Ink,
-                                            modifier = Modifier.size(22.dp),
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        ) {
+                                            Icon(
+                                                Icons.Default.PlayArrow,
+                                                contentDescription = continueButtonText ?: shortActionLabel,
+                                                tint = Ink,
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                            Text(
+                                                text = shortActionLabel,
+                                                fontFamily = Anton,
+                                                fontSize = 11.5.sp,
+                                                color = Ink,
+                                                letterSpacing = 0.5.sp,
+                                                maxLines = 1,
+                                            )
+                                        }
                                     }
                                 }
                             }
