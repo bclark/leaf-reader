@@ -1,13 +1,12 @@
 import SwiftUI
 import UIKit
 
-/// A transparent UIKit gesture layer for the reader. SwiftUI can't reliably run a
-/// `DragGesture(minimumDistance: 0)` (needed to catch taps) alongside a `MagnificationGesture` —
-/// the drag wins arbitration and the pinch never fires, so you can't zoom while reading. UIKit
-/// recognizers, told to recognize simultaneously, give pinch + pan + tap + double-tap all at once,
-/// mirroring Android's single unified pointer handler.
+/// A transparent UIKit gesture layer for the reader. UIKit recognizers, configured so pinch + pan
+/// recognize simultaneously while keeping tap and pan cleanly separated, giving fluid zoom, pan,
+/// page turning taps, and drag flipping.
 struct ReaderGestures: UIViewRepresentable {
-    /// Tap location (in the view) + the view's size, so the caller can map to left/right/middle zones.
+    var size: CGSize
+    /// Tap location (in the view) + container size, so the caller can map to left/right/middle zones.
     var onTap: (CGPoint, CGSize) -> Void
     var onDoubleTap: () -> Void
     /// Cumulative pinch scale since the gesture began (1.0 at start), and the end signal to commit.
@@ -21,6 +20,7 @@ struct ReaderGestures: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
         view.backgroundColor = .clear
+        view.isUserInteractionEnabled = true
         let c = context.coordinator
 
         let pinch = UIPinchGestureRecognizer(target: c, action: #selector(Coordinator.handlePinch(_:)))
@@ -33,7 +33,13 @@ struct ReaderGestures: UIViewRepresentable {
 
         pinch.delegate = c
         pan.delegate = c
-        for g in [pinch, pan, tap, double] as [UIGestureRecognizer] { view.addGestureRecognizer(g) }
+        tap.delegate = c
+        double.delegate = c
+
+        for g in [pinch, pan, tap, double] as [UIGestureRecognizer] {
+            g.cancelsTouchesInView = false
+            view.addGestureRecognizer(g)
+        }
         return view
     }
 
@@ -48,9 +54,16 @@ struct ReaderGestures: UIViewRepresentable {
         private var maxTouches = 1
         init(_ parent: ReaderGestures) { self.parent = parent }
 
-        // Let pinch and pan run together (zoom while repositioning), like Android.
+        // Only allow pinch and pan to run together (for simultaneous 2-finger zoom and repositioning).
+        // Tap must NOT recognize simultaneously with pan, ensuring clean arbitration.
         func gestureRecognizer(_ g: UIGestureRecognizer,
-                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            if (g is UIPinchGestureRecognizer && other is UIPanGestureRecognizer) ||
+               (g is UIPanGestureRecognizer && other is UIPinchGestureRecognizer) {
+                return true
+            }
+            return false
+        }
 
         @objc func handlePinch(_ g: UIPinchGestureRecognizer) {
             switch g.state {
@@ -79,7 +92,9 @@ struct ReaderGestures: UIViewRepresentable {
 
         @objc func handleTap(_ g: UITapGestureRecognizer) {
             guard let view = g.view else { return }
-            parent.onTap(g.location(in: view), view.bounds.size)
+            let loc = g.location(in: view)
+            let viewSize = (view.bounds.width > 0 && view.bounds.height > 0) ? view.bounds.size : parent.size
+            parent.onTap(loc, viewSize)
         }
 
         @objc func handleDouble(_ g: UITapGestureRecognizer) { parent.onDoubleTap() }

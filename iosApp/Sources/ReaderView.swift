@@ -1,11 +1,32 @@
 import SwiftUI
 import LeafShared
 
-/// Panel-by-panel CBZ reader with Leaf chrome: a branded header (back + title + issue), reticle
-/// brackets framing the page, the starburst page coin, and a "tap to step" hint — matching the
-/// Android reader. Tapping the right side steps page → panel 1 → … → next page; the left side steps
-/// back; panels come from the on-device Core ML detector via the shared decoder + planner, and the
-/// camera is framed by the shared computePageDraw and computeSpreadDraw.
+/// Contiguous reading unit for display: single page or side-by-side spread.
+struct DisplaySpread: Equatable {
+    let firstPage: Int
+    let secondPage: Int?
+    let firstImage: UIImage?
+    let secondImage: UIImage?
+    let isSpread: Bool
+
+    var isReady: Bool {
+        if isSpread {
+            return firstImage != nil && secondImage != nil
+        }
+        return firstImage != nil
+    }
+
+    static func == (lhs: DisplaySpread, rhs: DisplaySpread) -> Bool {
+        lhs.firstPage == rhs.firstPage &&
+        lhs.secondPage == rhs.secondPage &&
+        lhs.isSpread == rhs.isSpread &&
+        lhs.isReady == rhs.isReady
+    }
+}
+
+/// Whole-page CBZ/CBR reader with Leaf chrome: branded header (back + title + status chips),
+/// two-page spread support, pinch-to-zoom (1x-5x), pan when zoomed or fit-to-width,
+/// responsive tap zones, smooth interactive page drag flipping, and bottom scrubber.
 struct ReaderView: View {
     let comicURL: URL
 
@@ -15,70 +36,58 @@ struct ReaderView: View {
         case ready(PageLoader)
     }
 
-    private static let detector = LiteRTPanelDetector()
     private static let ioQueue = DispatchQueue(label: "leaf.reader.io", qos: .userInitiated)
-    private static let detectQueue = DispatchQueue(label: "leaf.reader.detect", qos: .userInitiated)
-
-    // Flick tuning ported from Android's ReaderScreen: a page turn needs a genuine horizontal flick
-    // (velocity, not distance), biased against vertical drags, so a slow reposition doesn't turn.
-    private static let flickVelocityPxS: CGFloat = 700  // Android FLICK_VELOCITY_PX_S
-    private static let swipeHorizontalBias: CGFloat = 1.2 // Android SWIPE_HORIZONTAL_BIAS
-    // Sentinel restoreStep meaning "land on this page's whole-page outro" (used by backward turns);
-    // resolved to regions.count once the page's regions are known.
-    private static let outroSlot = Int.max
-    // Android's camera motion: tween(360, FastOutSlowInEasing) between framed views.
-    // FastOutSlowIn == cubic-bezier(0.4, 0, 0.2, 1).
-    private static let cameraTween = Animation.timingCurve(0.4, 0, 0.2, 1, duration: 0.36)
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var settings: LeafSettings
     @State private var state: LoadState = .loading
     @State private var page = 0
     @State private var pageCount = 1
-    @State private var image: UIImage?
-    @State private var secondImage: UIImage?
-    @State private var nextImage: UIImage?
-    @State private var prevImage: UIImage?
+
+    // Display spreads: current page/spread and preloaded adjacent spreads for instant transitions
+    @State private var currentSpread: DisplaySpread?
+    @State private var nextSpread: DisplaySpread?
+    @State private var prevSpread: DisplaySpread?
+
+    // Interactive page turn / slide state
     @State private var slideOffset: CGFloat = 0
     @State private var isTurning = false
-    @State private var regions: [Panel] = [Panel.companion.FULL_PAGE]
-    @State private var step = -1
-    @State private var detecting = false
+
     @State private var rightToLeft = false
     @State private var showChrome = true
     @State private var loadToken = 0
     @State private var widePages: Set<Int> = []
     @State private var sizesKnownThrough = 0
-    // Detected panels cached per page (in the current reading direction) so back/forward and
-    // prefetched pages don't re-run the detector. Cleared when the direction changes.
-    @State private var panelCache: [Int: [Panel]] = [:]
-    // Manual zoom/pan layered on top of the panel-framing camera (pinch to zoom, drag to pan).
+
+    // Manual zoom/pan (pinch to zoom, drag to pan when zoomed)
     @State private var zoom: CGFloat = 1
     @State private var steadyZoom: CGFloat = 1
     @State private var pan: CGSize = .zero
     @State private var steadyPan: CGSize = .zero
-    // Page scrubber state (commit on release, not per-tick) + per-page fade-in alpha.
+
+    // Page scrubber state
     @State private var scrub: Double = 0
     @State private var scrubbing = false
-    @State private var pageAlpha: Double = 1
 
     private var title: String { comicURL.deletingPathExtension().lastPathComponent }
-    // Slot model matching Android: step -1 = whole-page intro, 0…n-1 = panels, n = whole-page outro.
-    // In Page Flip mode, the camera always frames the whole page.
-    private var camera: Panel {
-        if settings.pageSlideEnabled {
-            return Panel.companion.FULL_PAGE
-        }
-        return (step >= 0 && step < regions.count) ? regions[step] : Panel.companion.FULL_PAGE
-    }
-    // Whether the current slot is a framed panel (vs. the whole-page intro/outro).
-    private var onPanel: Bool { !settings.pageSlideEnabled && step >= 0 && step < regions.count }
-
     private var isReady: Bool { if case .ready = state { return true }; return false }
+
+    private var currentLoader: PageLoader? {
+        if case .ready(let l) = state { return l }
+        return nil
+    }
+
+    private var isSpread: Bool {
+        currentSpread?.isSpread == true && currentSpread?.secondImage != nil
+    }
 
     private func isSpreadActive(for size: CGSize) -> Bool {
         let isLandscape = size.width > size.height
-        return CameraTransformKt.resolveSpreadLayout(isLandscape: isLandscape, portraitSpread: settings.portraitSpread, landscapeSpread: settings.landscapeSpread)
+        return CameraTransformKt.resolveSpreadLayout(
+            isLandscape: isLandscape,
+            portraitSpread: settings.portraitSpread,
+            landscapeSpread: settings.landscapeSpread
+        )
     }
 
     private func resolveSpread(for targetPage: Int, in loader: PageLoader, spreadActive: Bool) -> ReaderSpread? {
@@ -96,22 +105,11 @@ struct ReaderView: View {
         }
         var kotlinSet = Set<KotlinInt>()
         for p in widePages { kotlinSet.insert(KotlinInt(int: Int32(p))) }
-        return CameraTransformKt.resolveReaderSpread(page: Int32(targetPage), pageCount: Int32(loader.pageCount), widePages: kotlinSet)
-    }
-
-    private var currentLoader: PageLoader? {
-        if case .ready(let l) = state { return l }
-        return nil
-    }
-
-    private var isSpread: Bool {
-        guard let loader = currentLoader else { return false }
-        if !settings.pageSlideEnabled && step >= 0 && step < regions.count {
-            return false
-        }
-        let spreadActive = isSpreadActive(for: UIScreen.main.bounds.size)
-        let s = resolveSpread(for: page, in: loader, spreadActive: spreadActive)
-        return s?.second != nil && secondImage != nil
+        return CameraTransformKt.resolveReaderSpread(
+            page: Int32(targetPage),
+            pageCount: Int32(loader.pageCount),
+            widePages: kotlinSet
+        )
     }
 
     var body: some View {
@@ -170,56 +168,9 @@ struct ReaderView: View {
             }
             state = .ready(loader)
             ReadingProgress.markOpened(comicURL)
-            var restore = ReadingProgress.get(comicURL)?.step ?? -1
-            if let s = LeafDebug.env("LEAF_DEBUG_STEP"), let si = Int(s) { restore = si }
-            loadPage(loader, restoreStep: restore)
+            loadCurrentAndAdjacent(loader: loader, targetPage: page)
         } catch {
             state = .failed("Could not open archive: \(error.localizedDescription)")
-        }
-    }
-
-    private func loadPage(_ loader: PageLoader, restoreStep: Int = -1) {
-        let spreadActive = isSpreadActive(for: UIScreen.main.bounds.size)
-        let s = resolveSpread(for: page, in: loader, spreadActive: spreadActive)
-        let firstPage = Int(s?.first ?? Int32(page))
-        let secondPage = s?.second != nil ? Int(s!.second!.int32Value) : nil
-
-        regions = panelCache[firstPage] ?? [Panel.companion.FULL_PAGE]
-        if settings.pageSlideEnabled {
-            step = -1
-        } else {
-            step = (restoreStep == Self.outroSlot) ? regions.count : restoreStep
-        }
-        resetZoom()
-        persist()
-        pageAlpha = 0.35
-
-        loadToken &+= 1
-        let token = loadToken
-        Self.ioQueue.async {
-            let img = loader.loadPage(firstPage)
-            let sec = secondPage != nil ? loader.loadPage(secondPage!) : nil
-            let nextIndex = Int(s?.after ?? Int32(firstPage + 1))
-            let next = (nextIndex < loader.pageCount) ? loader.loadPage(nextIndex) : nil
-            let prevIndex = firstPage - 1
-            let prev = (prevIndex >= 0) ? loader.loadPage(prevIndex) : nil
-            DispatchQueue.main.async {
-                guard token == self.loadToken else { return }
-                self.image = img
-                self.secondImage = sec
-                self.nextImage = next
-                self.prevImage = prev
-                withAnimation(.easeOut(duration: 0.28)) { self.pageAlpha = 1 }
-                if let cached = self.panelCache[firstPage] {
-                    withAnimation(Self.cameraTween) {
-                        self.regions = cached
-                        if self.step > cached.count { self.step = cached.count }
-                    }
-                } else if !self.settings.pageSlideEnabled {
-                    self.redetect()
-                }
-                self.prefetch(nextIndex, loader)
-            }
         }
     }
 
@@ -227,221 +178,309 @@ struct ReaderView: View {
         zoom = 1; steadyZoom = 1; pan = .zero; steadyPan = .zero
     }
 
-    private func turnPage(next: Bool, in loader: PageLoader) {
-        let spreadActive = isSpreadActive(for: UIScreen.main.bounds.size)
-        let s = resolveSpread(for: page, in: loader, spreadActive: spreadActive)
-        let target: Int
-        if next {
-            target = Int(s?.after ?? Int32(page + 1))
-        } else {
-            let prevIndex = Int(s?.first ?? Int32(page)) - 1
-            if prevIndex >= 0 {
-                let prevSpread = resolveSpread(for: prevIndex, in: loader, spreadActive: spreadActive)
-                target = Int(prevSpread?.first ?? Int32(prevIndex))
-            } else {
-                target = -1
-            }
-        }
-        guard target >= 0, target < loader.pageCount else { return }
-        page = target
-        loadPage(loader)
-    }
-
     private func persist() {
-        ReadingProgress.set(comicURL, page: page, step: step, total: pageCount, rtl: rightToLeft)
+        ReadingProgress.set(comicURL, page: page, step: -1, total: pageCount, rtl: rightToLeft)
     }
 
-    private func redetect() {
-        guard let img = image, let detector = Self.detector else { return }
-        let rtl = rightToLeft
-        let forPage = page
-        detecting = true
-        Self.detectQueue.async {
-            let found = detector.zoomRegions(for: img, rightToLeft: rtl)
+    private func syncLoadSpread(loader: PageLoader, spread: ReaderSpread?) -> DisplaySpread? {
+        guard let spread = spread else { return nil }
+        let first = Int(spread.first)
+        let second = spread.second != nil ? Int(spread.second!.int32Value) : nil
+        let img1 = loader.loadPage(first)
+        let img2 = second != nil ? loader.loadPage(second!) : nil
+        return DisplaySpread(
+            firstPage: first,
+            secondPage: second,
+            firstImage: img1,
+            secondImage: img2,
+            isSpread: second != nil
+        )
+    }
+
+    private func loadSpreadImages(
+        loader: PageLoader,
+        spread: ReaderSpread?,
+        completion: @escaping (DisplaySpread?) -> Void
+    ) {
+        guard let spread = spread else {
+            completion(nil)
+            return
+        }
+        let first = Int(spread.first)
+        let second = spread.second != nil ? Int(spread.second!.int32Value) : nil
+        let isSpread = second != nil
+
+        Self.ioQueue.async {
+            let img1 = loader.loadPage(first)
+            let img2 = second != nil ? loader.loadPage(second!) : nil
+            let ds = DisplaySpread(
+                firstPage: first,
+                secondPage: second,
+                firstImage: img1,
+                secondImage: img2,
+                isSpread: isSpread
+            )
             DispatchQueue.main.async {
-                self.panelCache[forPage] = found
-                guard forPage == self.page else { return }
-                withAnimation(Self.cameraTween) {
-                    self.regions = found
-                    if self.step > found.count { self.step = found.count }
-                }
-                self.detecting = false
+                completion(ds)
             }
         }
     }
 
-    private func prefetch(_ index: Int, _ loader: PageLoader) {
-        guard index >= 0, index < loader.pageCount, panelCache[index] == nil,
-              let detector = Self.detector else { return }
-        let rtl = rightToLeft
-        Self.detectQueue.async {
-            guard let img = loader.loadPage(index) else { return }
-            let found = detector.zoomRegions(for: img, rightToLeft: rtl)
-            DispatchQueue.main.async {
-                guard self.rightToLeft == rtl else { return }
-                self.panelCache[index] = found
-            }
+    private func loadCurrentAndAdjacent(loader: PageLoader, targetPage: Int) {
+        let spreadActive = isSpreadActive(for: UIScreen.main.bounds.size)
+        guard let currS = resolveSpread(for: targetPage, in: loader, spreadActive: spreadActive) else { return }
+        let currFirst = Int(currS.first)
+
+        resetZoom()
+        persist()
+
+        // Reuse preloaded next or prev if matching
+        if let next = nextSpread, next.firstPage == currFirst, next.isReady {
+            currentSpread = next
+        } else if let prev = prevSpread, prev.firstPage == currFirst, prev.isReady {
+            currentSpread = prev
+        } else {
+            currentSpread = syncLoadSpread(loader: loader, spread: currS)
+        }
+
+        let nextTarget = Int(currS.after)
+        let nextS = (nextTarget < loader.pageCount) ? resolveSpread(for: nextTarget, in: loader, spreadActive: spreadActive) : nil
+
+        let prevTarget = currFirst - 1
+        let prevS = (prevTarget >= 0) ? resolveSpread(for: prevTarget, in: loader, spreadActive: spreadActive) : nil
+
+        loadToken &+= 1
+        let token = loadToken
+
+        loadSpreadImages(loader: loader, spread: nextS) { ds in
+            guard token == self.loadToken else { return }
+            self.nextSpread = ds
+        }
+        loadSpreadImages(loader: loader, spread: prevS) { ds in
+            guard token == self.loadToken else { return }
+            self.prevSpread = ds
+        }
+    }
+
+    @ViewBuilder
+    private func renderSpread(
+        firstImage: UIImage,
+        secondImage: UIImage,
+        panX: CGFloat,
+        panY: CGFloat,
+        zoom: CGFloat,
+        container: CGSize
+    ) -> some View {
+        let leftImg = !rightToLeft ? firstImage : secondImage
+        let rightImg = !rightToLeft ? secondImage : firstImage
+        let leftW = Int32(leftImg.cgImage?.width ?? Int(leftImg.size.width))
+        let leftH = Int32(leftImg.cgImage?.height ?? Int(leftImg.size.height))
+        let rightW = Int32(rightImg.cgImage?.width ?? Int(rightImg.size.width))
+        let rightH = Int32(rightImg.cgImage?.height ?? Int(rightImg.size.height))
+
+        let spreadDraw = CameraTransformKt.computeSpreadDraw(
+            page1W: leftW, page1H: leftH,
+            page2W: rightW, page2H: rightH,
+            containerW: Float(container.width),
+            containerH: Float(container.height),
+            fill: 0.98,
+            fitMode: settings.pageFitMode
+        )
+
+        // Left page
+        Image(uiImage: leftImg)
+            .resizable()
+            .frame(width: CGFloat(leftW), height: CGFloat(leftH))
+            .modifier(SpreadPageFraming(
+                pageLeft: CGFloat(spreadDraw.left1),
+                pageTop: CGFloat(spreadDraw.top1),
+                scaledWidth: CGFloat(spreadDraw.width1),
+                scaledHeight: CGFloat(spreadDraw.height1),
+                zoom: zoom,
+                panX: panX,
+                panY: panY,
+                container: container
+            ))
+
+        // Right page
+        Image(uiImage: rightImg)
+            .resizable()
+            .frame(width: CGFloat(rightW), height: CGFloat(rightH))
+            .modifier(SpreadPageFraming(
+                pageLeft: CGFloat(spreadDraw.left2),
+                pageTop: CGFloat(spreadDraw.top2),
+                scaledWidth: CGFloat(spreadDraw.width2),
+                scaledHeight: CGFloat(spreadDraw.height2),
+                zoom: zoom,
+                panX: panX,
+                panY: panY,
+                container: container
+            ))
+
+        // Center book spine shadow
+        let cx = container.width / 2
+        let spineX = cx + (CGFloat(spreadDraw.left2) - cx) * zoom + panX
+        let spineH = CGFloat(spreadDraw.totalHeight) * zoom
+        let spineTop = (container.height / 2) + (CGFloat(spreadDraw.boundTop) - (container.height / 2)) * zoom + panY
+        Rectangle()
+            .fill(
+                LinearGradient(
+                    colors: [.black.opacity(0.35), .clear],
+                    startPoint: .center,
+                    endPoint: .leading
+                )
+            )
+            .frame(width: 8, height: spineH)
+            .position(x: spineX, y: spineTop + spineH / 2)
+            .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private func renderSinglePage(
+        image: UIImage,
+        panX: CGFloat,
+        panY: CGFloat,
+        zoom: CGFloat,
+        container: CGSize
+    ) -> some View {
+        let w = Int32(image.cgImage?.width ?? Int(image.size.width))
+        let h = Int32(image.cgImage?.height ?? Int(image.size.height))
+        Image(uiImage: image)
+            .resizable()
+            .frame(width: CGFloat(w), height: CGFloat(h))
+            .modifier(CameraFraming(
+                camL: 0, camT: 0, camR: 1, camB: 1,
+                zoom: zoom,
+                panX: panX,
+                panY: panY,
+                container: container,
+                fitMode: settings.pageFitMode
+            ))
+    }
+
+    @ViewBuilder
+    private func renderDisplaySpread(
+        _ spread: DisplaySpread,
+        panX: CGFloat,
+        panY: CGFloat,
+        zoom: CGFloat,
+        container: CGSize
+    ) -> some View {
+        if spread.isSpread, let first = spread.firstImage, let second = spread.secondImage {
+            renderSpread(
+                firstImage: first,
+                secondImage: second,
+                panX: panX,
+                panY: panY,
+                zoom: zoom,
+                container: container
+            )
+        } else if let first = spread.firstImage {
+            renderSinglePage(
+                image: first,
+                panX: panX,
+                panY: panY,
+                zoom: zoom,
+                container: container
+            )
         }
     }
 
     @ViewBuilder
     private func readerBody(_ loader: PageLoader, size: CGSize) -> some View {
         ZStack(alignment: .topLeading) {
-            // Incoming adjacent page sliding in when actively dragging / flipping in Page Flip mode
-            if settings.pageSlideEnabled && slideOffset != 0 {
-                if slideOffset < 0 {
-                    let incoming = rightToLeft ? prevImage : nextImage
-                    if let incoming, let cg = incoming.cgImage {
-                        Image(uiImage: incoming)
-                            .resizable()
-                            .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
-                            .modifier(CameraFraming(
-                                camL: 0, camT: 0, camR: 1, camB: 1,
-                                zoom: 1, panX: size.width + slideOffset, panY: 0,
-                                container: size,
-                                fitMode: settings.pageFitMode))
-                    }
-                } else if slideOffset > 0 {
-                    let incoming = rightToLeft ? nextImage : prevImage
-                    if let incoming, let cg = incoming.cgImage {
-                        Image(uiImage: incoming)
-                            .resizable()
-                            .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
-                            .modifier(CameraFraming(
-                                camL: 0, camT: 0, camR: 1, camB: 1,
-                                zoom: 1, panX: -size.width + slideOffset, panY: 0,
-                                container: size,
-                                fitMode: settings.pageFitMode))
-                    }
+            // Current page / spread
+            if let current = currentSpread {
+                renderDisplaySpread(
+                    current,
+                    panX: (zoom <= 1.01) ? slideOffset : pan.width,
+                    panY: pan.height,
+                    zoom: zoom,
+                    container: size
+                )
+            }
+
+            // Incoming adjacent page/spread sliding in when actively dragging or animating turn
+            if slideOffset != 0 || isTurning {
+                let isNegative = slideOffset < 0
+                let incomingSpread = isNegative
+                    ? (!rightToLeft ? nextSpread : prevSpread)
+                    : (!rightToLeft ? prevSpread : nextSpread)
+                let incomingPanX = isNegative ? (size.width + slideOffset) : (-size.width + slideOffset)
+
+                if let incoming = incomingSpread {
+                    renderDisplaySpread(
+                        incoming,
+                        panX: incomingPanX,
+                        panY: 0,
+                        zoom: 1,
+                        container: size
+                    )
                 }
 
                 // Shadow separator along the sliding seam
-                let dividerX = (slideOffset < 0) ? (size.width + slideOffset) : slideOffset
+                let dividerX = isNegative ? (size.width + slideOffset) : slideOffset
                 Rectangle()
                     .fill(
                         LinearGradient(
                             colors: [.black.opacity(0.40), .clear],
-                            startPoint: (slideOffset < 0) ? .leading : .trailing,
-                            endPoint: (slideOffset < 0) ? .trailing : .leading
+                            startPoint: isNegative ? .leading : .trailing,
+                            endPoint: isNegative ? .trailing : .leading
                         )
                     )
                     .frame(width: 24, height: size.height)
-                    .position(x: (slideOffset < 0) ? (dividerX + 12) : (dividerX - 12), y: size.height / 2)
+                    .position(x: isNegative ? (dividerX + 12) : (dividerX - 12), y: size.height / 2)
                     .allowsHitTesting(false)
-            }
-
-            // Current page content: two-page spread or single page
-            if isSpread, let image, let secondImage,
-               image.cgImage != nil, secondImage.cgImage != nil {
-                let leftImg = !rightToLeft ? image : secondImage
-                let rightImg = !rightToLeft ? secondImage : image
-                let leftW = Int32(leftImg.cgImage?.width ?? 1)
-                let leftH = Int32(leftImg.cgImage?.height ?? 1)
-                let rightW = Int32(rightImg.cgImage?.width ?? 1)
-                let rightH = Int32(rightImg.cgImage?.height ?? 1)
-
-                let spread = CameraTransformKt.computeSpreadDraw(
-                    page1W: leftW, page1H: leftH,
-                    page2W: rightW, page2H: rightH,
-                    containerW: Float(size.width),
-                    containerH: Float(size.height),
-                    fill: 0.98,
-                    fitMode: settings.pageFitMode
-                )
-
-                let currentPanX = (settings.pageSlideEnabled && zoom <= 1.01) ? slideOffset : pan.width
-
-                // Left page
-                Image(uiImage: leftImg)
-                    .resizable()
-                    .frame(width: CGFloat(leftW), height: CGFloat(leftH))
-                    .modifier(SpreadPageFraming(
-                        pageLeft: CGFloat(spread.left1),
-                        pageTop: CGFloat(spread.top1),
-                        scaledWidth: CGFloat(spread.width1),
-                        scaledHeight: CGFloat(spread.height1),
-                        zoom: zoom,
-                        panX: currentPanX,
-                        panY: pan.height,
-                        container: size
-                    ))
-                    .opacity(pageAlpha)
-
-                // Right page
-                Image(uiImage: rightImg)
-                    .resizable()
-                    .frame(width: CGFloat(rightW), height: CGFloat(rightH))
-                    .modifier(SpreadPageFraming(
-                        pageLeft: CGFloat(spread.left2),
-                        pageTop: CGFloat(spread.top2),
-                        scaledWidth: CGFloat(spread.width2),
-                        scaledHeight: CGFloat(spread.height2),
-                        zoom: zoom,
-                        panX: currentPanX,
-                        panY: pan.height,
-                        container: size
-                    ))
-                    .opacity(pageAlpha)
-
-                // Center book spine shadow
-                let cx = size.width / 2
-                let spineX = cx + (CGFloat(spread.left2) - cx) * zoom + currentPanX
-                let spineH = CGFloat(spread.totalHeight) * zoom
-                let spineTop = (size.height / 2) + (CGFloat(spread.boundTop) - (size.height / 2)) * zoom + pan.height
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.black.opacity(0.35), .clear],
-                            startPoint: .center,
-                            endPoint: .leading
-                        )
-                    )
-                    .frame(width: 8, height: spineH)
-                    .position(x: spineX, y: spineTop + spineH / 2)
-                    .allowsHitTesting(false)
-            } else if let image, let cg = image.cgImage {
-                Image(uiImage: image)
-                    .resizable()
-                    .frame(width: CGFloat(cg.width), height: CGFloat(cg.height))
-                    .modifier(CameraFraming(
-                        camL: CGFloat(camera.left), camT: CGFloat(camera.top),
-                        camR: CGFloat(camera.right), camB: CGFloat(camera.bottom),
-                        zoom: zoom,
-                        panX: (settings.pageSlideEnabled && zoom <= 1.01) ? slideOffset : pan.width,
-                        panY: pan.height,
-                        container: size,
-                        fitMode: settings.pageFitMode))
-                    .opacity(pageAlpha)
             }
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         .clipped()
-        .overlay { if image == nil { ProgressView().tint(Leaf.ochre) } }
-        // Reticle framing brackets — only shown in Panel by Panel mode
-        .overlay { if image != nil && !settings.pageSlideEnabled && !isSpread {
-            Reticle(color: Leaf.crimson.opacity(0.45), inset: 6, length: 16, stroke: 2).padding(6)
-        } }
-        // Gesture layer: interactive page slide in Page Flip mode, panel zoom/pan in guided mode
+        .overlay {
+            if currentSpread == nil {
+                ProgressView().tint(Leaf.ochre)
+            }
+        }
+        // Unified gesture layer: pinch-to-zoom, pan when zoomed, tap zones, and drag-to-flip
         .overlay {
             ReaderGestures(
-                onTap: { location, sz in tapZone(x: location.x, width: sz.width, in: loader) },
-                onDoubleTap: { showWholePage() },
+                size: size,
+                onTap: { location, sz in
+                    tapZone(x: location.x, width: sz.width, in: loader)
+                },
+                onDoubleTap: {
+                    withAnimation(.easeOut(duration: 0.22)) {
+                        resetZoom()
+                    }
+                },
                 onPinchChanged: { scale in
                     if !isTurning {
                         zoom = min(max(steadyZoom * scale, 1), 5)
                     }
                 },
-                onPinchEnded: { if zoom <= 1.01 { resetZoom() } else { steadyZoom = zoom } },
+                onPinchEnded: {
+                    if zoom <= 1.01 {
+                        resetZoom()
+                    } else {
+                        steadyZoom = zoom
+                    }
+                },
                 onPanChanged: { t in
-                    if settings.pageSlideEnabled && zoom <= 1.01 {
+                    if zoom <= 1.01 {
                         guard !isTurning else { return }
-                        let isAtLeadingBound = (!rightToLeft && page <= 0) || (rightToLeft && page >= pageCount - 1)
-                        let isAtTrailingBound = (!rightToLeft && page >= pageCount - 1) || (rightToLeft && page <= 0)
-                        if (t.width > 0 && isAtLeadingBound) || (t.width < 0 && isAtTrailingBound) {
+                        let spreadActive = isSpreadActive(for: size)
+                        let s = resolveSpread(for: page, in: loader, spreadActive: spreadActive)
+                        let canAdvance = !rightToLeft ? (Int(s?.after ?? Int32(page + 1)) < loader.pageCount) : (Int(s?.first ?? Int32(page)) > 0)
+                        let canGoBack = !rightToLeft ? (Int(s?.first ?? Int32(page)) > 0) : (Int(s?.after ?? Int32(page + 1)) < loader.pageCount)
+
+                        let isDraggingToAdvance = !rightToLeft ? (t.width < 0) : (t.width > 0)
+                        let isDraggingToGoBack = !rightToLeft ? (t.width > 0) : (t.width < 0)
+
+                        if (isDraggingToAdvance && !canAdvance) || (isDraggingToGoBack && !canGoBack) {
                             slideOffset = t.width * 0.25
                         } else {
                             slideOffset = t.width
                         }
+
                         if settings.pageFitMode == .fitWidth {
                             let raw = CGSize(width: 0, height: steadyPan.height + t.height)
                             pan = clampPan(raw, viewSize: size)
@@ -455,27 +494,20 @@ struct ReaderView: View {
                     handlePanEnd(translation: translation, velocity: velocity, maxTouches: maxTouches, in: loader, size: size)
                 }
             )
+            .frame(width: size.width, height: size.height)
+            .contentShape(Rectangle())
         }
     }
 
-    // Top-bar status line, matching Android: "Page X/Y · panel N/M" / "· full page" / "· detecting…".
     private var pageStatus: String {
-        let prefix: String
-        if let loader = currentLoader {
-            let spreadActive = isSpreadActive(for: UIScreen.main.bounds.size)
-            let s = resolveSpread(for: page, in: loader, spreadActive: spreadActive)
-            if let sec = s?.second, isSpread {
-                prefix = "Pages \(s!.first + 1)-\(sec.int32Value + 1)/\(pageCount) · "
-            } else {
-                prefix = "Page \(page + 1)/\(pageCount) · "
-            }
+        guard let loader = currentLoader else { return "Page \(page + 1)/\(pageCount)" }
+        let spreadActive = isSpreadActive(for: UIScreen.main.bounds.size)
+        let s = resolveSpread(for: page, in: loader, spreadActive: spreadActive)
+        if let sec = s?.second, isSpread {
+            return "Pages \(s!.first + 1)-\(sec.int32Value + 1)/\(pageCount)"
         } else {
-            prefix = "Page \(page + 1)/\(pageCount) · "
+            return "Page \(page + 1)/\(pageCount)"
         }
-        if settings.pageSlideEnabled { return prefix + "page flip" }
-        if detecting { return prefix + "detecting…" }
-        if onPanel { return prefix + "panel \(step + 1)/\(regions.count)" }
-        return prefix + "full page"
     }
 
     private var topBar: some View {
@@ -490,7 +522,7 @@ struct ReaderView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.archivo(14, weight: 800)).foregroundColor(Leaf.cream).lineLimit(1)
-                Text(pageStatus).font(.archivo(9)).tracking(1.4).foregroundColor(Leaf.creamMuted)
+                Text(pageStatus).font(.archivo(10)).tracking(1.4).foregroundColor(Leaf.creamMuted)
             }
             Spacer()
 
@@ -502,7 +534,9 @@ struct ReaderView: View {
                 } else {
                     settings.portraitSpread.toggle()
                 }
-                if case .ready(let l) = state { loadPage(l) }
+                if case .ready(let l) = state {
+                    loadCurrentAndAdjacent(loader: l, targetPage: page)
+                }
             }
 
             FitModeChip(fitMode: settings.pageFitMode) {
@@ -512,47 +546,27 @@ struct ReaderView: View {
 
             DirectionChip(rightToLeft: rightToLeft) {
                 rightToLeft.toggle()
-                panelCache.removeAll()
                 persist()
-                redetect()
+                if case .ready(let l) = state {
+                    loadCurrentAndAdjacent(loader: l, targetPage: page)
+                }
             }
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 18)
         .frame(maxWidth: .infinity)
-        .background(LinearGradient(colors: [Leaf.leafPrimary.opacity(0.98), Leaf.leafPrimary.opacity(0.88), .clear],
-                                   startPoint: .top, endPoint: .bottom)
-            .ignoresSafeArea(edges: [.top, .horizontal]))
+        .background(
+            LinearGradient(
+                colors: [Leaf.leafPrimary.opacity(0.98), Leaf.leafPrimary.opacity(0.88), .clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: [.top, .horizontal])
+        )
     }
 
     private var bottomBar: some View {
         VStack(spacing: 8) {
             HStack {
-                Button {
-                    withAnimation(Self.cameraTween) {
-                        settings.pageSlideEnabled.toggle()
-                        slideOffset = 0
-                        if settings.pageSlideEnabled {
-                            step = -1
-                            resetZoom()
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: settings.pageSlideEnabled ? "book.fill" : "viewfinder")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(Leaf.ochre)
-                        Text(settings.pageSlideEnabled ? "PAGE FLIP" : "PANEL BY PANEL")
-                            .font(.anton(11))
-                            .tracking(1)
-                            .foregroundColor(Leaf.cream)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Leaf.leafPrimary.opacity(0.9))
-                    .clipShape(RoundedCornerShape(cornerRadius: 12))
-                }
-                .buttonStyle(.plain)
-
                 Spacer()
                 PageCoin(page: (scrubbing ? Int(scrub.rounded()) : page) + 1, total: pageCount)
             }
@@ -560,61 +574,79 @@ struct ReaderView: View {
                 value: $scrub,
                 range: 0...Double(max(pageCount - 1, 1)),
                 onEditingChanged: { editing in
-                    if editing { scrubbing = true }
-                    else {
+                    if editing {
+                        scrubbing = true
+                    } else {
                         scrubbing = false
-                        page = Int(scrub.rounded())
+                        let targetPage = Int(scrub.rounded())
+                        page = targetPage
                         slideOffset = 0
-                        if case .ready(let a) = state { loadPage(a) }
+                        if case .ready(let l) = state {
+                            loadCurrentAndAdjacent(loader: l, targetPage: targetPage)
+                        }
                     }
                 }
             )
         }
         .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 12)
         .frame(maxWidth: .infinity)
-        .background(LinearGradient(colors: [.clear, Leaf.inkSoft.opacity(0.98)],
-                                   startPoint: .top, endPoint: .bottom)
-            .ignoresSafeArea(edges: [.bottom, .horizontal]))
+        .background(
+            LinearGradient(
+                colors: [.clear, Leaf.inkSoft.opacity(0.98)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: [.bottom, .horizontal])
+        )
         .onChange(of: page) { if !scrubbing { scrub = Double($0) } }
     }
 
-    // Tap zones, matching Android: left third turns back (or steps to prev panel), right third turns forward
-    // (or steps to next panel), middle third toggles chrome.
+    // Tap zones: left third turns back (or next if RTL), right third turns forward (or back if RTL),
+    // center third toggles chrome. If zoomed in, tap toggles chrome anywhere.
     private func tapZone(x: CGFloat, width: CGFloat, in loader: PageLoader) {
         guard !isTurning else { return }
-        if x < width / 3 {
-            if settings.pageSlideEnabled {
-                animateTapTurn(forward: rightToLeft, in: loader, width: width)
-            } else {
-                advance(by: rightToLeft ? 1 : -1, in: loader)
-            }
-        } else if x > width * 2 / 3 {
-            if settings.pageSlideEnabled {
-                animateTapTurn(forward: !rightToLeft, in: loader, width: width)
-            } else {
-                advance(by: rightToLeft ? -1 : 1, in: loader)
-            }
+        if zoom > 1.05 {
+            withAnimation(.easeInOut(duration: 0.2)) { showChrome.toggle() }
+            return
+        }
+        let leftBound = width / 3
+        let rightBound = width * 2 / 3
+        if x < leftBound {
+            performTurn(forward: rightToLeft, in: loader, width: width)
+        } else if x > rightBound {
+            performTurn(forward: !rightToLeft, in: loader, width: width)
         } else {
-            withAnimation { showChrome.toggle() }
+            withAnimation(.easeInOut(duration: 0.2)) { showChrome.toggle() }
         }
     }
 
-    private func animateTapTurn(forward: Bool, in loader: PageLoader, width: CGFloat) {
+    private func performTurn(forward: Bool, in loader: PageLoader, width: CGFloat) {
         let spreadActive = isSpreadActive(for: UIScreen.main.bounds.size)
         let s = resolveSpread(for: page, in: loader, spreadActive: spreadActive)
+
         let target: Int
         if forward {
             target = Int(s?.after ?? Int32(page + 1))
+            guard target < loader.pageCount else { return }
         } else {
-            let prevIndex = Int(s?.first ?? Int32(page)) - 1
-            if prevIndex >= 0 {
-                let prevSpread = resolveSpread(for: prevIndex, in: loader, spreadActive: spreadActive)
-                target = Int(prevSpread?.first ?? Int32(prevIndex))
-            } else {
-                target = -1
+            let prevDoc = Int(s?.first ?? Int32(page)) - 1
+            guard prevDoc >= 0 else { return }
+            let prevS = resolveSpread(for: prevDoc, in: loader, spreadActive: spreadActive)
+            target = Int(prevS?.first ?? Int32(prevDoc))
+        }
+
+        // Ensure target spread is loaded before starting transition
+        let targetSpreadS = resolveSpread(for: target, in: loader, spreadActive: spreadActive)
+        if forward {
+            if nextSpread == nil || nextSpread?.firstPage != target || !nextSpread!.isReady {
+                nextSpread = syncLoadSpread(loader: loader, spread: targetSpreadS)
+            }
+        } else {
+            if prevSpread == nil || prevSpread?.firstPage != target || !prevSpread!.isReady {
+                prevSpread = syncLoadSpread(loader: loader, spread: targetSpreadS)
             }
         }
-        guard target >= 0, target < loader.pageCount, !isTurning else { return }
+
         isTurning = true
         let targetOffset: CGFloat
         if !rightToLeft {
@@ -622,28 +654,39 @@ struct ReaderView: View {
         } else {
             targetOffset = forward ? width : -width
         }
+
         withAnimation(.easeOut(duration: 0.22)) {
             slideOffset = targetOffset
         }
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
-            if forward {
-                let incoming = !rightToLeft ? nextImage : prevImage
-                if let incoming { self.image = incoming }
-            } else {
-                let incoming = !rightToLeft ? prevImage : nextImage
-                if let incoming { self.image = incoming }
+            let incoming = forward ? self.nextSpread : self.prevSpread
+            if let incoming, incoming.isReady {
+                self.currentSpread = incoming
             }
-            page = target
-            slideOffset = 0
-            isTurning = false
-            loadPage(loader)
+            self.page = target
+            self.slideOffset = 0
+            self.isTurning = false
+            self.resetZoom()
+            self.persist()
+
+            // Preload adjacent in background
+            let newNextTarget = Int(targetSpreadS?.after ?? Int32(target + 1))
+            let newNextS = (newNextTarget < loader.pageCount) ? self.resolveSpread(for: newNextTarget, in: loader, spreadActive: spreadActive) : nil
+            let newPrevTarget = target - 1
+            let newPrevS = (newPrevTarget >= 0) ? self.resolveSpread(for: newPrevTarget, in: loader, spreadActive: spreadActive) : nil
+
+            self.loadSpreadImages(loader: loader, spread: newNextS) { ds in
+                if self.page == target { self.nextSpread = ds }
+            }
+            self.loadSpreadImages(loader: loader, spread: newPrevS) { ds in
+                if self.page == target { self.prevSpread = ds }
+            }
         }
     }
 
-    private var isFullPage: Bool { settings.pageSlideEnabled || step < 0 || step >= regions.count }
-
     private func handlePanEnd(translation: CGSize, velocity: CGSize, maxTouches: Int, in loader: PageLoader, size: CGSize) {
-        if settings.pageSlideEnabled && zoom <= 1.01 {
+        if zoom <= 1.01 {
             guard !isTurning else { return }
             let dragX = translation.width
             let velX = velocity.width
@@ -651,93 +694,41 @@ struct ReaderView: View {
 
             let spreadActive = isSpreadActive(for: size)
             let s = resolveSpread(for: page, in: loader, spreadActive: spreadActive)
-            let canAdvance = !rightToLeft ? (Int(s?.after ?? Int32(page + 1)) < pageCount) : (page > 0)
-            let canGoBack = !rightToLeft ? (page > 0) : (Int(s?.after ?? Int32(page + 1)) < pageCount)
+            let canAdvance = !rightToLeft ? (Int(s?.after ?? Int32(page + 1)) < loader.pageCount) : (Int(s?.first ?? Int32(page)) > 0)
+            let canGoBack = !rightToLeft ? (Int(s?.first ?? Int32(page)) > 0) : (Int(s?.after ?? Int32(page + 1)) < loader.pageCount)
 
-            let isAdvance = !rightToLeft ? (dragX < -60 || velX < -300) : (dragX > 60 || velX > 300)
-            let isGoBack = !rightToLeft ? (dragX > 60 || velX > 300) : (dragX < -60 || velX < -300)
+            let forwardDragDist = !rightToLeft ? -dragX : dragX
+            let forwardVel = !rightToLeft ? -velX : velX
+            let settleForward = (forwardDragDist > W * 0.35 || forwardVel > 500) && forwardVel > -400
 
-            if isAdvance && canAdvance {
-                isTurning = true
-                let targetOffset = !rightToLeft ? -W : W
-                withAnimation(.easeOut(duration: 0.20)) {
-                    slideOffset = targetOffset
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
-                    let incoming = !rightToLeft ? nextImage : prevImage
-                    if let incoming { self.image = incoming }
-                    let nextTarget: Int
-                    if !rightToLeft {
-                        nextTarget = Int(s?.after ?? Int32(page + 1))
-                    } else {
-                        let prevIndex = Int(s?.first ?? Int32(page)) - 1
-                        let prevSpread = prevIndex >= 0 ? resolveSpread(for: prevIndex, in: loader, spreadActive: spreadActive) : nil
-                        nextTarget = Int(prevSpread?.first ?? Int32(prevIndex))
-                    }
-                    if nextTarget >= 0 && nextTarget < loader.pageCount {
-                        page = nextTarget
-                    }
-                    slideOffset = 0
-                    isTurning = false
-                    loadPage(loader)
-                }
-            } else if isGoBack && canGoBack {
-                isTurning = true
-                let targetOffset = !rightToLeft ? W : -W
-                withAnimation(.easeOut(duration: 0.20)) {
-                    slideOffset = targetOffset
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
-                    let incoming = !rightToLeft ? prevImage : nextImage
-                    if let incoming { self.image = incoming }
-                    let prevTarget: Int
-                    if !rightToLeft {
-                        let prevIndex = Int(s?.first ?? Int32(page)) - 1
-                        let prevSpread = prevIndex >= 0 ? resolveSpread(for: prevIndex, in: loader, spreadActive: spreadActive) : nil
-                        prevTarget = Int(prevSpread?.first ?? Int32(prevIndex))
-                    } else {
-                        prevTarget = Int(s?.after ?? Int32(page + 1))
-                    }
-                    if prevTarget >= 0 && prevTarget < loader.pageCount {
-                        page = prevTarget
-                    }
-                    slideOffset = 0
-                    isTurning = false
-                    loadPage(loader)
-                }
+            let backDragDist = !rightToLeft ? dragX : -dragX
+            let backVel = !rightToLeft ? velX : -velX
+            let settleBackward = (backDragDist > W * 0.35 || backVel > 500) && backVel > -400
+
+            if settleForward && canAdvance {
+                performTurn(forward: true, in: loader, width: W)
+            } else if settleBackward && canGoBack {
+                performTurn(forward: false, in: loader, width: W)
             } else {
                 withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                     slideOffset = 0
                 }
             }
         } else {
-            if zoom > 1.01 || settings.pageFitMode == .fitWidth {
-                steadyPan = pan
-            } else if isFullPage {
-                let dragX = translation.width
-                let velX = velocity.width
-                let isAdvance = !rightToLeft ? (dragX < -60 || velX < -300) : (dragX > 60 || velX > 300)
-                let isGoBack = !rightToLeft ? (dragX > 60 || velX > 300) : (dragX < -60 || velX < -300)
-                if isAdvance {
-                    turnPage(next: !rightToLeft, in: loader)
-                } else if isGoBack {
-                    turnPage(next: rightToLeft, in: loader)
-                }
-            }
+            steadyPan = pan
         }
     }
 
     private func clampPan(_ raw: CGSize, viewSize: CGSize) -> CGSize {
         let cw = viewSize.width, ch = viewSize.height
-        if isSpread, let image, let secondImage,
-           image.cgImage != nil, secondImage.cgImage != nil {
-            let leftImg = !rightToLeft ? image : secondImage
-            let rightImg = !rightToLeft ? secondImage : image
+        if isSpread, let current = currentSpread, let leftImg = current.firstImage, let rightImg = current.secondImage {
+            let leftW = Int32(leftImg.cgImage?.width ?? Int(leftImg.size.width))
+            let leftH = Int32(leftImg.cgImage?.height ?? Int(leftImg.size.height))
+            let rightW = Int32(rightImg.cgImage?.width ?? Int(rightImg.size.width))
+            let rightH = Int32(rightImg.cgImage?.height ?? Int(rightImg.size.height))
             let spread = CameraTransformKt.computeSpreadDraw(
-                page1W: Int32(leftImg.cgImage?.width ?? 1),
-                page1H: Int32(leftImg.cgImage?.height ?? 1),
-                page2W: Int32(rightImg.cgImage?.width ?? 1),
-                page2H: Int32(rightImg.cgImage?.height ?? 1),
+                page1W: leftW, page1H: leftH,
+                page2W: rightW, page2H: rightH,
                 containerW: Float(cw),
                 containerH: Float(ch),
                 fill: 0.98,
@@ -750,11 +741,13 @@ struct ReaderView: View {
             let x: CGFloat = totalW <= cw ? 0 : min(max(raw.width, cw - totalW - baseLeft), -baseLeft)
             let y: CGFloat = totalH <= ch ? 0 : min(max(raw.height, ch - totalH - baseTop), -baseTop)
             return CGSize(width: x, height: y)
-        } else if let image, let cg = image.cgImage {
+        } else if let current = currentSpread, let img = current.firstImage {
+            let w = Int32(img.cgImage?.width ?? Int(img.size.width))
+            let h = Int32(img.cgImage?.height ?? Int(img.size.height))
             let draw = CameraTransformKt.computePageDraw(
-                camera: camera,
-                bitmapW: Int32(cg.width),
-                bitmapH: Int32(cg.height),
+                camera: Panel.companion.FULL_PAGE,
+                bitmapW: w,
+                bitmapH: h,
                 containerW: Float(cw),
                 containerH: Float(ch),
                 fill: 0.98,
@@ -769,29 +762,6 @@ struct ReaderView: View {
             return CGSize(width: x, height: y)
         }
         return .zero
-    }
-
-    private func advance(by delta: Int, in loader: PageLoader) {
-        let next = step + delta
-        if next > regions.count {
-            turnPage(next: true, in: loader)
-        } else if next < -1 {
-            turnPage(next: false, in: loader)
-        } else {
-            withAnimation(Self.cameraTween) {
-                step = next
-                resetZoom()
-            }
-            persist()
-        }
-    }
-
-    private func showWholePage() {
-        withAnimation(Self.cameraTween) {
-            step = -1
-            resetZoom()
-        }
-        persist()
     }
 }
 
