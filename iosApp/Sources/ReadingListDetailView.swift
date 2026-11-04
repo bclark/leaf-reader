@@ -1,19 +1,23 @@
 import SwiftUI
 
-/// Detail screen for a custom Reading List, matching Android's reading list sheet/dialog.
-/// Supports adding comics, removing comics, reordering comics, and launching issues.
+/// Dedicated screen for a custom reading list, matching Android's ReadingListDetailScreen.kt.
+/// Uses a compact single-row Hero Status Bar with unified read-progress badge, BookStatusBadgeIcon,
+/// compact START / CONTINUE / RESTART pill, and a pinned bottom-right "+ ADD COMICS" FAB.
 struct ReadingListDetailView: View {
     let listId: String
     @ObservedObject var library: LibraryStore
     let onOpenComic: (URL) -> Void
     let onDismiss: () -> Void
+    var initialShowAddComics: Bool = false
 
     @EnvironmentObject private var settings: LeafSettings
     @State private var showAddComicsSheet = false
-    @State private var showRenameAlert = false
-    @State private var showDeleteAlert = false
-    @State private var renameInput = ""
     @State private var selectedToAdd: Set<URL> = []
+    @State private var addSearchQuery = ""
+    @State private var showRenameAlert = false
+    @State private var renameInput = ""
+    @State private var showDeleteListAlert = false
+    @State private var comicToRemove: URL?
 
     private var currentList: ReadingListRecord? {
         library.readingLists.first { $0.id == listId }
@@ -21,8 +25,40 @@ struct ReadingListDetailView: View {
 
     private var listComics: [URL] {
         guard let list = currentList else { return [] }
-        let comicMap = Dictionary(uniqueKeysWithValues: library.comics.map { ($0.lastPathComponent, $0) })
-        return list.itemFilenames.compactMap { comicMap[$0] }
+        let map = Dictionary(uniqueKeysWithValues: library.comics.map { ($0.lastPathComponent, $0) })
+        return list.itemFilenames.compactMap { map[$0] }
+    }
+
+    private var completedCount: Int {
+        listComics.filter { ReadingProgress.isCompleted($0) }.count
+    }
+
+    private var allRead: Bool {
+        guard !listComics.isEmpty else { return false }
+        return completedCount == listComics.count
+    }
+
+    private var nextUnread: URL? {
+        listComics.first { !ReadingProgress.isCompleted($0) } ?? listComics.first
+    }
+
+    var heroButtonText: String {
+        guard let target = nextUnread else { return "START" }
+        let title = (library.metadata[target.lastPathComponent]?.title ?? target.deletingPathExtension().lastPathComponent).uppercased()
+        if allRead {
+            let firstTitle = (listComics.first.flatMap { library.metadata[$0.lastPathComponent]?.title ?? $0.deletingPathExtension().lastPathComponent } ?? title).uppercased()
+            return "READ FROM START: \(firstTitle)"
+        }
+        let started = (ReadingProgress.get(target)?.page ?? 0) > 0
+        return "\(started ? "CONTINUE" : "START"): \(title)"
+    }
+
+    /// Compact action pill label matching Android's redesigned hero card (`START`, `CONTINUE`, `RESTART`).
+    var shortActionLabel: String {
+        guard let target = nextUnread else { return "START" }
+        if allRead { return "RESTART" }
+        let started = (ReadingProgress.get(target)?.page ?? 0) > 0 || completedCount > 0
+        return started ? "CONTINUE" : "START"
     }
 
     var body: some View {
@@ -36,28 +72,80 @@ struct ReadingListDetailView: View {
                     content(for: geo.size.width)
                 }
             }
+
+            // Pinned Bottom-Right Extended FAB (+ ADD COMICS)
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Button {
+                        selectedToAdd.removeAll()
+                        addSearchQuery = ""
+                        showAddComicsSheet = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(Leaf.ink)
+                            Text("ADD COMICS")
+                                .font(.anton(15))
+                                .tracking(0.8)
+                                .foregroundColor(Leaf.ink)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(Leaf.ochre)
+                        .clipShape(RoundedCornerShape(cornerRadius: 6))
+                        .overlay(RoundedCornerShape(cornerRadius: 6).stroke(Leaf.ink, lineWidth: 2))
+                        .comicShadow(offset: 4, color: .black.opacity(0.75), corner: 6)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(20)
+                }
+            }
         }
         .navigationBarHidden(true)
+        .onAppear {
+            if initialShowAddComics {
+                showAddComicsSheet = true
+            }
+        }
         .sheet(isPresented: $showAddComicsSheet) {
             addComicsSheet
         }
         .alert("Rename Reading List", isPresented: $showRenameAlert) {
-            TextField("List name", text: $renameInput)
+            TextField("List Name", text: $renameInput)
             Button("Cancel", role: .cancel) {}
             Button("Save") {
-                if !renameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    library.renameReadingList(id: listId, newName: renameInput)
+                let trimmed = renameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    library.renameReadingList(id: listId, newName: trimmed)
                 }
             }
         }
-        .alert("Delete Reading List?", isPresented: $showDeleteAlert) {
+        .alert("Delete Reading List?", isPresented: $showDeleteListAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {
                 library.deleteReadingList(id: listId)
                 onDismiss()
             }
         } message: {
-            Text("This deletes the list. Comics inside the list are NOT deleted.")
+            Text("Delete “\(currentList?.name ?? "Reading List")”? The comics in this list will remain in your library.")
+        }
+        .alert("Remove from Reading List?", isPresented: Binding(
+            get: { comicToRemove != nil },
+            set: { if !$0 { comicToRemove = nil } }
+        )) {
+            Button("Cancel", role: .cancel) { comicToRemove = nil }
+            Button("Remove", role: .destructive) {
+                if let url = comicToRemove {
+                    library.removeComicFromReadingList(listId: listId, url: url)
+                }
+                comicToRemove = nil
+            }
+        } message: {
+            let comicTitle = comicToRemove?.deletingPathExtension().lastPathComponent ?? "this comic"
+            Text("Remove “\(comicTitle)” from “\(currentList?.name ?? "Reading List")”? The comic file will stay in your library.")
         }
     }
 
@@ -74,38 +162,46 @@ struct ReadingListDetailView: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(currentList?.name.uppercased() ?? "READING LIST")
+                Text((currentList?.name ?? "Reading List").uppercased())
                     .font(.anton(18))
                     .foregroundColor(Leaf.cream)
                     .lineLimit(1)
-                Text("\(listComics.count) COMICS")
+                Text("CUSTOM STORYLINE / READING LIST")
                     .font(.archivo(11, weight: 600))
                     .foregroundColor(Leaf.creamMuted)
+                    .lineLimit(1)
             }
 
             Spacer()
 
-            Menu {
+            HStack(spacing: 8) {
                 Button {
                     renameInput = currentList?.name ?? ""
                     showRenameAlert = true
                 } label: {
-                    Label("Rename List", systemImage: "pencil")
+                    Image(systemName: "pencil")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(Leaf.cream)
+                        .frame(width: 36, height: 36)
+                        .background(Leaf.cream.opacity(0.14))
+                        .clipShape(Circle())
                 }
-                Button(role: .destructive) {
-                    showDeleteAlert = true
+                .buttonStyle(.plain)
+                .accessibilityLabel("Rename Reading List")
+
+                Button {
+                    showDeleteListAlert = true
                 } label: {
-                    Label("Delete List", systemImage: "trash")
+                    Image(systemName: "trash")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(Leaf.crimson)
+                        .frame(width: 36, height: 36)
+                        .background(Leaf.cream.opacity(0.14))
+                        .clipShape(Circle())
                 }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(Leaf.cream)
-                    .frame(width: 36, height: 36)
-                    .background(Leaf.cream.opacity(0.14))
-                    .clipShape(Circle())
+                .buttonStyle(.plain)
+                .accessibilityLabel("Delete Reading List")
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 18)
         .padding(.top, 12)
@@ -120,59 +216,71 @@ struct ReadingListDetailView: View {
 
         return ScrollView {
             VStack(spacing: 16) {
-                HStack {
-                    OchreBadge(text: "CUSTOM LIST")
-                    Spacer()
-                    Button {
-                        selectedToAdd.removeAll()
-                        showAddComicsSheet = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 11, weight: .bold))
-                            Text("ADD COMICS")
-                                .font(.anton(11))
-                        }
-                        .foregroundColor(Leaf.ink)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Leaf.ochre)
-                        .clipShape(RoundedCornerShape(cornerRadius: 3))
-                    }
-                    .buttonStyle(.plain)
-                }
+                heroCard
 
                 if listComics.isEmpty {
-                    VStack(spacing: 8) {
-                        Text("This reading list is empty.")
-                            .font(.archivo(13))
-                            .foregroundColor(Leaf.creamMuted)
-                            .padding(.top, 24)
-                    }
+                    emptyStateCard
                 } else {
                     LazyVGrid(columns: gridColumns, spacing: cols >= 4 ? 14 : 18) {
-                        ForEach(listComics, id: \.self) { url in
-                            Button {
-                                onOpenComic(url)
-                            } label: {
-                                SeriesIssueCard(
-                                    url: url,
-                                    metadata: library.metadata[url.lastPathComponent],
-                                    progress: ReadingProgress.get(url),
-                                    columns: cols
-                                )
-                            }
-                            .buttonStyle(.plain)
+                        ForEach(Array(listComics.enumerated()), id: \.element) { index, url in
+                            let isRead = ReadingProgress.isCompleted(url)
+                            let lastPage = ReadingProgress.get(url)?.page ?? 0
+                            ReadingListComicCard(
+                                url: url,
+                                sequenceNumber: index + 1,
+                                totalCount: listComics.count,
+                                metadata: library.metadata[url.lastPathComponent],
+                                progress: ReadingProgress.get(url),
+                                columns: cols,
+                                onOpen: { onOpenComic(url) },
+                                onRemove: { comicToRemove = url },
+                                onMoveUp: index > 0 ? {
+                                    withAnimation(.easeInOut(duration: 0.18)) {
+                                        library.moveComicInReadingList(listId: listId, url: url, direction: -1)
+                                    }
+                                } : nil,
+                                onMoveDown: index < listComics.count - 1 ? {
+                                    withAnimation(.easeInOut(duration: 0.18)) {
+                                        library.moveComicInReadingList(listId: listId, url: url, direction: 1)
+                                    }
+                                } : nil
+                            )
                             .contextMenu {
                                 Button {
                                     onOpenComic(url)
                                 } label: {
-                                    Label("Read", systemImage: "book.open")
+                                    Label(
+                                        lastPage > 0 ? "Continue Reading (pg \(lastPage + 1))" : "Read Comic",
+                                        systemImage: "play.fill"
+                                    )
+                                }
+                                Button {
+                                    library.markComicsRead(urls: [url], read: !isRead)
+                                } label: {
+                                    Label(isRead ? "Mark as Unread" : "Mark as Read", systemImage: "checkmark.circle")
+                                }
+                                if index > 0 {
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.18)) {
+                                            library.moveComicInReadingList(listId: listId, url: url, direction: -1)
+                                        }
+                                    } label: {
+                                        Label("Move Up in Reading Order", systemImage: "arrow.up")
+                                    }
+                                }
+                                if index < listComics.count - 1 {
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.18)) {
+                                            library.moveComicInReadingList(listId: listId, url: url, direction: 1)
+                                        }
+                                    } label: {
+                                        Label("Move Down in Reading Order", systemImage: "arrow.down")
+                                    }
                                 }
                                 Button(role: .destructive) {
-                                    library.removeComicFromReadingList(listId: listId, url: url)
+                                    comicToRemove = url
                                 } label: {
-                                    Label("Remove from List", systemImage: "minus.circle")
+                                    Label("Remove from Reading List", systemImage: "trash")
                                 }
                             }
                         }
@@ -181,21 +289,171 @@ struct ReadingListDetailView: View {
             }
             .padding(.horizontal, 18)
             .padding(.top, 16)
-            .padding(.bottom, 48)
+            .padding(.bottom, 88)
         }
+    }
+
+    private var heroCard: some View {
+        let badgeColor = allRead ? BookStatusBadgeIcon.completedGreen : Leaf.ochre
+        let statusText = listComics.isEmpty
+            ? "0 COMICS"
+            : "\(completedCount) OF \(listComics.count) READ"
+        let progressFraction = listComics.isEmpty ? 0.0 : Double(completedCount) / Double(listComics.count)
+
+        return HStack(spacing: 12) {
+            // Left: Unified Read Badge + Slim Progress Bar
+            VStack(alignment: .leading, spacing: 6) {
+                Text(statusText)
+                    .font(.anton(12))
+                    .tracking(0.5)
+                    .foregroundColor(badgeColor)
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(Leaf.ink.opacity(0.6))
+                    .clipShape(RoundedCornerShape(cornerRadius: 4))
+                    .overlay(
+                        RoundedCornerShape(cornerRadius: 4)
+                            .stroke(badgeColor.opacity(0.55), lineWidth: 1)
+                    )
+
+                if !listComics.isEmpty {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedCornerShape(cornerRadius: 1.5)
+                                .fill(Leaf.inkSoft.opacity(0.25))
+                            RoundedCornerShape(cornerRadius: 1.5)
+                                .fill(badgeColor)
+                                .frame(width: geo.size.width * CGFloat(min(max(progressFraction, 0), 1)))
+                        }
+                    }
+                    .frame(height: 3)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Right: Book Status Toggle + Compact Start/Continue/Restart Pill
+            if !listComics.isEmpty {
+                HStack(spacing: 8) {
+                    Button {
+                        library.markReadingListRead(listId: listId, read: !allRead)
+                    } label: {
+                        BookStatusBadgeIcon(isAllCompleted: allRead)
+                            .frame(width: 36, height: 36)
+                            .background(Leaf.inkSoft)
+                            .clipShape(RoundedCornerShape(cornerRadius: 8))
+                            .overlay(
+                                RoundedCornerShape(cornerRadius: 8)
+                                    .stroke(
+                                        allRead ? BookStatusBadgeIcon.unreadRose.opacity(0.6) : Leaf.creamMuted.opacity(0.35),
+                                        lineWidth: 1
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+
+                    if let target = allRead ? listComics.first : nextUnread {
+                        Button {
+                            onOpenComic(target)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 12, weight: .bold))
+                                Text(shortActionLabel)
+                                    .font(.anton(13))
+                                    .tracking(0.6)
+                                    .lineLimit(1)
+                            }
+                            .foregroundColor(Leaf.ink)
+                            .padding(.horizontal, 12)
+                            .frame(height: 36)
+                            .background(Leaf.ochre)
+                            .clipShape(RoundedCornerShape(cornerRadius: 8))
+                            .overlay(
+                                RoundedCornerShape(cornerRadius: 8)
+                                    .stroke(Leaf.ink, lineWidth: 1.5)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(heroButtonText)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Leaf.deepInkSurface)
+        .clipShape(RoundedCornerShape(cornerRadius: 10))
+        .overlay(
+            RoundedCornerShape(cornerRadius: 10)
+                .stroke(Leaf.inkSoft.opacity(0.28), lineWidth: 1)
+        )
+        .comicShadow(offset: 4, color: .black.opacity(0.75), corner: 10)
+    }
+
+    private var emptyStateCard: some View {
+        VStack(spacing: 10) {
+            Text("THIS LIST IS EMPTY")
+                .font(.anton(16))
+                .foregroundColor(Leaf.paperWhite.opacity(0.75))
+            Text("Tap + ADD COMICS in the bottom corner to curate your reading order.")
+                .font(.archivo(12, weight: 500))
+                .foregroundColor(Leaf.creamMuted)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
     }
 
     private var addComicsSheet: some View {
         NavigationStack {
-            let availableComics = library.comics.filter { !listComics.contains($0) }
+            let q = addSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let availableComics = library.comics.filter { url in
+                guard !listComics.contains(url) else { return false }
+                if q.isEmpty { return true }
+                let title = url.deletingPathExtension().lastPathComponent.lowercased()
+                let series = library.metadata[url.lastPathComponent]?.series?.lowercased() ?? ""
+                return title.contains(q) || series.contains(q)
+            }
             ZStack {
                 settings.ground.ignoresSafeArea()
                 VStack(spacing: 0) {
+                    // Live search field matching Android's "SEARCH BY TITLE OR SERIES..."
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(addSearchQuery.isEmpty ? Leaf.creamMuted : Leaf.ochre)
+                        TextField("SEARCH BY TITLE OR SERIES…", text: $addSearchQuery)
+                            .font(.archivo(13, weight: 600))
+                            .foregroundColor(Leaf.cream)
+                            .tint(Leaf.ochre)
+                            .textInputAutocapitalization(.characters)
+                            .disableAutocorrection(true)
+                        if !addSearchQuery.isEmpty {
+                            Button { addSearchQuery = "" } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(Leaf.creamMuted)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(10)
+                    .background(Leaf.deepInkSurface)
+                    .clipShape(RoundedCornerShape(cornerRadius: 6))
+                    .overlay(
+                        RoundedCornerShape(cornerRadius: 6)
+                            .stroke(addSearchQuery.isEmpty ? Leaf.inkSoft : Leaf.ochre, lineWidth: 1.5)
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+
                     if availableComics.isEmpty {
-                        Text("All library comics are already in this list.")
-                            .font(.archivo(13))
-                            .foregroundColor(Leaf.creamMuted)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        VStack(spacing: 8) {
+                            Text(q.isEmpty ? "All library comics are already in this reading list." : "No comics matching “\(addSearchQuery)”")
+                                .font(.archivo(13))
+                                .foregroundColor(Leaf.creamMuted)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         List(availableComics, id: \.self) { url in
                             let isSelected = selectedToAdd.contains(url)
@@ -203,10 +461,26 @@ struct ReadingListDetailView: View {
                                 if isSelected { selectedToAdd.remove(url) }
                                 else { selectedToAdd.insert(url) }
                             } label: {
-                                HStack {
-                                    Text(url.deletingPathExtension().lastPathComponent)
-                                        .font(.archivo(13, weight: 600))
-                                        .foregroundColor(Leaf.cream)
+                                HStack(spacing: 12) {
+                                    SmallCoverThumb(url: url)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(url.deletingPathExtension().lastPathComponent)
+                                            .font(.archivo(13, weight: 700))
+                                            .foregroundColor(Leaf.cream)
+                                            .lineLimit(1)
+                                        if let s = library.metadata[url.lastPathComponent]?.series, !s.isEmpty {
+                                            let issuePart: String = {
+                                                if let n = library.metadata[url.lastPathComponent]?.issueNumber {
+                                                    return " #\(n.cleanNumber)"
+                                                }
+                                                return ""
+                                            }()
+                                            Text("\(s)\(issuePart)")
+                                                .font(.archivo(11))
+                                                .foregroundColor(Leaf.creamMuted)
+                                                .lineLimit(1)
+                                        }
+                                    }
                                     Spacer()
                                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                                         .font(.system(size: 18))
@@ -219,7 +493,7 @@ struct ReadingListDetailView: View {
                     }
                 }
             }
-            .navigationTitle("Add to \(currentList?.name ?? "List")")
+            .navigationTitle("Add Comics to List")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -228,13 +502,168 @@ struct ReadingListDetailView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add (\(selectedToAdd.count))") {
-                        library.addComicsToReadingList(listId: listId, urls: Array(selectedToAdd))
+                        let orderedSelection = library.comics.filter { selectedToAdd.contains($0) }
+                        library.addComicsToReadingList(listId: listId, urls: orderedSelection)
                         showAddComicsSheet = false
                     }
                     .foregroundColor(selectedToAdd.isEmpty ? Leaf.creamMuted : Leaf.ochre)
                     .disabled(selectedToAdd.isEmpty)
                 }
             }
+        }
+    }
+}
+
+/// Comic card inside `ReadingListDetailView` showing sequence badge (#1, #2),
+/// top-right quick-remove (x), and bottom-right Move Up / Move Down arrows.
+struct ReadingListComicCard: View {
+    let url: URL
+    let sequenceNumber: Int
+    let totalCount: Int
+    let metadata: ComicMetadataRecord?
+    let progress: Progress?
+    var columns: Int = 2
+    let onOpen: () -> Void
+    let onRemove: () -> Void
+    let onMoveUp: (() -> Void)?
+    let onMoveDown: (() -> Void)?
+
+    @State private var cover: UIImage?
+    @State private var pages = 0
+
+    private var displayTitle: String {
+        metadata?.title ?? url.deletingPathExtension().lastPathComponent
+    }
+
+    private var lastPage: Int { progress?.page ?? 0 }
+    private var pageCount: Int { progress?.total ?? pages }
+    private var started: Bool { lastPage > 0 }
+    private var progressFraction: Double {
+        guard pageCount > 0 else { return 0 }
+        if progress?.isCompleted == true { return 1.0 }
+        return min(max(Double(lastPage + 1) / Double(pageCount), 0), 1)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .bottom) {
+                Group {
+                    if let cover {
+                        Image(uiImage: cover)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        GeneratedCover(
+                            title: url.deletingPathExtension().lastPathComponent.uppercased(),
+                            columns: columns
+                        )
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+
+                // Top-left sequence badge (#1, #2, ...) and top-right quick remove (x)
+                VStack {
+                    HStack(alignment: .top) {
+                        Text("#\(sequenceNumber)")
+                            .font(.anton(columns >= 4 ? 8.5 : 10))
+                            .foregroundColor(Leaf.cream)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Leaf.ink.opacity(0.88))
+                            .clipShape(RoundedCornerShape(cornerRadius: 3))
+                            .overlay(
+                                RoundedCornerShape(cornerRadius: 3)
+                                    .stroke(Leaf.ochre, lineWidth: 1)
+                            )
+
+                        Spacer()
+
+                        Button(action: onRemove) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(Leaf.crimson)
+                                .frame(width: 22, height: 22)
+                                .background(Leaf.deepInk.opacity(0.85))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove from reading list")
+                    }
+                    Spacer()
+                }
+                .padding(6)
+
+                // Quick Move Up / Move Down buttons at bottom-right above the progress bar
+                if onMoveUp != nil || onMoveDown != nil {
+                    HStack(spacing: 4) {
+                        Spacer()
+                        if let onMoveUp {
+                            Button(action: onMoveUp) {
+                                Image(systemName: "arrow.up")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(Leaf.cream)
+                                    .frame(width: 22, height: 22)
+                                    .background(Leaf.deepInk.opacity(0.85))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Move earlier in reading order")
+                        }
+                        if let onMoveDown {
+                            Button(action: onMoveDown) {
+                                Image(systemName: "arrow.down")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(Leaf.cream)
+                                    .frame(width: 22, height: 22)
+                                    .background(Leaf.deepInk.opacity(0.85))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Move later in reading order")
+                        }
+                    }
+                    .padding(.trailing, 6)
+                    .padding(.bottom, columns >= 4 ? 10 : 12)
+                }
+
+                // Bottom progress bar
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Leaf.ink
+                        Leaf.ochre.frame(width: started ? geo.size.width * CGFloat(progressFraction) : 0)
+                    }
+                }
+                .frame(height: columns >= 4 ? 5 : 7)
+            }
+            .aspectRatio(0.7, contentMode: .fit)
+            .background(Leaf.deepInkSurface)
+            .clipShape(RoundedCornerShape(cornerRadius: 4))
+            .comicShadow(offset: columns >= 4 ? 3 : 5, color: .black.opacity(0.70), corner: 4)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onOpen()
+            }
+
+            Text(displayTitle)
+                .font(.archivo(columns >= 4 ? 10 : 12, weight: 800))
+                .foregroundColor(Leaf.paperWhite)
+                .lineLimit(2)
+                .padding(.top, columns >= 4 ? 6 : 9)
+
+            Text(started
+                 ? "\(Int((progressFraction * 100).rounded()))% · pg \(lastPage + 1)/\(pageCount)"
+                 : "\(pageCount) pages")
+                .font(.archivo(columns >= 4 ? 8.5 : 9.5, weight: 500))
+                .foregroundColor(started ? Leaf.ochre : Leaf.creamMuted)
+                .lineLimit(1)
+                .padding(.top, 2)
+        }
+        .task {
+            let loaded = await CoverLoader.load(for: url)
+            cover = loaded.cover
+            pages = loaded.pageCount
+            ReadingProgress.resyncTotalIfNeeded(url, actualTotal: loaded.pageCount)
         }
     }
 }

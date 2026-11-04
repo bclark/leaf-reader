@@ -487,6 +487,9 @@ class LibraryViewModel(
         }
     }
 
+    fun observeReadingList(listId: Long): Flow<ReadingListEntity?> =
+        repository.observeReadingList(listId)
+
     fun observeComicsForList(listId: Long): Flow<List<ComicEntity>> =
         repository.observeComicsForList(listId)
 
@@ -508,6 +511,29 @@ class LibraryViewModel(
     fun removeComicFromReadingList(listId: Long, comicId: Long) {
         viewModelScope.launch {
             repository.removeComicFromReadingList(listId, comicId)
+        }
+    }
+
+    fun reorderReadingList(listId: Long, comicIdsInOrder: List<Long>) {
+        viewModelScope.launch {
+            repository.reorderReadingList(listId, comicIdsInOrder)
+        }
+    }
+
+    fun moveReadingListItem(listId: Long, comicId: Long, direction: Int) {
+        viewModelScope.launch {
+            repository.moveReadingListItem(listId, comicId, direction)
+        }
+    }
+
+    fun markReadingListRead(listId: Long, read: Boolean) {
+        viewModelScope.launch {
+            val comics = repository.observeComicsForList(listId).firstOrNull() ?: return@launch
+            for (comic in comics) {
+                val newPage = if (read) (comic.pageCount - 1).coerceAtLeast(0) else 0
+                repository.saveProgress(comic.id, newPage, 0)
+            }
+            _message.value = if (read) "Marked all comics in list as read" else "Marked all comics in list as unread"
         }
     }
 

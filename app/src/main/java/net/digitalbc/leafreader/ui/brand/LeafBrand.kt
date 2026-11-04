@@ -39,6 +39,13 @@ import net.digitalbc.leafreader.ui.theme.CreamMuted
 import net.digitalbc.leafreader.ui.theme.Crimson
 import net.digitalbc.leafreader.ui.theme.Ink
 import net.digitalbc.leafreader.ui.theme.Ochre
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Book
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 
 /* ---- Signature texture & motifs ------------------------------------------------ */
@@ -291,3 +298,56 @@ fun PageCoin(
         }
     }
 }
+
+/**
+ * Custom book-themed status icon for "Mark All as Read" (open book with checkmark badge)
+ * vs "Mark All as Unread" (closed book with minus/reset badge).
+ */
+@Composable
+fun BookStatusBadgeIcon(
+    isAllCompleted: Boolean,
+    bookTint: Color,
+    badgeColor: Color,
+    badgeGlyphTint: Color,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier.size(22.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = if (isAllCompleted) {
+                Icons.Default.Book
+            } else {
+                Icons.AutoMirrored.Filled.MenuBook
+            },
+            contentDescription = if (isAllCompleted) "Mark all as unread" else "Mark all as read",
+            tint = bookTint,
+            modifier = Modifier
+                .size(18.dp)
+                .align(Alignment.TopStart)
+                .offset(x = 1.dp, y = 1.dp),
+        )
+        Box(
+            modifier = Modifier
+                .size(11.5.dp)
+                .align(Alignment.BottomEnd)
+                .clip(CircleShape)
+                .background(badgeColor)
+                .border(1.dp, Ink, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (isAllCompleted) {
+                    Icons.Default.Remove
+                } else {
+                    Icons.Default.Check
+                },
+                contentDescription = null,
+                tint = badgeGlyphTint,
+                modifier = Modifier.size(8.dp),
+            )
+        }
+    }
+}
+

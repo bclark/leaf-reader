@@ -8,19 +8,22 @@ public struct ComicMetadataRecord: Codable, Equatable {
     public var issueNumber: Float?
     public var year: Int?
     public var title: String?
+    public var userModified: Bool?
 
     public init(
         series: String? = nil,
         volume: String? = nil,
         issueNumber: Float? = nil,
         year: Int? = nil,
-        title: String? = nil
+        title: String? = nil,
+        userModified: Bool? = nil
     ) {
         self.series = series
         self.volume = volume
         self.issueNumber = issueNumber
         self.year = year
         self.title = title
+        self.userModified = userModified
     }
 }
 
@@ -59,6 +62,15 @@ public enum ComicMetadataStore {
         lock.unlock()
     }
 
+    public static func clear(_ url: URL) {
+        lock.lock()
+        var map = inMemoryMetadata ?? loadLocked()
+        map.removeValue(forKey: url.lastPathComponent)
+        inMemoryMetadata = map
+        saveLocked(map)
+        lock.unlock()
+    }
+
     public static func updateSeries(for urls: [URL], series: String?, volume: String?) {
         lock.lock()
         var map = inMemoryMetadata ?? loadLocked()
@@ -68,10 +80,60 @@ public enum ComicMetadataStore {
             var existing = map[url.lastPathComponent] ?? parseDefault(for: url)
             existing.series = cleanSeries
             existing.volume = cleanVolume
+            existing.userModified = true
             map[url.lastPathComponent] = existing
         }
         inMemoryMetadata = map
         saveLocked(map)
+        lock.unlock()
+    }
+
+    /// Backfills missing series/issue metadata for existing library comics using ComicInfo.xml
+    /// and filename heuristics, without overwriting explicit user series edits.
+    public static func backfillMetadataIfNeeded(for urls: [URL]) {
+        lock.lock()
+        var map = inMemoryMetadata ?? loadLocked()
+        var dirty = false
+        for url in urls {
+            let filename = url.lastPathComponent
+            if var existing = map[filename] {
+                if existing.userModified == true {
+                    if existing.issueNumber == nil {
+                        let parsed = parseDefault(for: url)
+                        if let issueNum = parsed.issueNumber {
+                            existing.issueNumber = issueNum
+                            map[filename] = existing
+                            dirty = true
+                        }
+                    }
+                    continue
+                }
+                if existing.series == nil || existing.issueNumber == nil {
+                    let parsed = parseDefault(for: url)
+                    let newSeries = existing.series ?? parsed.series
+                    let newVolume = existing.volume ?? parsed.volume
+                    let newIssue = existing.issueNumber ?? parsed.issueNumber
+                    let newYear = existing.year ?? parsed.year
+                    let newTitle = existing.title ?? parsed.title
+                    if newSeries != existing.series || newVolume != existing.volume || newIssue != existing.issueNumber {
+                        existing.series = newSeries
+                        existing.volume = newVolume
+                        existing.issueNumber = newIssue
+                        existing.year = newYear
+                        existing.title = newTitle
+                        map[filename] = existing
+                        dirty = true
+                    }
+                }
+            } else {
+                map[filename] = parseDefault(for: url)
+                dirty = true
+            }
+        }
+        if dirty {
+            inMemoryMetadata = map
+            saveLocked(map)
+        }
         lock.unlock()
     }
 
@@ -86,33 +148,32 @@ public enum ComicMetadataStore {
 
     public static func parseDefault(for url: URL) -> ComicMetadataRecord {
         let filename = url.lastPathComponent
-        // 1. Try reading ComicInfo.xml if CBZ
+        let fileMeta = ComicMetadataParser.shared.parseFilename(filename: filename)
+
+        // 1. Try reading ComicInfo.xml if CBZ and merge with filename fallback
         if let archive = try? CbzArchive(url: url), let xml = archive.readComicInfoXml() {
-            let sharedMeta = ComicMetadataParser.shared.parseComicInfoXml(xml: xml)
-            let series = sharedMeta.series
-            let volume = sharedMeta.volume
-            let issueNum = sharedMeta.issueNumber?.floatValue
-            let year = sharedMeta.year?.intValue
-            let title = sharedMeta.title ?? url.deletingPathExtension().lastPathComponent
-            if series != nil || issueNum != nil {
-                return ComicMetadataRecord(
-                    series: series,
-                    volume: volume,
-                    issueNumber: issueNum,
-                    year: year,
-                    title: title
-                )
-            }
+            let xmlMeta = ComicMetadataParser.shared.parseComicInfoXml(xml: xml)
+            let series = xmlMeta.series ?? fileMeta.series
+            let volume = xmlMeta.volume ?? fileMeta.volume
+            let issueNum = xmlMeta.issueNumber?.floatValue ?? fileMeta.issueNumber?.floatValue
+            let year = xmlMeta.year?.intValue ?? fileMeta.year?.intValue
+            let title = xmlMeta.title ?? fileMeta.title ?? url.deletingPathExtension().lastPathComponent
+            return ComicMetadataRecord(
+                series: series,
+                volume: volume,
+                issueNumber: issueNum,
+                year: year,
+                title: title
+            )
         }
 
         // 2. Fall back to filename heuristic parsing via shared parser
-        let sharedMeta = ComicMetadataParser.shared.parseFilename(filename: filename)
         return ComicMetadataRecord(
-            series: sharedMeta.series,
-            volume: sharedMeta.volume,
-            issueNumber: sharedMeta.issueNumber?.floatValue,
-            year: sharedMeta.year?.intValue,
-            title: sharedMeta.title ?? url.deletingPathExtension().lastPathComponent
+            series: fileMeta.series,
+            volume: fileMeta.volume,
+            issueNumber: fileMeta.issueNumber?.floatValue,
+            year: fileMeta.year?.intValue,
+            title: fileMeta.title ?? url.deletingPathExtension().lastPathComponent
         )
     }
 

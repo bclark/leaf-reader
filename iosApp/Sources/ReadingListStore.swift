@@ -101,6 +101,26 @@ public enum ReadingListStore {
         lock.unlock()
     }
 
+    /// Moves a comic up (`direction < 0`) or down (`direction > 0`) in the reading list's sequential order.
+    public static func moveComic(in listId: String, filename: String, direction: Int) {
+        guard direction != 0 else { return }
+        lock.lock()
+        var lists = inMemoryLists ?? loadLocked()
+        if let idx = lists.firstIndex(where: { $0.id == listId }) {
+            var items = lists[idx].itemFilenames
+            if let itemIdx = items.firstIndex(of: filename) {
+                let targetIdx = itemIdx + (direction < 0 ? -1 : 1)
+                if items.indices.contains(targetIdx) {
+                    items.swapAt(itemIdx, targetIdx)
+                    lists[idx].itemFilenames = items
+                    inMemoryLists = lists
+                    saveLocked(lists)
+                }
+            }
+        }
+        lock.unlock()
+    }
+
     public static func reorderComics(in listId: String, filenames: [String]) {
         lock.lock()
         var lists = inMemoryLists ?? loadLocked()

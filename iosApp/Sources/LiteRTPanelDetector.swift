@@ -1,4 +1,6 @@
+#if canImport(TensorFlowLite)
 import TensorFlowLite
+#endif
 import UIKit
 import LeafShared
 
@@ -7,6 +9,7 @@ import LeafShared
 /// + pipeline — so Android and iOS produce identical detections, ordering, and merge/divide
 /// planning from the same weights. The model's I/O tensors are float32 ([1,640,640,3] in,
 /// [1,300,6] out); int8 quantization is internal to the weights.
+#if canImport(TensorFlowLite)
 final class LiteRTPanelDetector {
     private let interpreter: Interpreter
     // The TFLite interpreter is not thread-safe; serialize inference (matching Android's lock) so
@@ -158,3 +161,11 @@ private extension Data {
         return out
     }
 }
+#else
+final class LiteRTPanelDetector {
+    init?() { return nil }
+    func zoomRegions(for image: UIImage, rightToLeft: Bool) -> [Panel] {
+        return [Panel.companion.FULL_PAGE]
+    }
+}
+#endif

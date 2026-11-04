@@ -175,6 +175,7 @@ fun LibraryScreen(
     viewModel: LibraryViewModel,
     onOpenComic: (Long) -> Unit,
     onOpenSeries: (String, String?) -> Unit,
+    onOpenReadingList: (Long) -> Unit = {},
     onOpenMenu: () -> Unit,
     onOpenDrive: () -> Unit,
 ) {
@@ -687,7 +688,7 @@ fun LibraryScreen(
                                 item = item,
                                 columns = actualColumns,
                                 onClick = {
-                                    activeReadingList = item.readingList
+                                    onOpenReadingList(item.readingList.id)
                                 },
                             )
                         }
@@ -1158,14 +1159,13 @@ fun LibraryScreen(
                         if (createListNameInput.isNotBlank()) {
                             val listName = createListNameInput.trim()
                             viewModel.createReadingList(listName) { newListId ->
-                                activeReadingList = ReadingListEntity(id = newListId, name = listName)
-                                showAddComicsToListDialog = true
+                                onOpenReadingList(newListId)
                             }
                             showCreateListDialog = false
                             createListNameInput = ""
                         }
                     }) {
-                        Text("CREATE & ADD COMICS", color = Ochre, fontWeight = FontWeight.Bold)
+                        Text("CREATE & OPEN", color = Ochre, fontWeight = FontWeight.Bold)
                     }
                 }
             },

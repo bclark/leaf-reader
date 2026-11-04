@@ -11,7 +11,17 @@ struct Progress: Codable, Equatable {
     // still decodes; nil means "never chosen for this comic" → fall back to the global default.
     var rtl: Bool?
 
-    var fraction: Double { total > 1 ? Double(page) / Double(total - 1) : 0 }
+    var isCompleted: Bool {
+        guard total > 0 else { return false }
+        return total == 1 ? page >= 1 : page >= total - 1
+    }
+
+    var fraction: Double {
+        if isCompleted { return 1.0 }
+        guard total > 1 else { return 0 }
+        return min(max(Double(page) / Double(total - 1), 0), 1)
+    }
+
     var percent: Int { Int((fraction * 100).rounded()) }
 }
 
@@ -137,6 +147,10 @@ enum ReadingProgress {
         load()[url.lastPathComponent]
     }
 
+    static func isCompleted(_ url: URL) -> Bool {
+        get(url)?.isCompleted ?? false
+    }
+
     /// Effective reading direction for a comic: its saved choice if any, else the global default.
     static func readingDirection(_ url: URL) -> Bool {
         get(url)?.rtl ?? ReadingPrefs.defaultRightToLeft
@@ -162,8 +176,13 @@ enum ReadingProgress {
         let filename = url.lastPathComponent
         if var current = inMemoryProgress?[filename] {
             if current.total != actualTotal || current.page >= actualTotal {
+                let wasCompleted = current.isCompleted
                 current.total = actualTotal
-                current.page = min(max(current.page, 0), actualTotal - 1)
+                if wasCompleted {
+                    current.page = max(0, actualTotal - 1)
+                } else {
+                    current.page = min(max(current.page, 0), actualTotal - 1)
+                }
                 inMemoryProgress?[filename] = current
                 lock.unlock()
                 scheduleSave()

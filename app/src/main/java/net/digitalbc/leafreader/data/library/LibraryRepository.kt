@@ -60,6 +60,9 @@ class LibraryRepository(
     val allReadingListItems: Flow<List<ReadingListItemEntity>> =
         readingListDao?.observeAllItems() ?: emptyFlow()
 
+    fun observeReadingList(listId: Long): Flow<ReadingListEntity?> =
+        readingListDao?.observeById(listId) ?: emptyFlow()
+
     fun observeComicsForList(listId: Long): Flow<List<ComicEntity>> =
         readingListDao?.observeComicsForList(listId) ?: emptyFlow()
 
@@ -85,6 +88,22 @@ class LibraryRepository(
 
     suspend fun removeComicFromReadingList(listId: Long, comicId: Long) = withContext(Dispatchers.IO) {
         readingListDao?.removeItem(listId, comicId)
+    }
+
+    suspend fun reorderReadingList(listId: Long, comicIdsInOrder: List<Long>) = withContext(Dispatchers.IO) {
+        readingListDao?.reorderItems(listId, comicIdsInOrder)
+    }
+
+    suspend fun moveReadingListItem(listId: Long, comicId: Long, direction: Int) = withContext(Dispatchers.IO) {
+        val items = readingListDao?.getAllItems()?.filter { it.listId == listId }?.sortedBy { it.sortOrder } ?: return@withContext
+        val currentIndex = items.indexOfFirst { it.comicId == comicId }
+        if (currentIndex == -1) return@withContext
+        val newIndex = (currentIndex + direction).coerceIn(0, items.size - 1)
+        if (newIndex == currentIndex) return@withContext
+        val mutable = items.map { it.comicId }.toMutableList()
+        mutable.removeAt(currentIndex)
+        mutable.add(newIndex, comicId)
+        readingListDao.reorderItems(listId, mutable)
     }
 
     suspend fun updateComicMetadata(id: Long, series: String?, volume: String?, issueNumber: Float?) = withContext(Dispatchers.IO) {

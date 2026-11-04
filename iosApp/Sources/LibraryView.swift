@@ -13,6 +13,12 @@ private struct OpenSeries: Identifiable {
     var id: String { "\(name)__\(volume ?? "")" }
 }
 
+/// Identifiable wrapper so a reading list detail can be presented via `.fullScreenCover(item:)`.
+private struct OpenReadingList: Identifiable {
+    let id: String
+    var showAddComics: Bool = false
+}
+
 /// The Leaf library — pulp-comic identity matching Android: ink ground with a halftone wash,
 /// brand mark, Ochre badges, filter pills, interactive series neat stacks, reading lists,
 /// and configurable grid columns.
@@ -45,7 +51,7 @@ struct LibraryView: View {
     // Detail screens
     @State private var openComic: OpenComic?
     @State private var openSeries: OpenSeries?
-    @State private var openListId: String?
+    @State private var openReadingList: OpenReadingList?
 
     // Search mode & query
     @State private var isSearchOpen = false
@@ -94,6 +100,34 @@ struct LibraryView: View {
                     }
                 }
 
+                // Extended "+ CREATE LIST" FAB in the LISTS tab matching Android
+                if !isEditMode && selectedFilter == .readingLists {
+                    HStack {
+                        Spacer()
+                        Button {
+                            newListNameInput = ""
+                            showCreateListAlert = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 13, weight: .bold))
+                                Text("CREATE LIST")
+                                    .font(.anton(13))
+                            }
+                            .foregroundColor(Leaf.ink)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(Leaf.ochre)
+                            .clipShape(Capsule())
+                            .comicShadow(offset: 3, color: .black.opacity(0.75), corner: 22)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Create Reading List")
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
+                }
+
                 if isEditMode {
                     editActionBar
                 }
@@ -117,22 +151,18 @@ struct LibraryView: View {
                 .environmentObject(settings)
                 .onDisappear { library.refresh() }
             }
-            .fullScreenCover(isPresented: Binding(
-                get: { openListId != nil },
-                set: { if !$0 { openListId = nil } }
-            )) {
-                if let listId = openListId {
-                    ReadingListDetailView(
-                        listId: listId,
-                        library: library,
-                        onOpenComic: { url in
-                            openComic = OpenComic(url: url)
-                        },
-                        onDismiss: { openListId = nil }
-                    )
-                    .environmentObject(settings)
-                    .onDisappear { library.refresh() }
-                }
+            .fullScreenCover(item: $openReadingList) { listTarget in
+                ReadingListDetailView(
+                    listId: listTarget.id,
+                    library: library,
+                    onOpenComic: { url in
+                        openComic = OpenComic(url: url)
+                    },
+                    onDismiss: { openReadingList = nil },
+                    initialShowAddComics: listTarget.showAddComics
+                )
+                .environmentObject(settings)
+                .onDisappear { library.refresh() }
             }
             .fullScreenCover(isPresented: $showMenu) {
                 MenuView()
@@ -156,19 +186,23 @@ struct LibraryView: View {
                 addToListSheet
             }
             .alert("Create Reading List", isPresented: $showCreateListAlert) {
-                TextField("List Name", text: $newListNameInput)
+                TextField("e.g. Summer Crossover Event", text: $newListNameInput)
                 Button("Cancel", role: .cancel) {}
-                Button("Create") {
+                Button(selectedComics.isEmpty && !library.comics.isEmpty ? "Create & Add Comics" : "Create") {
                     let name = newListNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !name.isEmpty {
-                        library.createReadingList(name: name, urls: Array(selectedComics))
-                        newListNameInput = ""
-                        if isEditMode {
-                            isEditMode = false
-                            selectedComics.removeAll()
-                        }
+                    guard !name.isEmpty else { return }
+                    let preselected = Array(selectedComics)
+                    let created = library.createReadingList(name: name, urls: preselected)
+                    newListNameInput = ""
+                    if isEditMode {
+                        isEditMode = false
+                        selectedComics.removeAll()
+                    } else if preselected.isEmpty && !library.comics.isEmpty {
+                        openReadingList = OpenReadingList(id: created.id, showAddComics: true)
                     }
                 }
+            } message: {
+                Text("Group comics in any order to track a custom reading storyline.")
             }
             .alert("Import failed", isPresented: Binding(
                 get: { library.importError != nil },
@@ -553,7 +587,16 @@ struct LibraryView: View {
                                 isEditMode: isEditMode,
                                 isSelected: issues.allSatisfy { selectedComics.contains($0) },
                                 onOpenSeries: {
-                                    openSeries = OpenSeries(name: name, volume: volume)
+                                    if isEditMode {
+                                        let allInSeriesSelected = issues.allSatisfy { selectedComics.contains($0) }
+                                        if allInSeriesSelected {
+                                            issues.forEach { selectedComics.remove($0) }
+                                        } else {
+                                            issues.forEach { selectedComics.insert($0) }
+                                        }
+                                    } else {
+                                        openSeries = OpenSeries(name: name, volume: volume)
+                                    }
                                 }
                             )
                             .contextMenu {
@@ -577,12 +620,12 @@ struct LibraryView: View {
                                 itemCount: count,
                                 columns: cols,
                                 onOpenList: {
-                                    openListId = list.id
+                                    openReadingList = OpenReadingList(id: list.id, showAddComics: false)
                                 }
                             )
                             .contextMenu {
                                 Button {
-                                    openListId = list.id
+                                    openReadingList = OpenReadingList(id: list.id, showAddComics: false)
                                 } label: {
                                     Label("Open List", systemImage: "list.bullet")
                                 }
@@ -612,7 +655,7 @@ struct LibraryView: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 10)
-                .padding(.bottom, isEditMode ? 96 : 48)
+                .padding(.bottom, isEditMode ? 96 : (selectedFilter == .readingLists ? 84 : 48))
             }
         }
     }
@@ -634,16 +677,18 @@ struct LibraryView: View {
         }
     }
 
-    // Floating batch edit action bar at the bottom
+    // Floating batch edit action bar at the bottom matching Android's bottom Bar
     private var editActionBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(selectedComics.count) SELECTED")
-                    .font(.anton(15))
+                Text("\(selectedComics.count) \(selectedComics.count == 1 ? "COMIC" : "COMICS") SELECTED")
+                    .font(.anton(14))
                     .foregroundColor(Leaf.paperWhite)
-                Text("Group, add to list, or delete")
-                    .font(.archivo(11))
+                    .lineLimit(1)
+                Text("Group into series, add to list, or delete")
+                    .font(.archivo(10.5))
                     .foregroundColor(Leaf.creamMuted)
+                    .lineLimit(1)
             }
 
             Spacer()
@@ -653,10 +698,10 @@ struct LibraryView: View {
                 seriesInputVolume = ""
                 showSetSeriesSheet = true
             } label: {
-                Text("SERIES")
-                    .font(.anton(12))
+                Text("SET SERIES")
+                    .font(.anton(11))
                     .foregroundColor(Leaf.ink)
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, 9)
                     .padding(.vertical, 8)
                     .background(selectedComics.isEmpty ? Leaf.ochre.opacity(0.4) : Leaf.ochre)
                     .clipShape(RoundedCornerShape(cornerRadius: 3))
@@ -667,10 +712,10 @@ struct LibraryView: View {
             Button {
                 showAddToListSheet = true
             } label: {
-                Text("LIST")
-                    .font(.anton(12))
+                Text("ADD TO LIST")
+                    .font(.anton(11))
                     .foregroundColor(Leaf.ink)
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, 9)
                     .padding(.vertical, 8)
                     .background(selectedComics.isEmpty ? Leaf.ochre.opacity(0.4) : Leaf.ochre)
                     .clipShape(RoundedCornerShape(cornerRadius: 3))
@@ -682,9 +727,9 @@ struct LibraryView: View {
                 showBatchDeleteAlert = true
             } label: {
                 Text("DELETE")
-                    .font(.anton(12))
+                    .font(.anton(11))
                     .foregroundColor(Leaf.paperWhite)
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 10)
                     .padding(.vertical, 8)
                     .background(selectedComics.isEmpty ? Leaf.crimson.opacity(0.4) : Leaf.crimson)
                     .clipShape(RoundedCornerShape(cornerRadius: 3))
@@ -692,7 +737,7 @@ struct LibraryView: View {
             .buttonStyle(.plain)
             .disabled(selectedComics.isEmpty)
         }
-        .padding(.horizontal, 18)
+        .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .background(Leaf.deepInkSurface.ignoresSafeArea(edges: [.bottom, .horizontal]))
         .overlay(
@@ -839,7 +884,7 @@ struct LibraryView: View {
 }
 
 /// Interactive neat stack card matching Android's ComicStackCard.
-/// Supports multi-layer paper card styling and tapping or swiping to cycle through covers in the stack!
+/// Supports 3-layer paper card styling with bottom-left issue badge and vertical downward cover peel!
 struct ComicStackCard: View {
     let seriesName: String
     let volume: String?
@@ -854,42 +899,103 @@ struct ComicStackCard: View {
     let onOpenSeries: () -> Void
 
     @State private var topIndex: Int = 0
+    @State private var didInitTopIndex = false
+    @State private var peelOffsetY: CGFloat = 0
+    @State private var cardHeight: CGFloat = 220
+
     @State private var topCoverImage: UIImage?
+    @State private var layer2CoverImage: UIImage?
+    @State private var layer3CoverImage: UIImage?
+
+    private var count: Int { max(issues.count, 1) }
 
     private var currentTopComic: URL {
         guard !issues.isEmpty else { return topCoverComic }
-        let idx = (topIndex % issues.count + issues.count) % issues.count
+        let idx = (topIndex % count + count) % count
         return issues[idx]
     }
 
-    private var currentIssueNum: String {
-        guard !issues.isEmpty else { return "1" }
-        let idx = (topIndex % issues.count + issues.count) % issues.count
-        return "\(idx + 1)"
+    private var layer2Comic: URL? {
+        guard issues.count >= 2 else { return nil }
+        let idx = ((topIndex + 1) % count + count) % count
+        return issues[idx]
+    }
+
+    private var layer3Comic: URL? {
+        guard issues.count >= 3 else { return nil }
+        let idx = ((topIndex + 2) % count + count) % count
+        return issues[idx]
+    }
+
+    private var currentIssueNum: Int {
+        guard !issues.isEmpty else { return 1 }
+        return (topIndex % count + count) % count + 1
+    }
+
+    private var layer2IssueNum: Int {
+        guard !issues.isEmpty else { return 2 }
+        return ((topIndex + 1) % count + count) % count + 1
+    }
+
+    private var peelProgress: CGFloat {
+        guard cardHeight > 0 else { return 0 }
+        return min(max(peelOffsetY / cardHeight, 0), 1)
+    }
+
+    private func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat {
+        a + (b - a) * t
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .bottom) {
-                // Layer 3 (for 3+ issues)
+                // Neat Layer 3 (Back) - for 3+ issues
                 if totalIssues >= 3 {
-                    RoundedCornerShape(cornerRadius: 4)
-                        .fill(Leaf.inkSoft.opacity(0.85))
-                        .aspectRatio(0.7, contentMode: .fit)
-                        .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Leaf.ink, lineWidth: 1.5))
-                        .offset(y: -8)
+                    ZStack {
+                        Leaf.inkSoft
+                        if let layer3CoverImage {
+                            Image(uiImage: layer3CoverImage)
+                                .resizable()
+                                .scaledToFill()
+                                .opacity(0.85)
+                        }
+                    }
+                    .aspectRatio(0.7, contentMode: .fit)
+                    .clipShape(RoundedCornerShape(cornerRadius: 4))
+                    .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Leaf.ink, lineWidth: 1.5))
+                    .scaleEffect(x: lerp(0.93, 0.96, peelProgress), y: 1.0, anchor: .center)
+                    .offset(y: lerp(-8, -4, peelProgress))
                 }
 
-                // Layer 2 (for 2+ issues)
+                // Neat Layer 2 (Middle) - for 2+ issues
                 if totalIssues >= 2 {
-                    RoundedCornerShape(cornerRadius: 4)
-                        .fill(Leaf.inkSoft)
-                        .aspectRatio(0.7, contentMode: .fit)
-                        .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Leaf.ink, lineWidth: 2))
-                        .offset(y: -4)
+                    ZStack(alignment: .bottom) {
+                        Group {
+                            if let layer2CoverImage {
+                                Image(uiImage: layer2CoverImage)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .opacity(Double(lerp(0.92, 1.0, peelProgress)))
+                            } else {
+                                GeneratedCover(title: seriesName.uppercased(), columns: columns)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
+
+                        stackBadge(issueNumber: layer2IssueNum)
+
+                        progressBarView
+                    }
+                    .aspectRatio(0.7, contentMode: .fit)
+                    .background(Leaf.deepInkSurface)
+                    .clipShape(RoundedCornerShape(cornerRadius: 4))
+                    .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Leaf.ink, lineWidth: 2))
+                    .scaleEffect(x: lerp(0.96, 1.0, peelProgress), y: 1.0, anchor: .center)
+                    .offset(y: lerp(-4, 0, peelProgress))
                 }
 
-                // Top Layer Cover
+                // Front Layer Cover
                 ZStack(alignment: .bottom) {
                     Group {
                         if let topCoverImage {
@@ -901,79 +1007,140 @@ struct ComicStackCard: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
 
-                    // Top Stack Badge
-                    HStack {
-                        Text(totalIssues > 1 ? "ISSUE \(currentIssueNum) OF \(totalIssues)" : (volume ?? "SERIES"))
-                            .font(.anton(columns >= 4 ? 9 : 10.5))
-                            .foregroundColor(Leaf.ink)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(Leaf.ochre)
-                            .clipShape(RoundedCornerShape(cornerRadius: 2))
-                        Spacer()
-                    }
-                    .padding(6)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    stackBadge(issueNumber: currentIssueNum)
 
-                    // Composite progress bar inside bottom edge
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Leaf.ink
-                            Leaf.ochre.frame(width: geo.size.width * CGFloat(progressFraction))
-                        }
-                    }
-                    .frame(height: columns >= 4 ? 5 : 7)
+                    progressBarView
                 }
                 .aspectRatio(0.7, contentMode: .fit)
-                .background(Leaf.inkSoft)
+                .background(
+                    GeometryReader { geo in
+                        Leaf.deepInkSurface
+                            .onAppear {
+                                if geo.size.height > 0 { cardHeight = geo.size.height }
+                            }
+                            .onChange(of: geo.size.height) { newHeight in
+                                if newHeight > 0 { cardHeight = newHeight }
+                            }
+                    }
+                )
                 .clipShape(RoundedCornerShape(cornerRadius: 4))
                 .overlay(
                     RoundedCornerShape(cornerRadius: 4)
                         .stroke(isSelected ? Leaf.ochre : Leaf.ink, lineWidth: isSelected ? 3 : (columns >= 4 ? 2 : 3))
                 )
                 .comicShadow(offset: columns >= 4 ? 3 : 5, color: .black.opacity(0.70), corner: 4)
+                .offset(y: peelOffsetY)
+                .opacity(peelProgress > 0.75 ? Double(max(0, 1 - (peelProgress - 0.75) / 0.25)) : 1.0)
             }
             .aspectRatio(0.7, contentMode: .fit)
-            .padding(.top, totalIssues >= 3 ? 8 : (totalIssues >= 2 ? 4 : 0))
+            .padding(.top, totalIssues >= 3 ? 10 : (totalIssues >= 2 ? 5 : 0))
+            .contentShape(Rectangle())
             .onTapGesture {
                 onOpenSeries()
             }
-            .gesture(
-                DragGesture(minimumDistance: 24)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 12)
+                    .onChanged { value in
+                        guard totalIssues > 1 else { return }
+                        let dy = value.translation.height
+                        let dx = value.translation.width
+                        // Only peel on downward vertical drags so horizontal/upward scrolls pass through
+                        if dy > 0 && abs(dy) > abs(dx) {
+                            peelOffsetY = min(dy, cardHeight * 1.15)
+                        }
+                    }
                     .onEnded { value in
-                        if totalIssues > 1 {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                if value.translation.width < 0 {
-                                    topIndex += 1
-                                } else {
-                                    topIndex -= 1
-                                }
+                        guard totalIssues > 1, peelOffsetY > 0 else { return }
+                        let dy = value.translation.height
+                        let predictedDy = value.predictedEndTranslation.height
+                        let threshold = cardHeight * 0.35
+                        if dy > threshold || (predictedDy - dy) > 120 {
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                peelOffsetY = cardHeight * 1.15
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                                topIndex = (topIndex + 1) % max(issues.count, 1)
+                                peelOffsetY = 0
+                            }
+                        } else {
+                            withAnimation(.spring(response: 0.24, dampingFraction: 0.78)) {
+                                peelOffsetY = 0
                             }
                         }
                     }
             )
 
-            // Series Name in Anton
+            // Series Name in Archivo ExtraBold
             Text(seriesName.uppercased())
-                .font(.anton(columns >= 4 ? 12 : 14))
+                .font(.archivo(columns >= 4 ? 10.5 : 12, weight: 800))
                 .foregroundColor(Leaf.cream)
-                .lineLimit(1)
+                .lineLimit(2)
                 .padding(.top, columns >= 4 ? 6 : 9)
 
             // Subtitle: X issues · Y unread
             Text("\(totalIssues) issues · \(unreadIssues > 0 ? "\(unreadIssues) unread" : "all read")")
-                .font(.archivo(columns >= 4 ? 8.5 : 9.5))
+                .font(.archivo(columns >= 4 ? 8.5 : 9.5, weight: 600))
                 .foregroundColor(unreadIssues > 0 ? Leaf.ochre : Leaf.creamMuted)
                 .lineLimit(1)
                 .padding(.top, 2)
         }
+        .onAppear {
+            if !didInitTopIndex {
+                didInitTopIndex = true
+                if let idx = issues.firstIndex(of: topCoverComic) {
+                    topIndex = idx
+                }
+            }
+        }
+        .onChange(of: topCoverComic) { newTop in
+            if let idx = issues.firstIndex(of: newTop) {
+                topIndex = idx
+            }
+        }
         .task(id: currentTopComic) {
             topCoverImage = await CoverLoader.load(for: currentTopComic).cover
+            if let l2 = layer2Comic {
+                layer2CoverImage = await CoverLoader.load(for: l2).cover
+            }
+            if let l3 = layer3Comic {
+                layer3CoverImage = await CoverLoader.load(for: l3).cover
+            }
         }
+    }
+
+    @ViewBuilder
+    private func stackBadge(issueNumber: Int) -> some View {
+        HStack {
+            Text(totalIssues > 1 ? "ISSUE #\(issueNumber) OF \(totalIssues)" : (volume ?? "1 ISSUE").uppercased())
+                .font(.anton(columns >= 4 ? 7.5 : 8.5))
+                .foregroundColor(Leaf.cream)
+                .padding(.horizontal, columns >= 4 ? 4 : 5)
+                .padding(.vertical, 2)
+                .background(Leaf.ink.opacity(0.85))
+                .clipShape(RoundedCornerShape(cornerRadius: 3))
+                .overlay(
+                    RoundedCornerShape(cornerRadius: 3)
+                        .stroke(Leaf.ochre, lineWidth: 1)
+                )
+            Spacer()
+        }
+        .padding(.leading, columns >= 4 ? 4 : 6)
+        .padding(.bottom, columns >= 4 ? 9 : 13)
+    }
+
+    private var progressBarView: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Leaf.ink
+                Leaf.ochre.frame(width: geo.size.width * CGFloat(progressFraction))
+            }
+        }
+        .frame(height: columns >= 4 ? 5 : 7)
     }
 }
 
-/// Reading List Card displayed in the library grid.
+/// Reading List Card displayed in the library grid — "Messy Stack" visual with rotated layers
+/// and downward cover peel matching Android's `ReadingListCard`.
 struct ReadingListCard: View {
     let list: ReadingListRecord
     let previewUrls: [URL]
@@ -981,30 +1148,122 @@ struct ReadingListCard: View {
     var columns: Int = 2
     let onOpenList: () -> Void
 
-    @State private var previewCover: UIImage?
+    @State private var topIndex: Int = 0
+    @State private var peelOffsetY: CGFloat = 0
+    @State private var cardHeight: CGFloat = 220
+
+    @State private var topCoverImage: UIImage?
+    @State private var layer2CoverImage: UIImage?
+    @State private var layer3CoverImage: UIImage?
+
+    private var count: Int { max(previewUrls.count, 1) }
+
+    private var currentTopComic: URL? {
+        guard !previewUrls.isEmpty else { return nil }
+        let idx = (topIndex % count + count) % count
+        return previewUrls[idx]
+    }
+
+    private var layer2Comic: URL? {
+        guard previewUrls.count >= 2 else { return nil }
+        let idx = ((topIndex + 1) % count + count) % count
+        return previewUrls[idx]
+    }
+
+    private var layer3Comic: URL? {
+        guard previewUrls.count >= 3 else { return nil }
+        let idx = ((topIndex + 2) % count + count) % count
+        return previewUrls[idx]
+    }
+
+    private var currentItemNum: Int {
+        guard !previewUrls.isEmpty else { return 1 }
+        return (topIndex % count + count) % count + 1
+    }
+
+    private var layer2ItemNum: Int {
+        guard !previewUrls.isEmpty else { return 2 }
+        return ((topIndex + 1) % count + count) % count + 1
+    }
+
+    private var peelProgress: CGFloat {
+        guard cardHeight > 0 else { return 0 }
+        return min(max(peelOffsetY / cardHeight, 0), 1)
+    }
+
+    private func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat {
+        a + (b - a) * t
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .bottom) {
+                // Messy Layer 3 (Rotated Left -6° -> +5°) - for 3+ items
                 if itemCount >= 3 {
-                    RoundedCornerShape(cornerRadius: 4)
-                        .fill(Leaf.inkSoft.opacity(0.85))
-                        .aspectRatio(0.7, contentMode: .fit)
-                        .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Leaf.ink, lineWidth: 1.5))
-                        .offset(y: -8)
-                }
-                if itemCount >= 2 {
-                    RoundedCornerShape(cornerRadius: 4)
-                        .fill(Leaf.inkSoft)
-                        .aspectRatio(0.7, contentMode: .fit)
-                        .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Leaf.ink, lineWidth: 2))
-                        .offset(y: -4)
+                    ZStack {
+                        Leaf.inkSoft
+                        if let layer3CoverImage {
+                            Image(uiImage: layer3CoverImage)
+                                .resizable()
+                                .scaledToFill()
+                                .opacity(0.85)
+                        }
+                    }
+                    .aspectRatio(0.7, contentMode: .fit)
+                    .clipShape(RoundedCornerShape(cornerRadius: 4))
+                    .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Leaf.ink, lineWidth: 1.5))
+                    .rotationEffect(.degrees(Double(lerp(-6, 5, peelProgress))))
+                    .offset(
+                        x: lerp(-6, 7, peelProgress),
+                        y: lerp(-4, -3, peelProgress)
+                    )
                 }
 
-                ZStack(alignment: .bottom) {
+                // Messy Layer 2 (Rotated Right +5° -> 0°) - for 2+ items
+                if itemCount >= 2 {
+                    ZStack(alignment: .bottomLeading) {
+                        Group {
+                            if let layer2CoverImage {
+                                Image(uiImage: layer2CoverImage)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .opacity(Double(lerp(0.85, 1.0, peelProgress)))
+                            } else {
+                                GeneratedCover(title: list.name.uppercased(), columns: columns)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
+
+                        Text("ITEM \(layer2ItemNum) OF \(itemCount)")
+                            .font(.anton(columns >= 4 ? 7.5 : 8.5))
+                            .foregroundColor(Leaf.cream)
+                            .padding(.horizontal, columns >= 4 ? 4 : 5)
+                            .padding(.vertical, 2)
+                            .background(Leaf.ink.opacity(0.85))
+                            .clipShape(RoundedCornerShape(cornerRadius: 3))
+                            .overlay(
+                                RoundedCornerShape(cornerRadius: 3)
+                                    .stroke(Leaf.ochre, lineWidth: 1)
+                            )
+                            .padding(columns >= 4 ? 4 : 6)
+                    }
+                    .aspectRatio(0.7, contentMode: .fit)
+                    .background(Leaf.deepInkSurface)
+                    .clipShape(RoundedCornerShape(cornerRadius: 4))
+                    .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Leaf.ink, lineWidth: 2))
+                    .rotationEffect(.degrees(Double(lerp(5, 0, peelProgress))))
+                    .offset(
+                        x: lerp(7, 0, peelProgress),
+                        y: lerp(-3, 0, peelProgress)
+                    )
+                }
+
+                // Front Main List Card (Straight 0°)
+                ZStack(alignment: .bottomLeading) {
                     Group {
-                        if let previewCover {
-                            Image(uiImage: previewCover).resizable().scaledToFill()
+                        if let topCoverImage {
+                            Image(uiImage: topCoverImage).resizable().scaledToFill()
                         } else {
                             GeneratedCover(title: list.name.uppercased(), columns: columns)
                         }
@@ -1012,47 +1271,102 @@ struct ReadingListCard: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
 
-                    HStack {
-                        Text("\(itemCount) COMICS")
-                            .font(.anton(columns >= 4 ? 9 : 10.5))
-                            .foregroundColor(Leaf.ink)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(Leaf.ochre)
-                            .clipShape(RoundedCornerShape(cornerRadius: 2))
-                        Spacer()
-                    }
-                    .padding(6)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    Text(itemCount > 1 ? "ITEM \(currentItemNum) OF \(itemCount)" : "\(itemCount) \(itemCount == 1 ? "ITEM" : "ITEMS")")
+                        .font(.anton(columns >= 4 ? 7.5 : 8.5))
+                        .foregroundColor(Leaf.cream)
+                        .padding(.horizontal, columns >= 4 ? 4 : 5)
+                        .padding(.vertical, 2)
+                        .background(Leaf.ink.opacity(0.85))
+                        .clipShape(RoundedCornerShape(cornerRadius: 3))
+                        .overlay(
+                            RoundedCornerShape(cornerRadius: 3)
+                                .stroke(Leaf.ochre, lineWidth: 1)
+                        )
+                        .padding(columns >= 4 ? 4 : 6)
                 }
                 .aspectRatio(0.7, contentMode: .fit)
-                .background(Leaf.inkSoft)
+                .background(
+                    GeometryReader { geo in
+                        Leaf.deepInkSurface
+                            .onAppear {
+                                if geo.size.height > 0 { cardHeight = geo.size.height }
+                            }
+                            .onChange(of: geo.size.height) { newHeight in
+                                if newHeight > 0 { cardHeight = newHeight }
+                            }
+                    }
+                )
                 .clipShape(RoundedCornerShape(cornerRadius: 4))
                 .overlay(
                     RoundedCornerShape(cornerRadius: 4)
                         .stroke(Leaf.ink, lineWidth: columns >= 4 ? 2 : 3)
                 )
                 .comicShadow(offset: columns >= 4 ? 3 : 5, color: .black.opacity(0.70), corner: 4)
+                .offset(y: peelOffsetY)
+                .opacity(peelProgress > 0.75 ? Double(max(0, 1 - (peelProgress - 0.75) / 0.25)) : 1.0)
             }
             .aspectRatio(0.7, contentMode: .fit)
-            .padding(.top, itemCount >= 3 ? 8 : (itemCount >= 2 ? 4 : 0))
+            .padding(itemCount >= 2 ? 6 : 0)
+            .contentShape(Rectangle())
             .onTapGesture { onOpenList() }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 12)
+                    .onChanged { value in
+                        guard itemCount > 1 else { return }
+                        let dy = value.translation.height
+                        let dx = value.translation.width
+                        if dy > 0 && abs(dy) > abs(dx) {
+                            peelOffsetY = min(dy, cardHeight * 1.15)
+                        }
+                    }
+                    .onEnded { value in
+                        guard itemCount > 1, peelOffsetY > 0 else { return }
+                        let dy = value.translation.height
+                        let predictedDy = value.predictedEndTranslation.height
+                        let threshold = cardHeight * 0.35
+                        if dy > threshold || (predictedDy - dy) > 120 {
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                peelOffsetY = cardHeight * 1.15
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                                topIndex = (topIndex + 1) % max(previewUrls.count, 1)
+                                peelOffsetY = 0
+                            }
+                        } else {
+                            withAnimation(.spring(response: 0.24, dampingFraction: 0.78)) {
+                                peelOffsetY = 0
+                            }
+                        }
+                    }
+            )
 
             Text(list.name.uppercased())
-                .font(.anton(columns >= 4 ? 12 : 14))
+                .font(.archivo(columns >= 4 ? 10.5 : 12, weight: 800))
                 .foregroundColor(Leaf.cream)
-                .lineLimit(1)
+                .lineLimit(2)
                 .padding(.top, columns >= 4 ? 6 : 9)
 
-            Text("\(itemCount) \(itemCount == 1 ? "comic" : "comics")")
-                .font(.archivo(columns >= 4 ? 8.5 : 9.5))
+            Text("\(itemCount) \(itemCount == 1 ? "item" : "items")")
+                .font(.archivo(columns >= 4 ? 8.5 : 9.5, weight: 600))
                 .foregroundColor(Leaf.creamMuted)
                 .lineLimit(1)
                 .padding(.top, 2)
         }
-        .task {
-            if let first = previewUrls.first {
-                previewCover = await CoverLoader.load(for: first).cover
+        .task(id: currentTopComic) {
+            if let top = currentTopComic {
+                topCoverImage = await CoverLoader.load(for: top).cover
+            } else {
+                topCoverImage = nil
+            }
+            if let l2 = layer2Comic {
+                layer2CoverImage = await CoverLoader.load(for: l2).cover
+            } else {
+                layer2CoverImage = nil
+            }
+            if let l3 = layer3Comic {
+                layer3CoverImage = await CoverLoader.load(for: l3).cover
+            } else {
+                layer3CoverImage = nil
             }
         }
     }

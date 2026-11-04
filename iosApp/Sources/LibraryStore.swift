@@ -25,9 +25,13 @@ final class LibraryStore: ObservableObject {
         return types
     }
 
-    init() {
-        dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Comics", isDirectory: true)
+    init(directory: URL? = nil) {
+        if let directory {
+            dir = directory
+        } else {
+            dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Comics", isDirectory: true)
+        }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         refresh()
     }
@@ -44,16 +48,9 @@ final class LibraryStore: ObservableObject {
             }
         comics = comicFiles
 
-        // Backfill metadata for newly discovered or existing files
-        var metaMap = ComicMetadataStore.all()
-        for file in comicFiles {
-            let name = file.lastPathComponent
-            if metaMap[name] == nil {
-                let parsed = ComicMetadataStore.parseAndStoreIfNeeded(file)
-                metaMap[name] = parsed
-            }
-        }
-        metadata = metaMap
+        // Backfill missing series/issue metadata for existing or newly discovered files
+        ComicMetadataStore.backfillMetadataIfNeeded(for: comicFiles)
+        metadata = ComicMetadataStore.all()
         readingLists = ReadingListStore.all()
     }
 
@@ -105,6 +102,7 @@ final class LibraryStore: ObservableObject {
     func delete(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
         ReadingProgress.clear(url)
+        ComicMetadataStore.clear(url)
         for list in readingLists {
             ReadingListStore.removeComic(from: list.id, filename: url.lastPathComponent)
         }
@@ -115,6 +113,7 @@ final class LibraryStore: ObservableObject {
         for url in urls {
             try? FileManager.default.removeItem(at: url)
             ReadingProgress.clear(url)
+            ComicMetadataStore.clear(url)
             for list in readingLists {
                 ReadingListStore.removeComic(from: list.id, filename: url.lastPathComponent)
             }
@@ -132,11 +131,31 @@ final class LibraryStore: ObservableObject {
     func markComicsRead(urls: [URL], read: Bool) {
         for url in urls {
             let current = ReadingProgress.get(url)
-            let total = current?.total ?? 1
+            let resolvedTotal: Int = {
+                if let t = current?.total, t > 1 { return t }
+                if let archive = try? CbzArchive(url: url), archive.pageCount > 0 {
+                    return archive.pageCount
+                }
+                return max(current?.total ?? 2, 2)
+            }()
             let dir = ReadingProgress.readingDirection(url)
-            ReadingProgress.set(url, page: read ? max(0, total - 1) : 0, step: -1, total: total, rtl: dir)
+            let targetPage = read ? max(1, resolvedTotal - 1) : 0
+            ReadingProgress.set(url, page: targetPage, step: -1, total: resolvedTotal, rtl: dir)
         }
+        ReadingProgress.flushSync()
         refresh()
+    }
+
+    func markSeriesRead(seriesName: String, volume: String?, read: Bool) {
+        let matching = comics.filter { url in
+            let m = metadata[url.lastPathComponent]
+            guard let s = m?.series, s.caseInsensitiveCompare(seriesName) == .orderedSame else { return false }
+            if let vol = volume, !vol.isEmpty {
+                return (m?.volume ?? "").caseInsensitiveCompare(vol) == .orderedSame
+            }
+            return true
+        }
+        markComicsRead(urls: matching, read: read)
     }
 
     // MARK: - Reading List Operations
@@ -166,6 +185,18 @@ final class LibraryStore: ObservableObject {
     func removeComicFromReadingList(listId: String, url: URL) {
         ReadingListStore.removeComic(from: listId, filename: url.lastPathComponent)
         refresh()
+    }
+
+    func moveComicInReadingList(listId: String, url: URL, direction: Int) {
+        ReadingListStore.moveComic(in: listId, filename: url.lastPathComponent, direction: direction)
+        refresh()
+    }
+
+    func markReadingListRead(listId: String, read: Bool) {
+        guard let list = readingLists.first(where: { $0.id == listId }) else { return }
+        let comicMap = Dictionary(uniqueKeysWithValues: comics.map { ($0.lastPathComponent, $0) })
+        let listUrls = list.itemFilenames.compactMap { comicMap[$0] }
+        markComicsRead(urls: listUrls, read: read)
     }
 
     // MARK: - Item Resolution for Library UI
@@ -205,20 +236,11 @@ final class LibraryStore: ObservableObject {
                     let key = "\(s)__\(v)".lowercased()
                     if let group = seriesGroups[key], group.count >= 2 {
                         let sortedIssues = sortIssues(group)
-                        let nextIssue = sortedIssues.first { u in
-                            let p = ReadingProgress.get(u)
-                            let tot = p?.total ?? 1
-                            let pg = p?.page ?? 0
-                            return tot > 0 && pg < tot - 1
-                        } ?? sortedIssues.first ?? url
+                        let nextIssue = sortedIssues.first { !ReadingProgress.isCompleted($0) }
+                            ?? sortedIssues.first ?? url
 
-                        let completedCount = sortedIssues.count { u in
-                            let p = ReadingProgress.get(u)
-                            let tot = p?.total ?? 1
-                            let pg = p?.page ?? 0
-                            return tot > 0 && pg >= tot - 1
-                        }
-                        let unreadCount = sortedIssues.count { (ReadingProgress.get($0)?.page ?? 0) == 0 }
+                        let completedCount = sortedIssues.count { ReadingProgress.isCompleted($0) }
+                        let unreadCount = sortedIssues.count { !ReadingProgress.isCompleted($0) }
 
                         items.append(
                             .seriesStack(
@@ -252,20 +274,11 @@ final class LibraryStore: ObservableObject {
 
             return seriesGroups.values.map { group in
                 let sortedIssues = sortIssues(group)
-                let nextIssue = sortedIssues.first { u in
-                    let p = ReadingProgress.get(u)
-                    let tot = p?.total ?? 1
-                    let pg = p?.page ?? 0
-                    return tot > 0 && pg < tot - 1
-                } ?? sortedIssues.first ?? group[0]
+                let nextIssue = sortedIssues.first { !ReadingProgress.isCompleted($0) }
+                    ?? sortedIssues.first ?? group[0]
 
-                let completedCount = sortedIssues.count { u in
-                    let p = ReadingProgress.get(u)
-                    let tot = p?.total ?? 1
-                    let pg = p?.page ?? 0
-                    return tot > 0 && pg >= tot - 1
-                }
-                let unreadCount = sortedIssues.count { (ReadingProgress.get($0)?.page ?? 0) == 0 }
+                let completedCount = sortedIssues.count { ReadingProgress.isCompleted($0) }
+                let unreadCount = sortedIssues.count { !ReadingProgress.isCompleted($0) }
 
                 return LibraryItem.seriesStack(
                     seriesName: metadata[group[0].lastPathComponent]?.series ?? "Series",
@@ -288,16 +301,15 @@ final class LibraryStore: ObservableObject {
             let filteredLists = q.isEmpty ? readingLists : readingLists.filter { $0.name.lowercased().contains(q) }
             return filteredLists.map { list in
                 let previewUrls = list.itemFilenames.compactMap { comicMap[$0] }
-                return .readingListItem(
-                    list: list,
-                    previewUrls: Array(previewUrls.prefix(4)),
-                    itemCount: previewUrls.count
-                )
+                return LibraryItem.readingListItem(list: list, previewUrls: previewUrls, itemCount: previewUrls.count)
             }
 
         case .unread:
-            let unread = filteredComics.filter { (ReadingProgress.get($0)?.page ?? 0) == 0 }
-            return unread.map { .singleComic(url: $0, metadata: metadata[$0.lastPathComponent]) }
+            return filteredComics.filter { url in
+                !ReadingProgress.isCompleted(url)
+            }.map { url in
+                LibraryItem.singleComic(url: url, metadata: metadata[url.lastPathComponent])
+            }
         }
     }
 
@@ -307,21 +319,20 @@ final class LibraryStore: ObservableObject {
             let mb = metadata[b.lastPathComponent]
             let numA = ma?.issueNumber ?? Float.greatestFiniteMagnitude
             let numB = mb?.issueNumber ?? Float.greatestFiniteMagnitude
-            if numA != numB {
-                return numA < numB
-            }
+            if numA != numB { return numA < numB }
             return a.lastPathComponent.localizedStandardCompare(b.lastPathComponent) == .orderedAscending
         }
     }
 
-    private static func leadingBytes(of url: URL, count: Int = 8) -> KotlinByteArray {
-        let data: Data = {
-            guard let handle = try? FileHandle(forReadingFrom: url) else { return Data() }
-            defer { try? handle.close() }
-            return (try? handle.read(upToCount: count)) ?? Data()
-        }()
-        let bytes = KotlinByteArray(size: Int32(data.count))
-        for (i, b) in data.enumerated() { bytes.set(index: Int32(i), value: Int8(bitPattern: b)) }
-        return bytes
+    /// Reads up to the first 8 bytes of a file so `ComicFormatDetector` can check magic numbers.
+    private static func leadingBytes(of url: URL) -> KotlinByteArray {
+        guard let handle = try? FileHandle(forReadingFrom: url),
+              let data = try? handle.read(upToCount: 8) else {
+            return KotlinByteArray(size: 0)
+        }
+        try? handle.close()
+        let out = KotlinByteArray(size: Int32(data.count))
+        for (i, b) in data.enumerated() { out.set(index: Int32(i), value: Int8(bitPattern: b)) }
+        return out
     }
 }
