@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -20,6 +21,9 @@ interface ReadingListDao {
 
     @Query("SELECT * FROM reading_list_items")
     suspend fun getAllItems(): List<ReadingListItemEntity>
+
+    @Query("SELECT * FROM reading_lists WHERE id = :id")
+    fun observeById(id: Long): Flow<ReadingListEntity?>
 
     @Query("SELECT * FROM reading_lists WHERE id = :id")
     suspend fun getById(id: Long): ReadingListEntity?
@@ -46,6 +50,16 @@ interface ReadingListDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertItem(item: ReadingListItemEntity)
+
+    @Query("UPDATE reading_list_items SET sortOrder = :sortOrder WHERE listId = :listId AND comicId = :comicId")
+    suspend fun updateItemOrder(listId: Long, comicId: Long, sortOrder: Int): Int
+
+    @Transaction
+    suspend fun reorderItems(listId: Long, comicIdsInOrder: List<Long>) {
+        comicIdsInOrder.forEachIndexed { index, comicId ->
+            updateItemOrder(listId, comicId, index)
+        }
+    }
 
     @Query("DELETE FROM reading_list_items WHERE listId = :listId AND comicId = :comicId")
     suspend fun removeItem(listId: Long, comicId: Long): Int

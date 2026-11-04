@@ -47,6 +47,7 @@ docs/REPLACEMENT_PANEL_DETECTOR_PLAN_AND_HANDOFF.md
 # iOS roadmap & planning docs
 docs/IOS_REMAINING_PHASES.md
 iosApp/IOS_REMAINING_PHASES.md
+docs/IOS_SERIES_AND_LISTS_HANDOFF.md
 
 # Local developer Xcode signing & config overrides (never committed)
 *Local.xcconfig

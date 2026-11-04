@@ -48,7 +48,9 @@ class LibraryViewModelTest {
         Dispatchers.setMain(testDispatcher)
         val context = RuntimeEnvironment.getApplication()
         fakeComicDao = FakeComicDao()
-        fakeReadingListDao = FakeReadingListDao()
+        fakeReadingListDao = FakeReadingListDao().apply {
+            comicsLookup = { fakeComicDao.getAllDirect() }
+        }
         settings = AppSettings(context)
         repository = LibraryRepository(
             context = context,
@@ -279,8 +281,137 @@ class LibraryViewModelTest {
         assertEquals("Vol 1", all.find { it.id == 2L }?.volume)
     }
 
+    @Test
+    fun readingListCreationAndItemInsertion() = runBlocking {
+        val c1 = createComic(1, "Infinity Gauntlet 01")
+        val c2 = createComic(2, "Silver Surfer 34")
+        fakeComicDao.setComics(listOf(c1, c2))
+
+        var createdId = 0L
+        viewModel.createReadingList("Cosmic Marvel") { id ->
+            createdId = id
+        }
+
+        withTimeout(3000) {
+            while (fakeReadingListDao.getAllLists().isEmpty()) {
+                kotlinx.coroutines.delay(10)
+            }
+        }
+        val list = fakeReadingListDao.getAllLists().first()
+        assertEquals("Cosmic Marvel", list.name)
+
+        viewModel.addComicsToReadingList(list.id, listOf(1L, 2L))
+        withTimeout(3000) {
+            while (fakeReadingListDao.getAllItems().size < 2) {
+                kotlinx.coroutines.delay(10)
+            }
+        }
+        val items = fakeReadingListDao.getAllItems().filter { it.listId == list.id }
+        assertEquals(2, items.size)
+    }
+
+    @Test
+    fun readingListReorderingUpdatesSortOrder() = runBlocking {
+        val c1 = createComic(1, "Issue 1")
+        val c2 = createComic(2, "Issue 2")
+        val c3 = createComic(3, "Issue 3")
+        fakeComicDao.setComics(listOf(c1, c2, c3))
+
+        val list = ReadingListEntity(1L, "Storyline")
+        fakeReadingListDao.setListsAndItems(
+            listOf(list),
+            listOf(
+                ReadingListItemEntity(1L, 1L, sortOrder = 0),
+                ReadingListItemEntity(1L, 2L, sortOrder = 1),
+                ReadingListItemEntity(1L, 3L, sortOrder = 2),
+            )
+        )
+
+        viewModel.moveReadingListItem(1L, 3L, -1)
+        withTimeout(3000) {
+            while (fakeReadingListDao.getAllItems().find { it.comicId == 3L }?.sortOrder != 1) {
+                kotlinx.coroutines.delay(10)
+            }
+        }
+        val reordered = fakeReadingListDao.getAllItems().filter { it.listId == 1L }.sortedBy { it.sortOrder }
+        assertEquals(listOf(1L, 3L, 2L), reordered.map { it.comicId })
+
+        viewModel.reorderReadingList(1L, listOf(2L, 1L, 3L))
+        withTimeout(3000) {
+            while (fakeReadingListDao.getAllItems().find { it.comicId == 2L }?.sortOrder != 0) {
+                kotlinx.coroutines.delay(10)
+            }
+        }
+        val finalOrder = fakeReadingListDao.getAllItems().filter { it.listId == 1L }.sortedBy { it.sortOrder }
+        assertEquals(listOf(2L, 1L, 3L), finalOrder.map { it.comicId })
+    }
+
+    @Test
+    fun readingListMarkAllReadAndUnread() = runBlocking {
+        val c1 = createComic(1, "Event 01", pageCount = 30, lastPage = 0)
+        val c2 = createComic(2, "Event 02", pageCount = 20, lastPage = 0)
+        fakeComicDao.setComics(listOf(c1, c2))
+
+        val list = ReadingListEntity(1L, "Crossover")
+        fakeReadingListDao.setListsAndItems(
+            listOf(list),
+            listOf(
+                ReadingListItemEntity(1L, 1L, sortOrder = 0),
+                ReadingListItemEntity(1L, 2L, sortOrder = 1),
+            )
+        )
+
+        viewModel.markReadingListRead(1L, true)
+        withTimeout(3000) {
+            while (!fakeComicDao.getAll().all { it.lastPage > 0 }) {
+                kotlinx.coroutines.delay(10)
+            }
+        }
+        var all = fakeComicDao.getAll()
+        assertEquals(29, all.find { it.id == 1L }?.lastPage)
+        assertEquals(19, all.find { it.id == 2L }?.lastPage)
+
+        viewModel.markReadingListRead(1L, false)
+        withTimeout(3000) {
+            while (!fakeComicDao.getAll().all { it.lastPage == 0 }) {
+                kotlinx.coroutines.delay(10)
+            }
+        }
+        all = fakeComicDao.getAll()
+        assertEquals(0, all.find { it.id == 1L }?.lastPage)
+        assertEquals(0, all.find { it.id == 2L }?.lastPage)
+    }
+
+    @Test
+    fun readingListRenameAndDelete() = runBlocking {
+        val list = ReadingListEntity(1L, "Old Title")
+        fakeReadingListDao.setListsAndItems(
+            listOf(list),
+            listOf(ReadingListItemEntity(1L, 10L, 0))
+        )
+
+        viewModel.renameReadingList(1L, "New Title")
+        withTimeout(3000) {
+            while (fakeReadingListDao.getById(1L)?.name != "New Title") {
+                kotlinx.coroutines.delay(10)
+            }
+        }
+        assertEquals("New Title", fakeReadingListDao.getById(1L)?.name)
+
+        viewModel.deleteReadingList(1L)
+        withTimeout(3000) {
+            while (fakeReadingListDao.getAllLists().isNotEmpty()) {
+                kotlinx.coroutines.delay(10)
+            }
+        }
+        assertTrue(fakeReadingListDao.getAllLists().isEmpty())
+        assertTrue(fakeReadingListDao.getAllItems().isEmpty())
+    }
+
     private class FakeComicDao : ComicDao {
         private val comicsState = MutableStateFlow<List<ComicEntity>>(emptyList())
+
+        fun getAllDirect(): List<ComicEntity> = comicsState.value
 
         fun setComics(list: List<ComicEntity>) {
             comicsState.value = list
@@ -344,11 +475,15 @@ class LibraryViewModelTest {
     private class FakeReadingListDao : ReadingListDao {
         private val listsState = MutableStateFlow<List<ReadingListEntity>>(emptyList())
         private val itemsState = MutableStateFlow<List<ReadingListItemEntity>>(emptyList())
+        var comicsLookup: () -> List<ComicEntity> = { emptyList() }
 
         fun setListsAndItems(lists: List<ReadingListEntity>, items: List<ReadingListItemEntity>) {
             listsState.value = lists
             itemsState.value = items
         }
+
+        override fun observeById(id: Long): Flow<ReadingListEntity?> =
+            listsState.map { lists -> lists.find { it.id == id } }
 
         override fun observeAll(): Flow<List<ReadingListEntity>> = listsState
 
@@ -380,13 +515,25 @@ class LibraryViewModelTest {
         }
 
         override fun observeComicsForList(listId: Long): Flow<List<ComicEntity>> =
-            MutableStateFlow(emptyList())
+            itemsState.map { items ->
+                val comicMap = comicsLookup().associateBy { it.id }
+                items.filter { it.listId == listId }
+                    .sortedBy { it.sortOrder }
+                    .mapNotNull { comicMap[it.comicId] }
+            }
 
         override fun observeItemCount(listId: Long): Flow<Int> =
             itemsState.map { items -> items.count { it.listId == listId } }
 
         override suspend fun insertItem(item: ReadingListItemEntity) {
             itemsState.value = itemsState.value.filterNot { it.listId == item.listId && it.comicId == item.comicId } + item
+        }
+
+        override suspend fun updateItemOrder(listId: Long, comicId: Long, sortOrder: Int): Int {
+            itemsState.value = itemsState.value.map {
+                if (it.listId == listId && it.comicId == comicId) it.copy(sortOrder = sortOrder) else it
+            }
+            return 1
         }
 
         override suspend fun removeItem(listId: Long, comicId: Long): Int {

@@ -14,6 +14,7 @@ import androidx.navigation.navArgument
 import net.digitalbc.leafreader.ComicReaderApp
 import net.digitalbc.leafreader.ui.library.LibraryScreen
 import net.digitalbc.leafreader.ui.library.LibraryViewModel
+import net.digitalbc.leafreader.ui.library.ReadingListDetailScreen
 import net.digitalbc.leafreader.ui.library.SeriesDetailScreen
 import net.digitalbc.leafreader.ui.library.SmbDriveScreen
 import net.digitalbc.leafreader.ui.menu.MenuScreen
@@ -26,8 +27,10 @@ private object Routes {
     const val READER = "reader/{comicId}"
     const val MENU = "menu"
     const val SERIES = "series/{seriesName}?volume={volume}"
+    const val READING_LIST = "reading_list/{listId}"
     fun reader(comicId: Long) = "reader/$comicId"
     fun series(seriesName: String, volume: String?) = "series/${Uri.encode(seriesName)}${if (!volume.isNullOrBlank()) "?volume=${Uri.encode(volume)}" else ""}"
+    fun readingList(listId: Long) = "reading_list/$listId"
 }
 
 @Composable
@@ -42,11 +45,26 @@ fun AppNavHost() {
                 viewModel = libraryVm,
                 onOpenComic = { id -> navController.navigate(Routes.reader(id)) },
                 onOpenSeries = { name, vol -> navController.navigate(Routes.series(name, vol)) },
+                onOpenReadingList = { listId -> navController.navigate(Routes.readingList(listId)) },
                 onOpenMenu = { navController.navigate(Routes.MENU) },
                 onOpenDrive = {
                     libraryVm.loadSmbDirectory("")
                     navController.navigate(Routes.DRIVE)
                 },
+            )
+        }
+        composable(
+            route = Routes.READING_LIST,
+            arguments = listOf(
+                navArgument("listId") { type = NavType.LongType },
+            ),
+        ) { entry ->
+            val listId = entry.arguments?.getLong("listId") ?: return@composable
+            ReadingListDetailScreen(
+                listId = listId,
+                viewModel = libraryVm,
+                onOpenComic = { id -> navController.navigate(Routes.reader(id)) },
+                onBack = { navController.popBackStack() },
             )
         }
         composable(
