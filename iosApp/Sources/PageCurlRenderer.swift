@@ -4,39 +4,131 @@ import MetalKit
 import UIKit
 import LeafShared
 
+/// Vertex structure passed to the Metal page curl shaders.
 struct CurlVertex {
     var position: SIMD2<Float>
     var texCoord: SIMD2<Float>
 }
 
+/// Vertex structure for untextured gradient / shadow / highlight quads.
 struct CurlColorVertex {
     var position: SIMD2<Float>
-    var _pad: SIMD2<Float> = .zero
     var color: SIMD4<Float>
 }
 
+/// Uniforms for converting screen-space coordinates to Normalized Device Coordinates (NDC).
 struct CurlUniforms {
     var viewportSize: SIMD2<Float>
 }
 
-/// Metal-based 3D cylindrical page curl renderer for Leaf iOS.
-/// Renders both single-page curls and two-page spread curls with identical physics,
-/// specular highlights, crease shadows, drop shadows, and reverse paper tint to Android's ReaderScreen.
+/// Singleton Metal renderer that compiles the page-curl shaders once and renders
+/// both single-page 3D cylindrical curls and open-book two-page spread curls.
 final class PageCurlRenderer {
     static let shared = PageCurlRenderer()
 
+    static let meshCols = 36
+    static let meshRows = 4
+
     let device: MTLDevice?
-    private let commandQueue: MTLCommandQueue?
+    let commandQueue: MTLCommandQueue?
     private let pipelineState: MTLRenderPipelineState?
     private let colorPipelineState: MTLRenderPipelineState?
     private let samplerState: MTLSamplerState?
     private let textureCache = NSCache<AnyObject, MTLTexture>()
 
-    static let meshCols = 36
-    static let meshRows = 4
+    private static let shaderSource = """
+    #include <metal_stdlib>
+    using namespace metal;
+
+    struct CurlVertexIn {
+        float2 position [[attribute(0)]];
+        float2 texCoord [[attribute(1)]];
+    };
+
+    struct CurlVertexOut {
+        float4 position [[position]];
+        float2 texCoord;
+    };
+
+    struct CurlColorVertexIn {
+        float2 position [[attribute(0)]];
+        float4 color [[attribute(1)]];
+    };
+
+    struct CurlColorVertexOut {
+        float4 position [[position]];
+        float4 color;
+    };
+
+    struct CurlUniforms {
+        float2 viewportSize;
+    };
+
+    vertex CurlVertexOut curl_vertex(
+        uint vid [[vertex_id]],
+        constant float4 *vertices [[buffer(0)]],
+        constant CurlUniforms &uniforms [[buffer(1)]]
+    ) {
+        float4 v = vertices[vid];
+        float2 pos = v.xy;
+        float2 uv = v.zw;
+
+        CurlVertexOut out;
+        out.position = float4(
+            (pos.x / (uniforms.viewportSize.x * 0.5)) - 1.0,
+            1.0 - (pos.y / (uniforms.viewportSize.y * 0.5)),
+            0.0,
+            1.0
+        );
+        out.texCoord = uv;
+        return out;
+    }
+
+    fragment float4 curl_fragment(
+        CurlVertexOut in [[stage_in]],
+        texture2d<float> tex [[texture(0)]],
+        sampler s [[sampler(0)]]
+    ) {
+        return tex.sample(s, in.texCoord);
+    }
+
+    struct ColorVertRaw {
+        float2 position;
+        float2 _pad;
+        float4 color;
+    };
+
+    vertex CurlColorVertexOut color_vertex(
+        uint vid [[vertex_id]],
+        constant ColorVertRaw *vertices [[buffer(0)]],
+        constant CurlUniforms &uniforms [[buffer(1)]]
+    ) {
+        ColorVertRaw v = vertices[vid];
+        float2 pos = v.position;
+
+        CurlColorVertexOut out;
+        out.position = float4(
+            (pos.x / (uniforms.viewportSize.x * 0.5)) - 1.0,
+            1.0 - (pos.y / (uniforms.viewportSize.y * 0.5)),
+            0.0,
+            1.0
+        );
+        out.color = v.color;
+        return out;
+    }
+
+    fragment float4 color_fragment(
+        CurlColorVertexOut in [[stage_in]]
+    ) {
+        return in.color;
+    }
+    """
 
     private init() {
-        guard let dev = MTLCreateSystemDefaultDevice() else {
+        textureCache.countLimit = 12
+
+        guard let dev = MTLCreateSystemDefaultDevice(),
+              let queue = dev.makeCommandQueue() else {
             self.device = nil
             self.commandQueue = nil
             self.pipelineState = nil
@@ -45,96 +137,18 @@ final class PageCurlRenderer {
             return
         }
         self.device = dev
-        self.commandQueue = dev.makeCommandQueue()
+        self.commandQueue = queue
 
-        let shaderSource = """
-        #include <metal_stdlib>
-        using namespace metal;
-
-        struct VertexIn {
-            float2 position;
-            float2 texCoord;
-        };
-
-        struct VertexOut {
-            float4 position [[position]];
-            float2 texCoord;
-        };
-
-        struct ColorVertexIn {
-            float2 position;
-            float2 _pad;
-            float4 color;
-        };
-
-        struct ColorVertexOut {
-            float4 position [[position]];
-            float4 color;
-        };
-
-        struct Uniforms {
-            float2 viewportSize;
-        };
-
-        vertex VertexOut curl_vertex(
-            constant VertexIn *vertices [[buffer(0)]],
-            constant Uniforms &uniforms [[buffer(1)]],
-            uint vid [[vertex_id]])
-        {
-            VertexOut out;
-            float2 pos = vertices[vid].position;
-            out.position = float4(
-                (pos.x / (uniforms.viewportSize.x * 0.5)) - 1.0,
-                1.0 - (pos.y / (uniforms.viewportSize.y * 0.5)),
-                0.0,
-                1.0
-            );
-            out.texCoord = vertices[vid].texCoord;
-            return out;
-        }
-
-        fragment float4 curl_fragment(
-            VertexOut in [[stage_in]],
-            texture2d<float> texture [[texture(0)]],
-            sampler s [[sampler(0)]])
-        {
-            return texture.sample(s, in.texCoord);
-        }
-
-        vertex ColorVertexOut color_vertex(
-            constant ColorVertexIn *vertices [[buffer(0)]],
-            constant Uniforms &uniforms [[buffer(1)]],
-            uint vid [[vertex_id]])
-        {
-            ColorVertexOut out;
-            float2 pos = vertices[vid].position;
-            out.position = float4(
-                (pos.x / (uniforms.viewportSize.x * 0.5)) - 1.0,
-                1.0 - (pos.y / (uniforms.viewportSize.y * 0.5)),
-                0.0,
-                1.0
-            );
-            out.color = vertices[vid].color;
-            return out;
-        }
-
-        fragment float4 color_fragment(ColorVertexOut in [[stage_in]]) {
-            return in.color;
-        }
-        """
-
-        var pipe: MTLRenderPipelineState? = nil
-        var colorPipe: MTLRenderPipelineState? = nil
-        var sampler: MTLSamplerState? = nil
+        var pipe: MTLRenderPipelineState?
+        var colorPipe: MTLRenderPipelineState?
+        var sampler: MTLSamplerState?
 
         do {
-            let library = try dev.makeLibrary(source: shaderSource, options: nil)
-            let texVertFunc = library.makeFunction(name: "curl_vertex")
-            let texFragFunc = library.makeFunction(name: "curl_fragment")
+            let library = try dev.makeLibrary(source: Self.shaderSource, options: nil)
 
             let pipeDesc = MTLRenderPipelineDescriptor()
-            pipeDesc.vertexFunction = texVertFunc
-            pipeDesc.fragmentFunction = texFragFunc
+            pipeDesc.vertexFunction = library.makeFunction(name: "curl_vertex")
+            pipeDesc.fragmentFunction = library.makeFunction(name: "curl_fragment")
             pipeDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
             pipeDesc.colorAttachments[0].isBlendingEnabled = true
             pipeDesc.colorAttachments[0].rgbBlendOperation = .add
@@ -145,12 +159,9 @@ final class PageCurlRenderer {
             pipeDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
             pipe = try dev.makeRenderPipelineState(descriptor: pipeDesc)
 
-            let colorVertFunc = library.makeFunction(name: "color_vertex")
-            let colorFragFunc = library.makeFunction(name: "color_fragment")
-
             let colorPipeDesc = MTLRenderPipelineDescriptor()
-            colorPipeDesc.vertexFunction = colorVertFunc
-            colorPipeDesc.fragmentFunction = colorFragFunc
+            colorPipeDesc.vertexFunction = library.makeFunction(name: "color_vertex")
+            colorPipeDesc.fragmentFunction = library.makeFunction(name: "color_fragment")
             colorPipeDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
             colorPipeDesc.colorAttachments[0].isBlendingEnabled = true
             colorPipeDesc.colorAttachments[0].rgbBlendOperation = .add
@@ -180,23 +191,61 @@ final class PageCurlRenderer {
         device != nil && pipelineState != nil && colorPipelineState != nil && samplerState != nil
     }
 
+    /// Converts a UIImage into a BGRA8Unorm MTLTexture, handling grayscale, RGB, RGBA, and wide-gamut images reliably.
     func texture(for image: UIImage) -> MTLTexture? {
         guard let dev = device, let cgImage = image.cgImage else { return nil }
         if let cached = textureCache.object(forKey: cgImage) {
             return cached
         }
-        let loader = MTKTextureLoader(device: dev)
-        do {
-            let tex = try loader.newTexture(cgImage: cgImage, options: [
-                .SRGB: false,
-                .generateMipmaps: false,
-                .origin: MTKTextureLoader.Origin.topLeft
-            ])
-            textureCache.setObject(tex, forKey: cgImage)
-            return tex
-        } catch {
-            print("Failed to create Metal texture from image: \(error)")
+
+        let width = cgImage.width
+        let height = cgImage.height
+        guard width > 0, height > 0 else { return nil }
+
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ), let data = context.data else {
             return nil
+        }
+
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm,
+            width: width,
+            height: height,
+            mipmapped: false
+        )
+        desc.usage = [.shaderRead]
+        desc.storageMode = .shared
+
+        guard let tex = dev.makeTexture(descriptor: desc) else { return nil }
+        tex.replace(
+            region: MTLRegionMake2D(0, 0, width, height),
+            mipmapLevel: 0,
+            withBytes: data,
+            bytesPerRow: bytesPerRow
+        )
+        textureCache.setObject(tex, forKey: cgImage)
+        return tex
+    }
+
+    func prewarmTextures(for images: [UIImage?]) {
+        for img in images {
+            if let img = img {
+                _ = texture(for: img)
+            }
         }
     }
 
@@ -260,6 +309,7 @@ final class PageCurlRenderer {
         grid: [[CurlVertex]],
         viewportSize: CGSize
     ) {
+        guard let dev = device else { return }
         var meshVerts = [CurlVertex]()
         meshVerts.reserveCapacity(Self.meshCols * Self.meshRows * 6)
 
@@ -280,9 +330,14 @@ final class PageCurlRenderer {
             }
         }
 
+        let byteLength = MemoryLayout<CurlVertex>.stride * meshVerts.count
+        guard let vertexBuffer = dev.makeBuffer(bytes: meshVerts, length: byteLength, options: .storageModeShared) else {
+            return
+        }
+
         var uniforms = CurlUniforms(viewportSize: [Float(viewportSize.width), Float(viewportSize.height)])
         encoder.setRenderPipelineState(pipelineState!)
-        encoder.setVertexBytes(meshVerts, length: MemoryLayout<CurlVertex>.stride * meshVerts.count, index: 0)
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<CurlUniforms>.stride, index: 1)
         encoder.setFragmentTexture(texture, index: 0)
         encoder.setFragmentSamplerState(samplerState, index: 0)
@@ -297,8 +352,36 @@ final class PageCurlRenderer {
         topImage: UIImage,
         bottomImage: UIImage?,
         draw: PageDraw,
+        bottomDraw: PageDraw? = nil,
         progress: CGFloat,
-        isPeelingFromRight: Bool
+        isPeelingFromRight: Bool,
+        clearColor: MTLClearColor = MTLClearColor(red: 20.0 / 255.0, green: 25.0 / 255.0, blue: 28.0 / 255.0, alpha: 1.0)
+    ) {
+        renderSinglePageCurl(
+            targetTexture: drawable.texture,
+            drawableToPresent: drawable,
+            viewportSize: viewportSize,
+            topImage: topImage,
+            bottomImage: bottomImage,
+            draw: draw,
+            bottomDraw: bottomDraw,
+            progress: progress,
+            isPeelingFromRight: isPeelingFromRight,
+            clearColor: clearColor
+        )
+    }
+
+    func renderSinglePageCurl(
+        targetTexture: MTLTexture,
+        drawableToPresent: CAMetalDrawable? = nil,
+        viewportSize: CGSize,
+        topImage: UIImage,
+        bottomImage: UIImage?,
+        draw: PageDraw,
+        bottomDraw: PageDraw? = nil,
+        progress: CGFloat,
+        isPeelingFromRight: Bool,
+        clearColor: MTLClearColor = MTLClearColor(red: 20.0 / 255.0, green: 25.0 / 255.0, blue: 28.0 / 255.0, alpha: 1.0)
     ) {
         guard isAvailable, let queue = commandQueue else { return }
         guard let topTex = texture(for: topImage) else { return }
@@ -306,9 +389,9 @@ final class PageCurlRenderer {
 
         guard let cmdBuffer = queue.makeCommandBuffer() else { return }
         let passDesc = MTLRenderPassDescriptor()
-        passDesc.colorAttachments[0].texture = drawable.texture
+        passDesc.colorAttachments[0].texture = targetTexture
         passDesc.colorAttachments[0].loadAction = .clear
-        passDesc.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        passDesc.colorAttachments[0].clearColor = clearColor
         passDesc.colorAttachments[0].storeAction = .store
 
         guard let encoder = cmdBuffer.makeRenderCommandEncoder(descriptor: passDesc) else { return }
@@ -321,10 +404,16 @@ final class PageCurlRenderer {
 
         // 1. Draw underneath page revealed by the curl
         if let bottomTex = bottomTex {
+            let bDraw = bottomDraw ?? draw
             drawFlatQuad(
                 encoder: encoder,
                 texture: bottomTex,
-                rect: CGRect(x: CGFloat(left), y: CGFloat(top), width: CGFloat(w), height: CGFloat(h)),
+                rect: CGRect(
+                    x: CGFloat(bDraw.left),
+                    y: CGFloat(bDraw.top),
+                    width: CGFloat(bDraw.scaledWidth),
+                    height: CGFloat(bDraw.scaledHeight)
+                ),
                 viewportSize: viewportSize
             )
         }
@@ -340,12 +429,14 @@ final class PageCurlRenderer {
 
         if isPeelingFromRight {
             let xFold = left + w * (1.0 - t)
-            let xApex = min(xFold + r, left + w)
+            let sMax = max((left + w) - xFold, 0.0)
+            let thetaMax = sMax / r
+            let xApex = min(xFold + r * sin(min(thetaMax, Float.pi / 2.0)), left + w)
 
             // Drop shadow onto underneath page to the right of the apex
             let shadowWidth = max(r * 1.8, 12.0)
             let shadowAlpha = min(max(0.55 * sin(t * Float.pi), 0.0), 0.65)
-            if shadowAlpha > 0.02 {
+            if shadowAlpha > 0.02 && xApex < left + w {
                 let shadowEnd = min(xApex + shadowWidth, left + w)
                 let shadowMid = xApex + (shadowEnd - xApex) * 0.4
                 drawGradientRect(
@@ -364,8 +455,8 @@ final class PageCurlRenderer {
                 )
             }
 
-            // Deform top page mesh around the vertical cylinder
-            var grid = [[CurlVertex]](
+            // Deform top page front face around the vertical cylinder (clamped at cylinder horizon pi/2)
+            var frontGrid = [[CurlVertex]](
                 repeating: [CurlVertex](repeating: CurlVertex(position: .zero, texCoord: .zero), count: Self.meshCols + 1),
                 count: Self.meshRows + 1
             )
@@ -380,22 +471,39 @@ final class PageCurlRenderer {
                         x = xFlat
                     } else {
                         let s = xFlat - xFold
-                        let theta = s / r
-                        if theta <= Float.pi {
-                            x = xFold + r * sin(theta)
-                        } else {
-                            x = xFold - (s - Float.pi * r)
-                        }
+                        let theta = min(s / r, Float.pi / 2.0)
+                        x = min(xFold + r * sin(theta), left + w)
                     }
-                    grid[row][col] = CurlVertex(position: [x, yFlat], texCoord: [u, v])
+                    frontGrid[row][col] = CurlVertex(position: [x, yFlat], texCoord: [u, v])
                 }
             }
-            drawMesh(encoder: encoder, texture: topTex, grid: grid, viewportSize: viewportSize)
+            drawMesh(encoder: encoder, texture: topTex, grid: frontGrid, viewportSize: viewportSize)
+
+            // Back of the rolled sheet (coiled between xFold and xApex when thetaMax > pi/2)
+            if thetaMax > Float.pi / 2.0 {
+                var backGrid = [[CurlVertex]](
+                    repeating: [CurlVertex](repeating: CurlVertex(position: .zero, texCoord: .zero), count: Self.meshCols + 1),
+                    count: Self.meshRows + 1
+                )
+                for row in 0...Self.meshRows {
+                    let v = Float(row) / Float(Self.meshRows)
+                    let yFlat = top + v * h
+                    for col in 0...Self.meshCols {
+                        let u = Float(col) / Float(Self.meshCols)
+                        let xFlat = left + u * w
+                        let s = max(xFlat - xFold, (Float.pi / 2.0) * r)
+                        let theta = min(s / r, Float.pi)
+                        let x = min(xFold + r * sin(theta), left + w)
+                        backGrid[row][col] = CurlVertex(position: [x, yFlat], texCoord: [u, v])
+                    }
+                }
+                drawMesh(encoder: encoder, texture: topTex, grid: backGrid, viewportSize: viewportSize)
+            }
 
             // Crease shadow in the valley at xFold
             let creaseWidth = max(r * 0.75, 8.0)
             let creaseAlpha = min(max(0.4 * sin(t * Float.pi), 0.0), 0.45)
-            if creaseAlpha > 0.02 {
+            if creaseAlpha > 0.02 && xFold > left {
                 let creaseStart = max(xFold - creaseWidth, left)
                 let creaseMid = creaseStart + (xFold - creaseStart) * 0.7
                 drawGradientRect(
@@ -410,6 +518,18 @@ final class PageCurlRenderer {
                     xStart: creaseMid, xEnd: xFold, y: top, height: h,
                     colorStart: [0, 0, 0, creaseAlpha * 0.5],
                     colorEnd: [0, 0, 0, creaseAlpha],
+                    viewportSize: viewportSize
+                )
+            }
+
+            // Reverse side of page tint across the curl
+            let reverseAlpha = min(max(0.58 * sin(t * Float.pi), 0.0), 0.68)
+            if reverseAlpha > 0.02 && xApex > xFold {
+                drawGradientRect(
+                    encoder: encoder,
+                    xStart: xFold, xEnd: xApex, y: top, height: h,
+                    colorStart: [paperR, paperG, paperB, reverseAlpha],
+                    colorEnd: [paperR, paperG, paperB, reverseAlpha * 0.35],
                     viewportSize: viewportSize
                 )
             }
@@ -435,27 +555,17 @@ final class PageCurlRenderer {
                     viewportSize: viewportSize
                 )
             }
-
-            // Reverse side of page tint across the curl
-            let reverseAlpha = min(max(0.28 * sin(t * Float.pi), 0.0), 0.35)
-            if reverseAlpha > 0.02 && xApex > xFold {
-                drawGradientRect(
-                    encoder: encoder,
-                    xStart: xFold, xEnd: xApex, y: top, height: h,
-                    colorStart: [paperR, paperG, paperB, reverseAlpha],
-                    colorEnd: [paperR, paperG, paperB, 0],
-                    viewportSize: viewportSize
-                )
-            }
         } else {
             // Peeling from Left edge to Right
             let xFold = left + w * t
-            let xApex = max(xFold - r, left)
+            let sMax = max(xFold - left, 0.0)
+            let thetaMax = sMax / r
+            let xApex = max(xFold - r * sin(min(thetaMax, Float.pi / 2.0)), left)
 
             // Drop shadow onto underneath page to the left of the apex
             let shadowWidth = max(r * 1.8, 12.0)
             let shadowAlpha = min(max(0.55 * sin(t * Float.pi), 0.0), 0.65)
-            if shadowAlpha > 0.02 {
+            if shadowAlpha > 0.02 && xApex > left {
                 let shadowStart = max(xApex - shadowWidth, left)
                 let shadowMid = shadowStart + (xApex - shadowStart) * 0.6
                 drawGradientRect(
@@ -474,8 +584,8 @@ final class PageCurlRenderer {
                 )
             }
 
-            // Deform top page mesh around the vertical cylinder
-            var grid = [[CurlVertex]](
+            // Deform top page front face around the vertical cylinder (clamped at cylinder horizon pi/2)
+            var frontGrid = [[CurlVertex]](
                 repeating: [CurlVertex](repeating: CurlVertex(position: .zero, texCoord: .zero), count: Self.meshCols + 1),
                 count: Self.meshRows + 1
             )
@@ -490,22 +600,39 @@ final class PageCurlRenderer {
                         x = xFlat
                     } else {
                         let s = xFold - xFlat
-                        let theta = s / r
-                        if theta <= Float.pi {
-                            x = xFold - r * sin(theta)
-                        } else {
-                            x = xFold + (s - Float.pi * r)
-                        }
+                        let theta = min(s / r, Float.pi / 2.0)
+                        x = max(xFold - r * sin(theta), left)
                     }
-                    grid[row][col] = CurlVertex(position: [x, yFlat], texCoord: [u, v])
+                    frontGrid[row][col] = CurlVertex(position: [x, yFlat], texCoord: [u, v])
                 }
             }
-            drawMesh(encoder: encoder, texture: topTex, grid: grid, viewportSize: viewportSize)
+            drawMesh(encoder: encoder, texture: topTex, grid: frontGrid, viewportSize: viewportSize)
+
+            // Back of the rolled sheet (coiled between xApex and xFold when thetaMax > pi/2)
+            if thetaMax > Float.pi / 2.0 {
+                var backGrid = [[CurlVertex]](
+                    repeating: [CurlVertex](repeating: CurlVertex(position: .zero, texCoord: .zero), count: Self.meshCols + 1),
+                    count: Self.meshRows + 1
+                )
+                for row in 0...Self.meshRows {
+                    let v = Float(row) / Float(Self.meshRows)
+                    let yFlat = top + v * h
+                    for col in 0...Self.meshCols {
+                        let u = Float(col) / Float(Self.meshCols)
+                        let xFlat = left + u * w
+                        let s = max(xFold - xFlat, (Float.pi / 2.0) * r)
+                        let theta = min(s / r, Float.pi)
+                        let x = max(xFold - r * sin(theta), left)
+                        backGrid[row][col] = CurlVertex(position: [x, yFlat], texCoord: [u, v])
+                    }
+                }
+                drawMesh(encoder: encoder, texture: topTex, grid: backGrid, viewportSize: viewportSize)
+            }
 
             // Crease shadow in the valley at xFold
             let creaseWidth = max(r * 0.75, 8.0)
             let creaseAlpha = min(max(0.4 * sin(t * Float.pi), 0.0), 0.45)
-            if creaseAlpha > 0.02 {
+            if creaseAlpha > 0.02 && xFold < left + w {
                 let creaseEnd = min(xFold + creaseWidth, left + w)
                 let creaseMid = xFold + (creaseEnd - xFold) * 0.3
                 drawGradientRect(
@@ -520,6 +647,18 @@ final class PageCurlRenderer {
                     xStart: creaseMid, xEnd: creaseEnd, y: top, height: h,
                     colorStart: [0, 0, 0, creaseAlpha * 0.5],
                     colorEnd: [0, 0, 0, 0],
+                    viewportSize: viewportSize
+                )
+            }
+
+            // Reverse side of page tint across the curl
+            let reverseAlpha = min(max(0.58 * sin(t * Float.pi), 0.0), 0.68)
+            if reverseAlpha > 0.02 && xFold > xApex {
+                drawGradientRect(
+                    encoder: encoder,
+                    xStart: xApex, xEnd: xFold, y: top, height: h,
+                    colorStart: [paperR, paperG, paperB, reverseAlpha * 0.35],
+                    colorEnd: [paperR, paperG, paperB, reverseAlpha],
                     viewportSize: viewportSize
                 )
             }
@@ -545,22 +684,12 @@ final class PageCurlRenderer {
                     viewportSize: viewportSize
                 )
             }
-
-            // Reverse side of page tint across the curl
-            let reverseAlpha = min(max(0.28 * sin(t * Float.pi), 0.0), 0.35)
-            if reverseAlpha > 0.02 && xFold > xApex {
-                drawGradientRect(
-                    encoder: encoder,
-                    xStart: xApex, xEnd: xFold, y: top, height: h,
-                    colorStart: [paperR, paperG, paperB, 0],
-                    colorEnd: [paperR, paperG, paperB, reverseAlpha],
-                    viewportSize: viewportSize
-                )
-            }
         }
 
         encoder.endEncoding()
-        cmdBuffer.present(drawable)
+        if let drawable = drawableToPresent {
+            cmdBuffer.present(drawable)
+        }
         cmdBuffer.commit()
     }
 
@@ -579,7 +708,44 @@ final class PageCurlRenderer {
         progress: CGFloat,
         userScale: CGFloat,
         userPanX: CGFloat,
-        userPanY: CGFloat
+        userPanY: CGFloat,
+        clearColor: MTLClearColor = MTLClearColor(red: 20.0 / 255.0, green: 25.0 / 255.0, blue: 28.0 / 255.0, alpha: 1.0)
+    ) {
+        renderSpreadCurl(
+            targetTexture: drawable.texture,
+            drawableToPresent: drawable,
+            viewportSize: viewportSize,
+            spread: spread,
+            destinationSpread: destinationSpread,
+            staticImage: staticImage,
+            movingFrontImage: movingFrontImage,
+            movingBackImage: movingBackImage,
+            underneathImage: underneathImage,
+            mapping: mapping,
+            progress: progress,
+            userScale: userScale,
+            userPanX: userPanX,
+            userPanY: userPanY,
+            clearColor: clearColor
+        )
+    }
+
+    func renderSpreadCurl(
+        targetTexture: MTLTexture,
+        drawableToPresent: CAMetalDrawable? = nil,
+        viewportSize: CGSize,
+        spread: SpreadDraw,
+        destinationSpread: SpreadDraw,
+        staticImage: UIImage,
+        movingFrontImage: UIImage,
+        movingBackImage: UIImage?,
+        underneathImage: UIImage?,
+        mapping: SpreadTurnMapping,
+        progress: CGFloat,
+        userScale: CGFloat,
+        userPanX: CGFloat,
+        userPanY: CGFloat,
+        clearColor: MTLClearColor = MTLClearColor(red: 20.0 / 255.0, green: 25.0 / 255.0, blue: 28.0 / 255.0, alpha: 1.0)
     ) {
         guard isAvailable, let queue = commandQueue else { return }
         guard let staticTex = texture(for: staticImage),
@@ -589,9 +755,9 @@ final class PageCurlRenderer {
 
         guard let cmdBuffer = queue.makeCommandBuffer() else { return }
         let passDesc = MTLRenderPassDescriptor()
-        passDesc.colorAttachments[0].texture = drawable.texture
+        passDesc.colorAttachments[0].texture = targetTexture
         passDesc.colorAttachments[0].loadAction = .clear
-        passDesc.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        passDesc.colorAttachments[0].clearColor = clearColor
         passDesc.colorAttachments[0].storeAction = .store
 
         guard let encoder = cmdBuffer.makeRenderCommandEncoder(descriptor: passDesc) else { return }
@@ -697,7 +863,9 @@ final class PageCurlRenderer {
         }
 
         encoder.endEncoding()
-        cmdBuffer.present(drawable)
+        if let drawable = drawableToPresent {
+            cmdBuffer.present(drawable)
+        }
         cmdBuffer.commit()
     }
 }

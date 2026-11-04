@@ -72,6 +72,17 @@ final class CurlAnimator: ObservableObject {
         }
     }
 
+    /// Immediately finishes an in-flight animation, invoking its completion handler synchronously.
+    func completeImmediately() {
+        guard isAnimating else { return }
+        stop()
+        progress = targetProgress
+        let completed = (targetProgress >= 0.99)
+        let cb = onComplete
+        onComplete = nil
+        cb?(completed)
+    }
+
     func stop() {
         displayLink?.invalidate()
         displayLink = nil
@@ -86,6 +97,7 @@ final class CurlAnimator: ObservableObject {
 
     func reset() {
         stop()
+        onComplete = nil
         direction = nil
         progress = 0
     }
@@ -96,6 +108,7 @@ enum TurnKind {
         topImage: UIImage,
         bottomImage: UIImage?,
         draw: PageDraw,
+        bottomDraw: PageDraw? = nil,
         isPeelingFromRight: Bool
     )
     case spread(
@@ -116,6 +129,15 @@ final class MetalCurlUIView: UIView {
     override class var layerClass: AnyClass { CAMetalLayer.self }
     var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
 
+    private var currentKind: TurnKind?
+    private var currentProgress: CGFloat = 0
+    private var currentClearColor: MTLClearColor = MTLClearColor(
+        red: 20.0 / 255.0,
+        green: 25.0 / 255.0,
+        blue: 28.0 / 255.0,
+        alpha: 1.0
+    )
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupLayer()
@@ -131,21 +153,52 @@ final class MetalCurlUIView: UIView {
         metalLayer.device = dev
         metalLayer.pixelFormat = .bgra8Unorm
         metalLayer.framebufferOnly = true
-        metalLayer.isOpaque = false
-        metalLayer.backgroundColor = UIColor.clear.cgColor
+        metalLayer.isOpaque = true
         metalLayer.contentsScale = UIScreen.main.scale
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        guard bounds.width > 0 && bounds.height > 0 else { return }
         let scale = metalLayer.contentsScale
-        metalLayer.drawableSize = CGSize(
+        let expectedSize = CGSize(
             width: max(bounds.width * scale, 1),
             height: max(bounds.height * scale, 1)
         )
+        if metalLayer.drawableSize != expectedSize {
+            metalLayer.drawableSize = expectedSize
+        }
+        if let kind = currentKind {
+            renderNow(kind: kind, progress: currentProgress, clearColor: currentClearColor)
+        }
     }
 
-    func render(kind: TurnKind, progress: CGFloat) {
+    func update(kind: TurnKind?, progress: CGFloat, clearColor: MTLClearColor) {
+        self.currentKind = kind
+        self.currentProgress = progress
+        self.currentClearColor = clearColor
+
+        guard let kind = kind else {
+            if !isHidden {
+                isHidden = true
+            }
+            return
+        }
+        if isHidden {
+            isHidden = false
+        }
+        renderNow(kind: kind, progress: progress, clearColor: clearColor)
+    }
+
+    func render(
+        kind: TurnKind,
+        progress: CGFloat,
+        clearColor: MTLClearColor = MTLClearColor(red: 20.0 / 255.0, green: 25.0 / 255.0, blue: 28.0 / 255.0, alpha: 1.0)
+    ) {
+        update(kind: kind, progress: progress, clearColor: clearColor)
+    }
+
+    private func renderNow(kind: TurnKind, progress: CGFloat, clearColor: MTLClearColor) {
         guard bounds.width > 0 && bounds.height > 0 else { return }
         let scale = metalLayer.contentsScale
         let expectedSize = CGSize(
@@ -157,15 +210,17 @@ final class MetalCurlUIView: UIView {
         }
         guard let drawable = metalLayer.nextDrawable() else { return }
         switch kind {
-        case .single(let topImg, let bottomImg, let draw, let isPeelingFromRight):
+        case .single(let topImg, let bottomImg, let draw, let bottomDraw, let isPeelingFromRight):
             PageCurlRenderer.shared.renderSinglePageCurl(
                 to: drawable,
                 viewportSize: bounds.size,
                 topImage: topImg,
                 bottomImage: bottomImg,
                 draw: draw,
+                bottomDraw: bottomDraw,
                 progress: progress,
-                isPeelingFromRight: isPeelingFromRight
+                isPeelingFromRight: isPeelingFromRight,
+                clearColor: clearColor
             )
         case .spread(
             let spread,
@@ -192,24 +247,32 @@ final class MetalCurlUIView: UIView {
                 progress: progress,
                 userScale: userScale,
                 userPanX: userPanX,
-                userPanY: userPanY
+                userPanY: userPanY,
+                clearColor: clearColor
             )
         }
     }
 }
 
 struct PageCurlView: UIViewRepresentable {
-    var kind: TurnKind
+    var kind: TurnKind?
     var progress: CGFloat
+    var clearColor: MTLClearColor = MTLClearColor(
+        red: 20.0 / 255.0,
+        green: 25.0 / 255.0,
+        blue: 28.0 / 255.0,
+        alpha: 1.0
+    )
 
     func makeUIView(context: Context) -> MetalCurlUIView {
         let view = MetalCurlUIView()
         view.backgroundColor = .clear
-        view.isOpaque = false
+        view.isOpaque = true
+        view.isHidden = (kind == nil)
         return view
     }
 
     func updateUIView(_ uiView: MetalCurlUIView, context: Context) {
-        uiView.render(kind: kind, progress: progress)
+        uiView.update(kind: kind, progress: progress, clearColor: clearColor)
     }
 }
