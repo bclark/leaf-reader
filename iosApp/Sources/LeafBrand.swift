@@ -157,6 +157,37 @@ struct OchreBadge: View {
     }
 }
 
+/// Custom book-themed status icon for "Mark All as Read" (open book with green checkmark badge)
+/// vs "Mark All as Unread" (closed book with rose minus/reset badge), matching Android's BookStatusBadgeIcon.
+struct BookStatusBadgeIcon: View {
+    let isAllCompleted: Bool
+    static let completedGreen = Color(hex: 0x4ADE80)
+    static let unreadRose = Color(hex: 0xA15555)
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Image(systemName: isAllCompleted ? "book.closed.fill" : "book.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(Leaf.cream)
+                .frame(width: 22, height: 22, alignment: .topLeading)
+
+            Circle()
+                .fill(isAllCompleted ? Self.unreadRose : Self.completedGreen)
+                .frame(width: 13, height: 13)
+                .overlay(
+                    Circle().stroke(Leaf.deepInkSurface, lineWidth: 1.5)
+                )
+                .overlay(
+                    Image(systemName: isAllCompleted ? "minus" : "checkmark")
+                        .font(.system(size: 7, weight: .black))
+                        .foregroundColor(isAllCompleted ? Leaf.cream : Leaf.ink)
+                )
+        }
+        .frame(width: 24, height: 24)
+        .accessibilityLabel(isAllCompleted ? "Mark all as unread" : "Mark all as read")
+    }
+}
+
 /// Dog-eared page-curl bookmark badge shape.
 struct PageCurlBadgeShape: Shape {
     var corner: CGFloat = 10

@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Dedicated screen for a custom reading list, matching Android's ReadingListDetailScreen.kt.
-/// Allows sequential reading, adding comics with live search, reordering up/down,
-/// batch mark read/unread, renaming, and deleting the list.
+/// Uses a compact single-row Hero Status Bar with unified read-progress badge, BookStatusBadgeIcon,
+/// compact START / CONTINUE / RESTART pill, and a pinned bottom-right "+ ADD COMICS" FAB.
 struct ReadingListDetailView: View {
     let listId: String
     @ObservedObject var library: LibraryStore
@@ -29,9 +29,13 @@ struct ReadingListDetailView: View {
         return list.itemFilenames.compactMap { map[$0] }
     }
 
+    private var completedCount: Int {
+        listComics.filter { ReadingProgress.isCompleted($0) }.count
+    }
+
     private var allRead: Bool {
         guard !listComics.isEmpty else { return false }
-        return listComics.allSatisfy { ReadingProgress.isCompleted($0) }
+        return completedCount == listComics.count
     }
 
     private var nextUnread: URL? {
@@ -49,6 +53,14 @@ struct ReadingListDetailView: View {
         return "\(started ? "CONTINUE" : "START"): \(title)"
     }
 
+    /// Compact action pill label matching Android's redesigned hero card (`START`, `CONTINUE`, `RESTART`).
+    var shortActionLabel: String {
+        guard let target = nextUnread else { return "START" }
+        if allRead { return "RESTART" }
+        let started = (ReadingProgress.get(target)?.page ?? 0) > 0 || completedCount > 0
+        return started ? "CONTINUE" : "START"
+    }
+
     var body: some View {
         ZStack {
             settings.ground.ignoresSafeArea()
@@ -58,6 +70,37 @@ struct ReadingListDetailView: View {
                 appBar
                 GeometryReader { geo in
                     content(for: geo.size.width)
+                }
+            }
+
+            // Pinned Bottom-Right Extended FAB (+ ADD COMICS)
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Button {
+                        selectedToAdd.removeAll()
+                        addSearchQuery = ""
+                        showAddComicsSheet = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(Leaf.ink)
+                            Text("ADD COMICS")
+                                .font(.anton(15))
+                                .tracking(0.8)
+                                .foregroundColor(Leaf.ink)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(Leaf.ochre)
+                        .clipShape(RoundedCornerShape(cornerRadius: 6))
+                        .overlay(RoundedCornerShape(cornerRadius: 6).stroke(Leaf.ink, lineWidth: 2))
+                        .comicShadow(offset: 4, color: .black.opacity(0.75), corner: 6)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(20)
                 }
             }
         }
@@ -246,103 +289,120 @@ struct ReadingListDetailView: View {
             }
             .padding(.horizontal, 18)
             .padding(.top, 16)
-            .padding(.bottom, 48)
+            .padding(.bottom, 88)
         }
     }
 
     private var heroCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                OchreBadge(text: "\(listComics.count) COMICS IN LIST")
-                Spacer()
+        let badgeColor = allRead ? BookStatusBadgeIcon.completedGreen : Leaf.ochre
+        let statusText = listComics.isEmpty
+            ? "0 COMICS"
+            : "\(completedCount) OF \(listComics.count) READ"
+        let progressFraction = listComics.isEmpty ? 0.0 : Double(completedCount) / Double(listComics.count)
+
+        return HStack(spacing: 12) {
+            // Left: Unified Read Badge + Slim Progress Bar
+            VStack(alignment: .leading, spacing: 6) {
+                Text(statusText)
+                    .font(.anton(12))
+                    .tracking(0.5)
+                    .foregroundColor(badgeColor)
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(Leaf.ink.opacity(0.6))
+                    .clipShape(RoundedCornerShape(cornerRadius: 4))
+                    .overlay(
+                        RoundedCornerShape(cornerRadius: 4)
+                            .stroke(badgeColor.opacity(0.55), lineWidth: 1)
+                    )
+
+                if !listComics.isEmpty {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedCornerShape(cornerRadius: 1.5)
+                                .fill(Leaf.inkSoft.opacity(0.25))
+                            RoundedCornerShape(cornerRadius: 1.5)
+                                .fill(badgeColor)
+                                .frame(width: geo.size.width * CGFloat(min(max(progressFraction, 0), 1)))
+                        }
+                    }
+                    .frame(height: 3)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Right: Book Status Toggle + Compact Start/Continue/Restart Pill
+            if !listComics.isEmpty {
                 HStack(spacing: 8) {
                     Button {
-                        selectedToAdd.removeAll()
-                        addSearchQuery = ""
-                        showAddComicsSheet = true
+                        library.markReadingListRead(listId: listId, read: !allRead)
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 11, weight: .bold))
-                            Text("ADD COMICS")
-                                .font(.anton(11))
-                        }
-                        .foregroundColor(Leaf.ink)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(Leaf.ochre)
-                        .clipShape(RoundedCornerShape(cornerRadius: 3))
+                        BookStatusBadgeIcon(isAllCompleted: allRead)
+                            .frame(width: 36, height: 36)
+                            .background(Leaf.inkSoft)
+                            .clipShape(RoundedCornerShape(cornerRadius: 8))
+                            .overlay(
+                                RoundedCornerShape(cornerRadius: 8)
+                                    .stroke(
+                                        allRead ? BookStatusBadgeIcon.unreadRose.opacity(0.6) : Leaf.creamMuted.opacity(0.35),
+                                        lineWidth: 1
+                                    )
+                            )
                     }
                     .buttonStyle(.plain)
 
-                    if !listComics.isEmpty {
+                    if let target = allRead ? listComics.first : nextUnread {
                         Button {
-                            library.markReadingListRead(listId: listId, read: !allRead)
+                            onOpenComic(target)
                         } label: {
-                            Text(allRead ? "MARK UNREAD" : "MARK READ")
-                                .font(.anton(11))
-                                .foregroundColor(Leaf.ochre)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 5)
-                                .background(Leaf.inkSoft)
-                                .clipShape(RoundedCornerShape(cornerRadius: 3))
+                            HStack(spacing: 4) {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 12, weight: .bold))
+                                Text(shortActionLabel)
+                                    .font(.anton(13))
+                                    .tracking(0.6)
+                                    .lineLimit(1)
+                            }
+                            .foregroundColor(Leaf.ink)
+                            .padding(.horizontal, 12)
+                            .frame(height: 36)
+                            .background(Leaf.ochre)
+                            .clipShape(RoundedCornerShape(cornerRadius: 8))
+                            .overlay(
+                                RoundedCornerShape(cornerRadius: 8)
+                                    .stroke(Leaf.ink, lineWidth: 1.5)
+                            )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(heroButtonText)
                     }
                 }
-            }
-
-            if let target = allRead ? listComics.first : nextUnread {
-                Button {
-                    onOpenComic(target)
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 12))
-                        Text(heroButtonText)
-                            .font(.anton(13))
-                            .lineLimit(1)
-                    }
-                    .foregroundColor(Leaf.ink)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(Leaf.ochre)
-                    .clipShape(RoundedCornerShape(cornerRadius: 4))
-                }
-                .buttonStyle(.plain)
             }
         }
-        .padding(14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .background(Leaf.deepInkSurface)
-        .clipShape(RoundedCornerShape(cornerRadius: 8))
-        .comicShadow(offset: 4, color: .black.opacity(0.75), corner: 8)
+        .clipShape(RoundedCornerShape(cornerRadius: 10))
+        .overlay(
+            RoundedCornerShape(cornerRadius: 10)
+                .stroke(Leaf.inkSoft.opacity(0.28), lineWidth: 1)
+        )
+        .comicShadow(offset: 4, color: .black.opacity(0.75), corner: 10)
     }
 
     private var emptyStateCard: some View {
-        VStack(spacing: 14) {
-            Text("No comics in this reading list yet.")
-                .font(.archivo(14, weight: 600))
+        VStack(spacing: 10) {
+            Text("THIS LIST IS EMPTY")
+                .font(.anton(16))
+                .foregroundColor(Leaf.paperWhite.opacity(0.75))
+            Text("Tap + ADD COMICS in the bottom corner to curate your reading order.")
+                .font(.archivo(12, weight: 500))
                 .foregroundColor(Leaf.creamMuted)
-            Button {
-                selectedToAdd.removeAll()
-                addSearchQuery = ""
-                showAddComicsSheet = true
-            } label: {
-                Text("+ ADD COMICS TO LIST")
-                    .font(.anton(12))
-                    .foregroundColor(Leaf.ink)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Leaf.ochre)
-                    .clipShape(RoundedCornerShape(cornerRadius: 4))
-            }
-            .buttonStyle(.plain)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(28)
-        .background(Leaf.deepInkSurface)
-        .clipShape(RoundedCornerShape(cornerRadius: 8))
-        .comicShadow(offset: 4, color: .black.opacity(0.75), corner: 8)
+        .padding(.vertical, 40)
     }
 
     private var addComicsSheet: some View {

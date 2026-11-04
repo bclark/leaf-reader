@@ -297,6 +297,7 @@ final class LibraryStoreTests: XCTestCase {
             onDismiss: {}
         )
         XCTAssertTrue(viewFresh.heroButtonText.hasPrefix("START:"), "Expected START: prefix when fresh, got \(viewFresh.heroButtonText)")
+        XCTAssertEqual(viewFresh.shortActionLabel, "START")
 
         // Partial progress on issue 1
         ReadingProgress.set(issue1, page: 3, step: -1, total: 8, rtl: false)
@@ -309,6 +310,7 @@ final class LibraryStoreTests: XCTestCase {
             onDismiss: {}
         )
         XCTAssertTrue(viewContinue.heroButtonText.hasPrefix("CONTINUE:"), "Expected CONTINUE: prefix when in progress, got \(viewContinue.heroButtonText)")
+        XCTAssertEqual(viewContinue.shortActionLabel, "CONTINUE")
 
         // Mark all read
         store.markSeriesRead(seriesName: "Invincible", volume: nil, read: true)
@@ -320,6 +322,7 @@ final class LibraryStoreTests: XCTestCase {
             onDismiss: {}
         )
         XCTAssertTrue(viewAllRead.heroButtonText.hasPrefix("READ FROM START:"), "Expected READ FROM START: when all completed, got \(viewAllRead.heroButtonText)")
+        XCTAssertEqual(viewAllRead.shortActionLabel, "RESTART")
 
         for u in [issue1, issue2] {
             ReadingProgress.clear(u)
@@ -371,11 +374,13 @@ final class LibraryStoreTests: XCTestCase {
             onDismiss: {}
         )
         XCTAssertEqual(detailAfterReorder.heroButtonText, "START: EVENT PART 2")
+        XCTAssertEqual(detailAfterReorder.shortActionLabel, "START")
 
         // Start reading Event Part 2 (page 2 of 6) -> CONTINUE: EVENT PART 2
         ReadingProgress.set(c2, page: 2, step: -1, total: 6, rtl: false)
         store.refresh()
         XCTAssertEqual(detailAfterReorder.heroButtonText, "CONTINUE: EVENT PART 2")
+        XCTAssertEqual(detailAfterReorder.shortActionLabel, "CONTINUE")
 
         // Mark entire reading list read -> READ FROM START: EVENT PART 2
         store.markReadingListRead(listId: created.id, read: true)
@@ -383,11 +388,13 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertTrue(ReadingProgress.isCompleted(c2))
         XCTAssertTrue(ReadingProgress.isCompleted(c3))
         XCTAssertEqual(detailAfterReorder.heroButtonText, "READ FROM START: EVENT PART 2")
+        XCTAssertEqual(detailAfterReorder.shortActionLabel, "RESTART")
 
         // Mark entire reading list unread -> back to START: EVENT PART 2
         store.markReadingListRead(listId: created.id, read: false)
         XCTAssertFalse(ReadingProgress.isCompleted(c1))
         XCTAssertEqual(detailAfterReorder.heroButtonText, "START: EVENT PART 2")
+        XCTAssertEqual(detailAfterReorder.shortActionLabel, "START")
 
         for u in [c1, c2, c3] {
             ReadingProgress.clear(u)
