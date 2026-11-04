@@ -245,44 +245,38 @@ fun ReadingListDetailScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            // Left Column: Count Chip + Status + Slim Progress Bar
+                            // Left Column: Unified Read Count Badge + Slim Progress Bar
                             Column(
                                 modifier = Modifier
                                     .weight(1f)
                                     .padding(end = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                val completedCount = listComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
+                                val statusText = if (listComics.isEmpty()) {
+                                    "0 COMICS"
+                                } else {
+                                    "$completedCount OF ${listComics.size} READ"
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(InkSoft)
+                                        .border(
+                                            1.dp,
+                                            if (allCompleted) LeafAccent.copy(alpha = 0.65f) else Ochre.copy(alpha = 0.6f),
+                                            RoundedCornerShape(4.dp),
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 3.dp),
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(InkSoft)
-                                            .border(1.dp, Ochre.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
-                                            .padding(horizontal = 7.dp, vertical = 2.dp),
-                                    ) {
-                                        Text(
-                                            text = "${listComics.size} ${if (listComics.size == 1) "COMIC" else "COMICS"}",
-                                            fontFamily = Anton,
-                                            fontSize = 11.sp,
-                                            color = Ochre,
-                                            letterSpacing = 0.4.sp,
-                                        )
-                                    }
-                                    if (listComics.isNotEmpty()) {
-                                        val completedCount = listComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-                                        Text(
-                                            text = if (allCompleted) "COMPLETED" else "$completedCount OF ${listComics.size} READ",
-                                            fontFamily = Archivo,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 11.sp,
-                                            color = if (allCompleted) LeafAccent else CreamMuted,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
+                                    Text(
+                                        text = statusText,
+                                        fontFamily = Anton,
+                                        fontSize = 11.sp,
+                                        color = if (allCompleted) LeafAccent else Ochre,
+                                        letterSpacing = 0.4.sp,
+                                        maxLines = 1,
+                                    )
                                 }
 
                                 if (listComics.isNotEmpty()) {
