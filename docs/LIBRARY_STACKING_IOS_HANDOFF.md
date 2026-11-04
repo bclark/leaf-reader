@@ -37,13 +37,22 @@ This document details the complete feature specification verified on Android, th
   - Vertical swipe peels the top card down with spring physics, cycling through issues in the stack. Tapping opens the `SeriesDetailScreen`.
 
 ### C. Dedicated `SeriesDetailScreen`
-- **Hero Header**:
-  - Large series title, volume badge, total issue count badge (`X ISSUES TOTAL`).
-  - Dynamic completion toggle: `MARK READ` if any issue is unread, toggling to `MARK UNREAD` if all issues are read.
-- **Adaptive Primary Action Button**:
-  - `READ FROM START: [ISSUE #1]` when all issues in the series are completed.
-  - `CONTINUE: [ISSUE #X]` when an issue is partially read (`lastPage > 0`).
-  - `START: [ISSUE #X]` when starting fresh from an unread issue.
+- **Compact Hero Status Bar (Single-Row Card)**:
+  - **Left Column (Progress Summary)**:
+    - **Unified Progress Badge**: Single bordered pill showing `"X OF Y READ"` (or `"0 ISSUES"` when empty) in Anton font (`12.sp`, letterSpacing `0.5.sp`). Colored `Ochre` while unread/in-progress, switching to `LeafAccent` green (`#4ADE80`) when all issues are completed.
+    - **Progress Bar**: Slim `3.dp` height `LinearProgressIndicator` (`completedCount / totalCount`) directly below the badge when `totalCount > 0`.
+  - **Right Row (Quick Actions)**:
+    - **Mark All Read / Unread Icon Button (`36.dp` × `36.dp` rounded square, `LeafSurface` background, `InkSoft` border)**:
+      - **Mark All as Read** (when not all completed): Open book icon (`MenuBook` / SF Symbol `book.pages` or `book.fill`) with a `13.dp` circular `LeafAccent` (`#4ADE80`) checkmark badge (`✓`) in the bottom-right corner.
+      - **Mark All as Unread** (when all completed): Closed book icon (`Book` / SF Symbol `book.closed.fill`) with a `13.dp` circular `ComicRose` (`#A15555`) minus badge (`−`) in the bottom-right corner.
+    - **Primary Action Pill (`36.dp` height, `Ochre` background, `1.5.dp` `Ink` border, `8.dp` corner radius)**:
+      - Play icon (`16.dp`) + Anton label (`13.sp`, `Ink`):
+        - `▶ START` when starting fresh from an unread issue.
+        - `▶ CONTINUE` when an issue is partially read (`lastPage > 0`) or some issues are completed.
+        - `▶ RESTART` when all issues in the series are completed.
+- **Pinned Bottom-Right FAB (`+ ADD COMICS`)**:
+  - Pinned to `Alignment.BottomEnd` (`padding(20.dp)`), matching the main Library screen's `+ ADD` FAB (`Ochre` background, `Ink` text, `+ ADD COMICS` label).
+  - Grid bottom content padding set to `88.dp` so the FAB does not overlap cards.
 - **Natural Order Grid**:
   - Issues sorted by `issueNumber ?: Float.MAX_VALUE` then `title`.
   - Each item displays individual progress bar, quick-remove `(X)` icon, and cover thumbnail.
@@ -53,7 +62,7 @@ This document details the complete feature specification verified on Android, th
     2. `MARK AS READ` / `MARK AS UNREAD`
     3. `REMOVE FROM SERIES` (detaches issue back to standalone)
 - **Add Comics Flow**:
-  - `ADD COMICS` button in header opens a multi-select dialog showing downloaded library comics not yet in the series.
+  - `+ ADD COMICS` bottom-right FAB opens a multi-select dialog showing downloaded library comics not yet in the series.
 
 ---
 
@@ -82,14 +91,14 @@ When running the `:app` build on your Android device, execute the following test
 5. Tap directly on the card without dragging.
 6. **Verify**: It navigates cleanly to the `SeriesDetailScreen`.
 
-### Test Case 4: `SeriesDetailScreen` Hero & CTA
+### Test Case 4: `SeriesDetailScreen` Compact Hero Status Bar & CTA
 1. Open a series with multiple issues.
-2. If none have been started, verify the button says `START: [FIRST ISSUE]`.
+2. If none have been started, verify the hero bar shows `0 OF X READ`, the open-book-with-checkmark icon (`BookStatusBadgeIcon`), and the `▶ START` pill.
 3. Open an issue and read a few pages, then back out.
-4. Verify the hero button updates to `CONTINUE: [PARTIALLY READ ISSUE]`.
-5. Tap the hero button; verify it opens directly to your saved page.
-6. Return and tap `MARK READ` in the header; verify all issues fill their progress bars and the button changes to `READ FROM START: [FIRST ISSUE]` and the header button changes to `MARK UNREAD`.
-7. Tap `MARK UNREAD`; verify all progress bars reset to empty.
+4. Verify the hero pill updates to `▶ CONTINUE`.
+5. Tap `▶ CONTINUE`; verify it opens directly to your saved page.
+6. Return and tap the book-with-checkmark button in the hero bar; verify all issues fill their progress bars, the badge turns `LeafAccent` green (`X OF X READ`), the book icon switches to the closed-book-with-minus badge, and the action pill changes to `▶ RESTART`.
+7. Tap the closed-book-with-minus button; verify all progress bars reset to empty (`0 OF X READ`).
 
 ### Test Case 5: Issue Long-Press Menu & Direct Removal
 1. In `SeriesDetailScreen`, long-press on an issue card.
@@ -99,8 +108,8 @@ When running the `:app` build on your Android device, execute the following test
 5. Confirm removal.
 6. **Verify**: The comic is removed from the series. Return to the main library: verify that comic is now listed as a standalone single comic.
 
-### Test Case 6: Manual Series Addition
-1. Inside `SeriesDetailScreen`, tap `ADD COMICS`.
+### Test Case 6: Manual Series Addition (Bottom-Right FAB)
+1. Inside `SeriesDetailScreen`, tap the pinned bottom-right `+ ADD COMICS` FAB.
 2. Select one or more standalone comics from the dialog and tap `ADD`.
 3. **Verify**: The comics are immediately added to the series and sorted into their natural issue positions.
 
@@ -120,7 +129,7 @@ When running the `:app` build on your Android device, execute the following test
 | `LibraryRepository.backfillMetadataIfNeeded()` | `ComicMetadataStore.backfillMetadataIfNeeded()` | Check that archive `readComicInfoXml()` is invoked if filename parsing yields no series. |
 | `LibraryViewModel.libraryItems` | `LibraryStore.libraryItems` | Implemented; ensure `topCoverComic` defaults to first uncompleted issue (`lastPage < pageCount - 1`). |
 | `ComicStackCard` (Jetpack Compose) | `ComicStackCard` (SwiftUI) | Verify `topIndex` starts at the `topCoverComic` index, and issue badges show `#num` if available. |
-| `SeriesDetailScreen.kt` | `SeriesDetailView.swift` | Refine CTA button text (`READ FROM START` vs `CONTINUE` vs `START`), dynamic `MARK READ`/`MARK UNREAD`, and context menu. |
+| `SeriesDetailScreen.kt` | `SeriesDetailView.swift` | Replace multi-row hero card with compact single-row status bar (`X OF Y READ` + `BookStatusBadgeIcon` + `▶ START/CONTINUE/RESTART` pill) and move `+ ADD COMICS` to bottom-right FAB. |
 | `LibraryViewModelTest.kt` | `LibraryStoreTests.swift` | Add XCTest cases mirroring the 10 Android Robolectric unit tests. |
 
 ### iOS Refinements to Match Android Experience
@@ -144,17 +153,16 @@ When running the `:app` build on your Android device, execute the following test
    }
    ```
 
-3. **Hero Button Text in `SeriesDetailView.swift`**:
+3. **Compact Hero Action Pill Label in `SeriesDetailView.swift`**:
    ```swift
-   var heroButtonText: String {
-       if allRead, let first = seriesComics.first {
-           return "READ FROM START: \(first.deletingPathExtension().lastPathComponent.uppercased())"
-       } else if let next = nextUnread, let p = ReadingProgress.get(next), p.page > 0 {
-           return "CONTINUE: \(next.deletingPathExtension().lastPathComponent.uppercased())"
-       } else if let next = nextUnread {
-           return "START: \(next.deletingPathExtension().lastPathComponent.uppercased())"
+   var actionLabel: String {
+       if allCompleted {
+           return "RESTART"
+       } else if let next = nextUnread, (ReadingProgress.get(next)?.page ?? 0) > 0 || completedCount > 0 {
+           return "CONTINUE"
+       } else {
+           return "START"
        }
-       return "READ"
    }
    ```
 

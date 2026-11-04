@@ -14,19 +14,27 @@ This feature promotes Reading Lists from basic alert popups to a first-class, de
 * **App Bar**:
   * Back button (`chevron.left` / `ArrowBack`).
   * List title in brand Anton font (`18.sp`, uppercase).
-  * Subtitle: `CUSTOM STORYLINE / READING LIST`.
+  * Subtitle: `CUSTOM READING LIST` (`11.sp`, `InkSoft.copy(alpha = 0.7f)`).
   * Quick action icons in toolbar:
     * **Edit / Rename**: Opens dialog to update the reading list name.
     * **Delete**: Opens confirmation dialog to delete the list (clearly indicating comics remain in the library).
-* **Hero Card**:
-  * Badge: `X COMICS IN LIST` / `1 COMIC IN LIST`.
-  * Actions row:
-    * **ADD COMICS**: Opens multi-select dialog to add library comics not yet in the list.
-    * **MARK READ / MARK UNREAD**: Toggles all comics in the reading list between completed (`lastPage = pageCount - 1`) and unread (`lastPage = 0`).
-  * **Dynamic Primary Action Button**:
-    * `START: [FIRST COMIC]` when no comics in the list have been read.
-    * `CONTINUE: [TITLE] (PG X/Y)` when a comic in the list is in progress (`lastPage > 0` and uncompleted).
-    * `READ FROM START: [FIRST COMIC]` when all comics in the list are completed.
+* **Compact Hero Status Bar (Single-Row Card)**:
+  * **Left Column (Progress Summary)**:
+    * **Unified Progress Badge**: Single bordered pill showing `"X OF Y READ"` (or `"0 COMICS"` when empty) in Anton font (`12.sp`, letterSpacing `0.5.sp`). Colored `Ochre` (`#D8B14A`) while unread/in-progress, switching to `LeafAccent` green (`#4ADE80`) when all comics are completed.
+    * **Progress Bar**: Slim `3.dp` height `LinearProgressIndicator` (`completedCount / totalCount`) directly below the badge when `totalCount > 0`.
+  * **Right Row (Quick Actions)**:
+    * **Mark All Read / Unread Icon Button (`36.dp` × `36.dp` rounded square, `LeafSurface` background, `InkSoft` border)**:
+      * **Mark All as Read** (when not all completed): Open book icon (`MenuBook` / SF Symbol `book.fill` or `book.pages`) with a `13.dp` circular `LeafAccent` (`#4ADE80`) checkmark badge (`✓`) in the bottom-right corner.
+      * **Mark All as Unread** (when all completed): Closed book icon (`Book` / SF Symbol `book.closed.fill`) with a `13.dp` circular `ComicRose` (`#A15555`) minus badge (`−`) in the bottom-right corner.
+    * **Primary Action Pill (`36.dp` height, `Ochre` background, `1.5.dp` `Ink` border, `8.dp` corner radius)**:
+      * Play icon (`16.dp`) + Anton label (`13.sp`, `Ink`):
+        * `▶ START` when no comics in the list have been read.
+        * `▶ CONTINUE` when a comic in the list is in progress (`lastPage > 0` and uncompleted).
+        * `▶ RESTART` when all comics in the list are completed.
+* **Pinned Bottom-Right FAB (`+ ADD COMICS`)**:
+  * Moved out of the hero card and pinned to `Alignment.BottomEnd` (`padding(20.dp)`), matching the main Library screen's `+ ADD` FAB.
+  * Styled with `Ochre` container color, `Ink` content color, `+` icon, and `ADD COMICS` Anton label (`15.sp`).
+  * Grid bottom content padding increased to `88.dp` so the FAB never obscures the bottom row of cards.
 
 ### B. Natural Custom Ordering & Reordering
 * Comics in a reading list are strictly ordered by `sortOrder ASC`.
@@ -59,10 +67,12 @@ This feature promotes Reading Lists from basic alert popups to a first-class, de
 
 ### Test Case 2: Multi-Select Add Comics
 1. Tap `ADD COMICS` in the hero card.
+### Test Case 2: Multi-Select Add Comics (Bottom-Right FAB)
+1. Tap the pinned `+ ADD COMICS` floating action button in the bottom-right corner.
 2. Type in the search box to find specific titles.
 3. Select 3 comics across different series and tap `ADD (3)`.
 4. **Verify**: All 3 comics appear in the list with badges `#1`, `#2`, and `#3`.
-5. **Verify**: The hero badge updates to `3 COMICS IN LIST`.
+5. **Verify**: The hero badge updates to `0 OF 3 READ`.
 
 ### Test Case 3: Reorder Reading Sequence
 1. On comic `#3`, tap the Move Up arrow (`▲`).
@@ -71,13 +81,13 @@ This feature promotes Reading Lists from basic alert popups to a first-class, de
 4. **Verify**: Comic `#1` becomes `#2`.
 5. Exit to the library and return: verify the updated sequence is persistent.
 
-### Test Case 4: Dynamic Hero CTA Progression
-1. With all comics unread, verify the hero button says `START: [FIRST COMIC]`.
-2. Tap the button; verify it opens Comic #1 in the reader.
+### Test Case 4: Dynamic Hero Bar & Book Status Badge Progression
+1. With all comics unread, verify the hero bar shows `0 OF 3 READ`, the open-book-with-checkmark icon (`BookStatusBadgeIcon(isAllCompleted = false)`), and the `▶ START` pill.
+2. Tap `▶ START`; verify it opens Comic #1 in the reader.
 3. Read a few pages and back out.
-4. **Verify**: The hero button updates to `CONTINUE: [COMIC #1] (PG X/Y)`.
-5. Tap `MARK READ` in the hero header.
-6. **Verify**: All comics in the list show 100% progress bars, the header button changes to `MARK UNREAD`, and the hero button updates to `READ FROM START: [FIRST COMIC]`.
+4. **Verify**: The action pill updates to `▶ CONTINUE`.
+5. Tap the book-with-checkmark button in the hero bar.
+6. **Verify**: All comics in the list show 100% progress bars, the hero badge turns `LeafAccent` green (`3 OF 3 READ`), the book button switches to the closed-book-with-minus icon (`BookStatusBadgeIcon(isAllCompleted = true)`), and the action pill updates to `▶ RESTART`.
 
 ### Test Case 5: Rename and Delete
 1. Tap the edit pencil in the top-right corner, enter a new name, and save.
@@ -94,7 +104,8 @@ All iOS work is strictly scoped to `iosApp/`.
 ### Architecture Mapping
 | Android Component | iOS Equivalent (`iosApp/`) | Action Required |
 | :--- | :--- | :--- |
-| `ReadingListDetailScreen.kt` | `ReadingListDetailView.swift` | Enhance existing view with sequence badges (`#1`, `#2`), quick Move Up/Down controls, and hero CTA. |
+| `ReadingListDetailScreen.kt` | `ReadingListDetailView.swift` | Replace multi-row hero card with single-row status bar (`X OF Y READ` + `BookStatusBadgeIcon` + `▶ START/CONTINUE/RESTART` pill) and move `+ ADD COMICS` to bottom-right FAB. |
+| `BookStatusBadgeIcon` (`LeafBrand.kt`) | `BookStatusBadgeIcon` (`View`) | Open book (`book.pages` / `book.fill`) + green `✓` badge when not all read; closed book (`book.closed.fill`) + rose `−` badge when all read. |
 | `Routes.READING_LIST` | SwiftUI NavigationLink / Sheet | Ensure tapping `ReadingListCard` in `LibraryView` opens full `ReadingListDetailView`. |
 | `reorderReadingList()` / `moveReadingListItem()` | `ReadingListStore.reorder()` | Add item move and reorder persistence to `ReadingListStore`. |
 | `markReadingListRead()` | `LibraryStore.markListRead()` | Implement batch toggle for all items in `currentList`. |
@@ -115,27 +126,41 @@ All iOS work is strictly scoped to `iosApp/`.
        .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.ochre, lineWidth: 1))
    ```
 
-2. **Reorder Actions**:
-   Provide both quick buttons and context menu items:
+2. **Book Status Badge Icon (`BookStatusBadgeIcon`)**:
    ```swift
-   Button {
-       library.moveItemInList(listId: listId, comicURL: comic, direction: -1)
-   } label: {
-       Image(systemName: "arrow.up")
+   struct BookStatusBadgeIcon: View {
+       let isAllCompleted: Bool
+       var body: some View {
+           ZStack(alignment: .bottomTrailing) {
+               Image(systemName: isAllCompleted ? "book.closed.fill" : "book.pages.fill")
+                   .font(.system(size: 16, weight: .semibold))
+                   .foregroundColor(Leaf.cream)
+                   .frame(width: 22, height: 22, alignment: .topLeading)
+               Circle()
+                   .fill(isAllCompleted ? Color(hex: 0xA15555) : Leaf.accent)
+                   .frame(width: 13, height: 13)
+                   .overlay(Circle().stroke(Leaf.deepSurface, lineWidth: 1.5))
+                   .overlay(
+                       Image(systemName: isAllCompleted ? "minus" : "checkmark")
+                           .font(.system(size: 7, weight: .bold))
+                           .foregroundColor(isAllCompleted ? Leaf.cream : Leaf.ink)
+                   )
+           }
+           .frame(width: 24, height: 24)
+       }
    }
    ```
 
-3. **Dynamic Hero CTA**:
+3. **Compact Hero Action Pill Label**:
    ```swift
-   var heroButtonText: String {
-       if allCompleted, let first = listComics.first {
-           return "READ FROM START: \(first.deletingPathExtension().lastPathComponent.uppercased())"
-       } else if let next = nextUnread, let p = ReadingProgress.get(next), p.page > 0 {
-           return "CONTINUE: \(next.deletingPathExtension().lastPathComponent.uppercased())"
-       } else if let next = nextUnread {
-           return "START: \(next.deletingPathExtension().lastPathComponent.uppercased())"
+   var actionLabel: String {
+       if allCompleted {
+           return "RESTART"
+       } else if let next = nextUnread, (ReadingProgress.get(next)?.page ?? 0) > 0 || completedCount > 0 {
+           return "CONTINUE"
+       } else {
+           return "START"
        }
-       return "READ"
    }
    ```
 
