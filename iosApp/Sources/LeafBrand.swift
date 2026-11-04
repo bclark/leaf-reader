@@ -225,6 +225,7 @@ struct PageCoin: View {
             Text("\(page)")
                 .font(.archivo(15, weight: 500))
                 .foregroundColor(Leaf.ink)
+                .accessibilityIdentifier("PageCoinCurrentPage")
             Text("/")
                 .font(.archivo(13, weight: 400))
                 .foregroundColor(Leaf.ink.opacity(0.55))
@@ -232,6 +233,8 @@ struct PageCoin: View {
                 .font(.archivo(14, weight: 400))
                 .foregroundColor(Leaf.ink.opacity(0.85))
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("PageCoin")
         .padding(.leading, 11)
         .padding(.trailing, 15)
         .padding(.vertical, 4)

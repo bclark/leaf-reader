@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leaf Architecture · Cross-Platform Android &amp; iOS</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:       #FBF8F2;   /* warm comic paper */
+      --color-paper-2:     #F3ECE2;   /* card background */
+      --color-ink:         #1A2820;   /* deep forest ink */
+      --color-ink-strong:  #0D1611;   /* high contrast text */
+      --color-muted:       #4A5D52;   /* sage slate */
+      --color-soft:        #687C71;   /* boundary labels */
+      --color-accent:      #C46516;   /* leaf ochre focal */
+      --color-accent-tint: rgba(196, 101, 22, 0.08);
+      --color-link:        #2A5C7A;   /* deep slate blue */
+      --font-sans:         'Geist', system-ui, sans-serif;
+      --font-serif:        'Instrument Serif', Georgia, serif;
+      --font-mono:         'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2.5rem 1.5rem;
+    }
+
+    .frame {
+      max-width: 1200px;
+      width: 100%;
+    }
+
+    .diagram-container {
+      width: 100%;
+      overflow-x: auto;
+      background: var(--color-paper);
+      border: 1px solid rgba(26, 40, 32, 0.12);
+      border-radius: 8px;
+      padding: 1.5rem 1rem;
+    }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.8rem, 2.5vw + 1rem, 2.4rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.25rem;
+    }
+
+    svg {
+      width: 100%;
+      min-width: 1080px;
+      display: block;
+    }
+
+    @media print {
+      .diagram-container { overflow-x: visible; border: none; padding: 0; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · Diagram Design</p>
+    <h1>Leaf App Architecture: Android, iOS, &amp; Shared Engine</h1>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1120 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="leaf-arch-title leaf-arch-desc">
+        <title id="leaf-arch-title">Leaf App Cross-Platform Architecture</title>
+        <desc id="leaf-arch-desc">System overview showing SwiftUI with Metal GPU rendering on iOS, Compose with Canvas Skia rendering on Android, unified by the Kotlin Multiplatform shared engine.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#4A5D52"/>
+          </marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#C46516"/>
+          </marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#2A5C7A"/>
+          </marker>
+        </defs>
+
+        <!-- Background -->
+        <rect width="100%" height="100%" fill="#FBF8F2"/>
+
+        <!-- ==================== TIER ZONES (Z-Order: Zones first) ==================== -->
+        <!-- Zone: iOS Platform -->
+        <rect x="40" y="50" width="500" height="236" rx="8" fill="rgba(26,40,32,0.02)" stroke="rgba(26,40,32,0.12)" stroke-width="0.8"/>
+        <rect x="56" y="54" width="220" height="14" rx="2" fill="#FBF8F2"/>
+        <text x="60" y="65" fill="#687C71" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">IOS PLATFORM · SWIFTUI &amp; METAL</text>
+
+        <!-- Zone: Android Platform -->
+        <rect x="580" y="50" width="500" height="236" rx="8" fill="rgba(26,40,32,0.02)" stroke="rgba(26,40,32,0.12)" stroke-width="0.8"/>
+        <rect x="596" y="54" width="230" height="14" rx="2" fill="#FBF8F2"/>
+        <text x="600" y="65" fill="#687C71" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">ANDROID PLATFORM · COMPOSE &amp; SKIA</text>
+
+        <!-- Zone: Kotlin Multiplatform Shared Core -->
+        <rect x="150" y="326" width="820" height="194" rx="8" fill="rgba(196,101,22,0.03)" stroke="rgba(196,101,22,0.22)" stroke-width="1"/>
+        <rect x="170" y="330" width="280" height="14" rx="2" fill="#FBF8F2"/>
+        <text x="174" y="341" fill="#C46516" font-size="8" font-family="'Geist Mono', monospace" font-weight="600" letter-spacing="0.14em">SHARED KMP ENGINE · COM.CHAKRA.LEAF:SHARED</text>
+
+        <!-- Zone: Persistence & Storage -->
+        <rect x="260" y="556" width="600" height="104" rx="8" fill="rgba(26,40,32,0.02)" stroke="rgba(26,40,32,0.12)" stroke-width="0.8"/>
+        <rect x="280" y="560" width="220" height="14" rx="2" fill="#FBF8F2"/>
+        <text x="284" y="571" fill="#687C71" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">STORAGE &amp; DURABLE PERSISTENCE</text>
+
+
+        <!-- ==================== CONNECTORS (Drawn before nodes) ==================== -->
+        <!-- 1. iOS: SwiftUI Views -> Native Decoders (Vertical line) -->
+        <line x1="170" y1="166" x2="170" y2="206" stroke="#4A5D52" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <rect x="144" y="177" width="52" height="14" rx="2" fill="#FBF8F2"/>
+        <text x="170" y="187" fill="#687C71" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DECODE</text>
+
+        <!-- 2. iOS: SwiftUI Views -> Metal Curl Engine (Horizontal line) -->
+        <line x1="270" y1="130" x2="310" y2="130" stroke="#4A5D52" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <rect x="274" y="112" width="34" height="12" rx="2" fill="#FBF8F2"/>
+        <text x="291" y="121" fill="#687C71" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DRIVE</text>
+
+        <!-- 3. Android: Compose UI -> Canvas Curl Engine (Horizontal line) -->
+        <line x1="810" y1="130" x2="850" y2="130" stroke="#4A5D52" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <rect x="814" y="112" width="34" height="12" rx="2" fill="#FBF8F2"/>
+        <text x="831" y="121" fill="#687C71" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DRIVE</text>
+
+        <!-- 4. Android: Compose UI -> Storage Framework (Elbow right+down) -->
+        <!-- Source (790, 166) -> Target (870, 206) via mid x=870 -->
+        <path d="M 770,166 V 188 Q 770,196 778,196 H 922 Q 930,196 930,204 V 206" fill="none" stroke="#4A5D52" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <rect x="826" y="190" width="48" height="12" rx="2" fill="#FBF8F2"/>
+        <text x="850" y="199" fill="#687C71" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">FETCH</text>
+
+        <!-- 5. iOS Metal Engine -> KMP Camera & Curl Transform (Elbow down) -->
+        <!-- Source (415, 166) -> Target (340, 376) -->
+        <path d="M 415,166 V 294 Q 415,302 407,302 H 348 Q 340,302 340,310 V 376" fill="none" stroke="#C46516" stroke-width="1.3" marker-end="url(#arrow-accent)"/>
+        <rect x="348" y="296" width="60" height="12" rx="2" fill="#FBF8F2"/>
+        <text x="378" y="305" fill="#C46516" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">MESH MATH</text>
+
+        <!-- 6. Android Canvas Engine -> KMP Camera & Curl Transform (Elbow down) -->
+        <!-- Source (955, 166) -> Target (480, 376) -->
+        <path d="M 955,166 V 306 Q 955,314 947,314 H 488 Q 480,314 480,322 V 376" fill="none" stroke="#C46516" stroke-width="1.3" marker-end="url(#arrow-accent)"/>
+        <rect x="668" y="308" width="84" height="12" rx="2" fill="#FBF8F2"/>
+        <text x="710" y="317" fill="#C46516" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SPREAD TRANSFORMS</text>
+
+        <!-- 7. iOS SwiftUI -> State & Backup Engine (Elbow down) -->
+        <!-- Source (235, 166) -> Target (670, 376) -->
+        <path d="M 235,166 V 270 Q 235,278 243,278 H 662 Q 670,278 670,286 V 376" fill="none" stroke="#4A5D52" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <rect x="420" y="272" width="76" height="12" rx="2" fill="#FBF8F2"/>
+        <text x="458" y="281" fill="#687C71" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">PROGRESS SYNC</text>
+
+        <!-- 8. Android Compose -> State & Backup Engine (Vertical straight line) -->
+        <line x1="720" y1="166" x2="720" y2="376" stroke="#4A5D52" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <rect x="686" y="244" width="68" height="12" rx="2" fill="#FBF8F2"/>
+        <text x="720" y="253" fill="#687C71" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">STATE BIND</text>
+
+        <!-- 9. KMP State & Backup -> Storage & Documents (Elbow down) -->
+        <!-- Source (720, 480) -> Target (620, 584) -->
+        <path d="M 720,480 V 534 Q 720,542 712,542 H 628 Q 620,542 620,550 V 584" fill="none" stroke="#4A5D52" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+        <rect x="638" y="536" width="64" height="12" rx="2" fill="#FBF8F2"/>
+        <text x="670" y="545" fill="#687C71" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">BACKUP JSON</text>
+
+        <!-- 10. iOS Decoders -> Storage & Documents (Elbow down) -->
+        <!-- Source (170, 266) -> Target (440, 584) -->
+        <path d="M 170,266 V 534 Q 170,542 178,542 H 432 Q 440,542 440,550 V 584" fill="none" stroke="#2A5C7A" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-link)"/>
+        <rect x="254" y="536" width="80" height="12" rx="2" fill="#FBF8F2"/>
+        <text x="294" y="545" fill="#2A5C7A" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">FILE STREAMING</text>
+
+
+        <!-- ==================== NODE BOXES (Z-Order: After arrows) ==================== -->
+        <!-- Node A1: iOS SwiftUI Views -->
+        <rect x="70" y="96" width="200" height="70" rx="6" fill="#FBF8F2"/>
+        <rect x="70" y="96" width="200" height="70" rx="6" fill="#F3ECE2" stroke="rgba(26,40,32,0.18)" stroke-width="1"/>
+        <rect x="78" y="104" width="28" height="12" rx="2" fill="transparent" stroke="rgba(26,40,32,0.30)" stroke-width="0.8"/>
+        <text x="92" y="113" fill="#1A2820" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">UI</text>
+        <text x="170" y="132" fill="#1A2820" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">SwiftUI Layer</text>
+        <text x="170" y="150" fill="#4A5D52" font-size="8.5" font-family="'Geist Mono', monospace" text-anchor="middle">ReaderView · LibraryView</text>
+
+        <!-- Node A2: iOS Metal Curl Engine -->
+        <rect x="310" y="96" width="210" height="70" rx="6" fill="#FBF8F2"/>
+        <rect x="310" y="96" width="210" height="70" rx="6" fill="#F3ECE2" stroke="rgba(26,40,32,0.18)" stroke-width="1"/>
+        <rect x="318" y="104" width="36" height="12" rx="2" fill="transparent" stroke="rgba(26,40,32,0.30)" stroke-width="0.8"/>
+        <text x="336" y="113" fill="#1A2820" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">METAL</text>
+        <text x="415" y="132" fill="#1A2820" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">PageCurlRenderer</text>
+        <text x="415" y="150" fill="#4A5D52" font-size="8.5" font-family="'Geist Mono', monospace" text-anchor="middle">CAMetalLayer · Dual Shaders</text>
+
+        <!-- Node A3: iOS Native Decoders -->
+        <rect x="70" y="206" width="200" height="60" rx="6" fill="#FBF8F2"/>
+        <rect x="70" y="206" width="200" height="60" rx="6" fill="#F3ECE2" stroke="rgba(26,40,32,0.18)" stroke-width="1"/>
+        <rect x="78" y="214" width="28" height="12" rx="2" fill="transparent" stroke="rgba(26,40,32,0.30)" stroke-width="0.8"/>
+        <text x="92" y="223" fill="#1A2820" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">I/O</text>
+        <text x="170" y="238" fill="#1A2820" font-size="11.5" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Archive Decoders</text>
+        <text x="170" y="254" fill="#4A5D52" font-size="8.5" font-family="'Geist Mono', monospace" text-anchor="middle">ZIPFoundation · libarchive</text>
+
+        <!-- Node B1: Android Compose M3 UI -->
+        <rect x="610" y="96" width="200" height="70" rx="6" fill="#FBF8F2"/>
+        <rect x="610" y="96" width="200" height="70" rx="6" fill="#F3ECE2" stroke="rgba(26,40,32,0.18)" stroke-width="1"/>
+        <rect x="618" y="104" width="28" height="12" rx="2" fill="transparent" stroke="rgba(26,40,32,0.30)" stroke-width="0.8"/>
+        <text x="632" y="113" fill="#1A2820" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">UI</text>
+        <text x="710" y="132" fill="#1A2820" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Compose M3 Layer</text>
+        <text x="710" y="150" fill="#4A5D52" font-size="8.5" font-family="'Geist Mono', monospace" text-anchor="middle">ReaderScreen · Library</text>
+
+        <!-- Node B2: Android Canvas Curl Engine -->
+        <rect x="850" y="96" width="210" height="70" rx="6" fill="#FBF8F2"/>
+        <rect x="850" y="96" width="210" height="70" rx="6" fill="#F3ECE2" stroke="rgba(26,40,32,0.18)" stroke-width="1"/>
+        <rect x="858" y="104" width="36" height="12" rx="2" fill="transparent" stroke="rgba(26,40,32,0.30)" stroke-width="0.8"/>
+        <text x="876" y="113" fill="#1A2820" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SKIA</text>
+        <text x="955" y="132" fill="#1A2820" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Canvas Curl Engine</text>
+        <text x="955" y="150" fill="#4A5D52" font-size="8.5" font-family="'Geist Mono', monospace" text-anchor="middle">Mesh2D · drawCurlTurn</text>
+
+        <!-- Node B3: Android Document Pipeline -->
+        <rect x="850" y="206" width="210" height="60" rx="6" fill="#FBF8F2"/>
+        <rect x="850" y="206" width="210" height="60" rx="6" fill="#F3ECE2" stroke="rgba(26,40,32,0.18)" stroke-width="1"/>
+        <rect x="858" y="214" width="28" height="12" rx="2" fill="transparent" stroke="rgba(26,40,32,0.30)" stroke-width="0.8"/>
+        <text x="872" y="223" fill="#1A2820" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">I/O</text>
+        <text x="955" y="238" fill="#1A2820" font-size="11.5" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Android Storage</text>
+        <text x="955" y="254" fill="#4A5D52" font-size="8.5" font-family="'Geist Mono', monospace" text-anchor="middle">Coil Decoders · SAF Storage</text>
+
+        <!-- Node C1: KMP Camera & Curl Transform (FOCAL / ACCENT 1) -->
+        <rect x="180" y="376" width="350" height="104" rx="6" fill="#FBF8F2"/>
+        <rect x="180" y="376" width="350" height="104" rx="6" fill="rgba(196,101,22,0.06)" stroke="#C46516" stroke-width="1.4"/>
+        <rect x="190" y="386" width="38" height="14" rx="2" fill="#FBF8F2" stroke="#C46516" stroke-width="0.8"/>
+        <text x="209" y="396" fill="#C46516" font-size="7.5" font-family="'Geist Mono', monospace" font-weight="600" text-anchor="middle" letter-spacing="0.08em">CORE</text>
+        <text x="355" y="420" fill="#1A2820" font-size="13.5" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Camera &amp; Curl Transform Engine</text>
+        <text x="355" y="442" fill="#4A5D52" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">CameraTransformKt · ReaderSpread · Panel</text>
+        <text x="355" y="460" fill="#687C71" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">computeSpreadCurlFold · computeSpreadDraw · lerpSpread</text>
+
+        <!-- Node C2: KMP State & Backup Engine (CORE COMPONENT) -->
+        <rect x="570" y="376" width="360" height="104" rx="6" fill="#FBF8F2"/>
+        <rect x="570" y="376" width="360" height="104" rx="6" fill="#F3ECE2" stroke="rgba(26,40,32,0.22)" stroke-width="1.2"/>
+        <rect x="580" y="386" width="42" height="14" rx="2" fill="#FBF8F2" stroke="rgba(26,40,32,0.30)" stroke-width="0.8"/>
+        <text x="601" y="396" fill="#1A2820" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text>
+        <text x="750" y="420" fill="#1A2820" font-size="13.5" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Progress &amp; Backup Engine</text>
+        <text x="750" y="442" fill="#4A5D52" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">ReadingProgress · BackupManager v2</text>
+        <text x="750" y="460" fill="#687C71" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">Versioned Schema (v1/v2) · Atomic Flush</text>
+
+        <!-- Node D1: Storage & Archive Files -->
+        <rect x="300" y="584" width="520" height="56" rx="6" fill="#FBF8F2"/>
+        <rect x="300" y="584" width="520" height="56" rx="6" fill="#F3ECE2" stroke="rgba(26,40,32,0.18)" stroke-width="1"/>
+        <rect x="310" y="592" width="32" height="12" rx="2" fill="transparent" stroke="rgba(26,40,32,0.30)" stroke-width="0.8"/>
+        <text x="326" y="601" fill="#1A2820" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DISK</text>
+        <text x="560" y="610" fill="#1A2820" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Physical Storage &amp; Documents</text>
+        <text x="560" y="626" fill="#4A5D52" font-size="8.5" font-family="'Geist Mono', monospace" text-anchor="middle">.cbz / .cbr Comic Archives · SharedPreferences / UserDefaults · JSON Exports</text>
+
+
+        <!-- ==================== LEGEND STRIP (Horizontal bottom) ==================== -->
+        <line x1="150" y1="682" x2="970" y2="682" stroke="rgba(26,40,32,0.12)" stroke-width="0.8"/>
+
+        <rect x="180" y="694" width="12" height="12" rx="2" fill="rgba(196,101,22,0.12)" stroke="#C46516" stroke-width="1"/>
+        <text x="200" y="703" fill="#1A2820" font-size="8" font-family="'Geist Mono', monospace">KMP Shared Core (Focal)</text>
+
+        <rect x="360" y="694" width="12" height="12" rx="2" fill="#F3ECE2" stroke="rgba(26,40,32,0.22)" stroke-width="1"/>
+        <text x="380" y="703" fill="#1A2820" font-size="8" font-family="'Geist Mono', monospace">Native Platform Service</text>
+
+        <line x1="530" y1="700" x2="560" y2="700" stroke="#4A5D52" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <text x="570" y="703" fill="#1A2820" font-size="8" font-family="'Geist Mono', monospace">Direct Method Binding</text>
+
+        <line x1="720" y1="700" x2="750" y2="700" stroke="#2A5C7A" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-link)"/>
+        <text x="760" y="703" fill="#1A2820" font-size="8" font-family="'Geist Mono', monospace">Asynchronous File I/O</text>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

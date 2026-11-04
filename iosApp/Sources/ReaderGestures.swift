@@ -6,6 +6,7 @@ import UIKit
 /// page turning taps, and drag flipping.
 struct ReaderGestures: UIViewRepresentable {
     var size: CGSize
+    var isZoomed: Bool = false
     /// Tap location (in the view) + container size, so the caller can map to left/right/middle zones.
     var onTap: (CGPoint, CGSize) -> Void
     var onDoubleTap: () -> Void
@@ -21,6 +22,7 @@ struct ReaderGestures: UIViewRepresentable {
         let view = UIView()
         view.backgroundColor = .clear
         view.isUserInteractionEnabled = true
+        view.accessibilityIdentifier = "ReaderGestureView"
         let c = context.coordinator
 
         let pinch = UIPinchGestureRecognizer(target: c, action: #selector(Coordinator.handlePinch(_:)))
@@ -30,6 +32,8 @@ struct ReaderGestures: UIViewRepresentable {
         let double = UITapGestureRecognizer(target: c, action: #selector(Coordinator.handleDouble(_:)))
         double.numberOfTapsRequired = 2
         tap.require(toFail: double) // single tap fires only once a double-tap is ruled out
+
+        c.doubleTapRecognizer = double
 
         pinch.delegate = c
         pan.delegate = c
@@ -51,8 +55,19 @@ struct ReaderGestures: UIViewRepresentable {
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: ReaderGestures
+        weak var doubleTapRecognizer: UITapGestureRecognizer?
         private var maxTouches = 1
         init(_ parent: ReaderGestures) { self.parent = parent }
+
+        // Only require double-tap failure when zoomed in (where double-tap resets zoom to 1x).
+        // When at 1x zoom, double-tap fails immediately so single-tap page turns have 0ms delay
+        // and rapid page-turning taps are never swallowed as double-taps.
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            if gestureRecognizer === doubleTapRecognizer {
+                return parent.isZoomed
+            }
+            return true
+        }
 
         // Only allow pinch and pan to run together (for simultaneous 2-finger zoom and repositioning).
         // Tap must NOT recognize simultaneously with pan, ensuring clean arbitration.
@@ -98,5 +113,17 @@ struct ReaderGestures: UIViewRepresentable {
         }
 
         @objc func handleDouble(_ g: UITapGestureRecognizer) { parent.onDoubleTap() }
+
+        func simulateTap(at location: CGPoint, in viewSize: CGSize) {
+            parent.onTap(location, viewSize)
+        }
+
+        func simulatePanChanged(_ translation: CGSize) {
+            parent.onPanChanged(translation)
+        }
+
+        func simulatePanEnded(translation: CGSize, velocity: CGSize, maxTouches: Int = 1) {
+            parent.onPanEnded(translation, velocity, maxTouches)
+        }
     }
 }
