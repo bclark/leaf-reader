@@ -241,6 +241,34 @@ fun computeSpreadCurlX(
     }
 }
 
+/**
+ * Broad single-page bend matching the iOS renderer. Hidden portions collapse at the
+ * cylinder horizon; carrying the fold beyond the margin clears both faces at completion.
+ * Returns an x-coordinate relative to the page's left edge.
+ */
+fun computeSinglePageCurlX(
+    u: Float,
+    width: Float,
+    progress: Float,
+    fromRight: Boolean,
+    back: Boolean,
+): Float {
+    val w = width.coerceAtLeast(0f)
+    val radius = (w * 0.30f).coerceAtLeast(1f)
+    val fold = w - (w + radius) * progress.coerceIn(0f, 1f)
+    val distance = (if (fromRight) u else 1f - u) * w
+    val horizon = kotlin.math.PI.toFloat() / 2f
+    val x = if (!back && distance <= fold) {
+        distance
+    } else {
+        val angle = (distance - fold) / radius
+        val theta = if (back) angle.coerceIn(horizon, kotlin.math.PI.toFloat())
+                    else angle.coerceAtMost(horizon)
+        fold + radius * kotlin.math.sin(theta)
+    }.coerceIn(0f, w)
+    return if (fromRight) x else w - x
+}
+
 /** Texture-coordinate projection with the hidden face collapsed at the roll's apex. */
 fun computeSpreadCurlFaceX(
     u: Float,

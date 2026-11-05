@@ -556,19 +556,16 @@ private const val MESH_VERT_COUNT = (MESH_COLS + 1) * (MESH_ROWS + 1) * 2
 
 
 
-/**
- * Renders a skeuomorphic 3D page curl & unroll deformer along a vertical curved axis.
- *
- * Peels the top page from the outer margin inward around a 3D cylindrical roll, exposing
- * the reverse side of the page and casting a subtle progressive drop shadow onto the spread underneath.
- */
+/** Single-page cylindrical bend: unmodified artwork on both faces, with a soft cast shadow. */
 private fun DrawScope.drawCurlTurn(
     topBitmap: Bitmap,
     bottomBitmap: Bitmap?,
     draw: PageDraw,
+    bottomDraw: PageDraw?,
     progress: Float,
     isPeelingFromRight: Boolean,
-    verts: FloatArray,
+    vertsFront: FloatArray,
+    vertsBack: FloatArray,
     meshPaint: Paint,
 ) {
     if (topBitmap.isRecycled) return
@@ -577,244 +574,63 @@ private fun DrawScope.drawCurlTurn(
     val h = draw.scaledHeight
     val left = draw.left
     val top = draw.top
+    if (w <= 0f || h <= 0f) return
 
-    // 1. Draw underneath spread revealed by the curl
-    if (bottomBitmap != null && !bottomBitmap.isRecycled) {
+    if (bottomBitmap != null && !bottomBitmap.isRecycled && bottomDraw != null) {
         drawIntoCanvas { canvas ->
-            val src = Rect(0, 0, bottomBitmap.width, bottomBitmap.height)
-            val dst = Rect(
-                left.roundToInt(),
-                top.roundToInt(),
-                (left + w).roundToInt(),
-                (top + h).roundToInt(),
-            )
-            canvas.nativeCanvas.drawBitmap(bottomBitmap, src, dst, meshPaint)
-        }
-    }
-
-    // 2. Geometry of the vertical cylindrical roll
-    val baseR = w * 0.08f
-    val r = (baseR * (0.8f + 0.4f * kotlin.math.sin(t * Math.PI.toFloat()))).coerceAtLeast(10f)
-
-    if (isPeelingFromRight) {
-        val xFold = left + w * (1f - t)
-        val xApex = (xFold + r).coerceAtMost(left + w)
-
-        // Drop shadow onto underneath page to the right of the apex
-        val shadowWidth = (r * 1.8f).coerceAtLeast(12.dp.toPx())
-        val shadowAlpha = (0.55f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.65f)
-        if (shadowAlpha > 0.02f) {
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0.0f to Color.Black.copy(alpha = shadowAlpha),
-                    0.4f to Color.Black.copy(alpha = shadowAlpha * 0.45f),
-                    1.0f to Color.Transparent,
-                    startX = xApex,
-                    endX = (xApex + shadowWidth).coerceAtMost(left + w),
-                ),
-                topLeft = Offset(xApex, top),
-                size = Size((xApex + shadowWidth).coerceAtMost(left + w) - xApex, h),
-            )
-        }
-
-        // Deform top page mesh around the vertical cylinder
-        var idx = 0
-        for (row in 0..MESH_ROWS) {
-            val v = row.toFloat() / MESH_ROWS
-            val yFlat = top + v * h
-
-            for (col in 0..MESH_COLS) {
-                val u = col.toFloat() / MESH_COLS
-                val xFlat = left + u * w
-
-                val x = if (xFlat <= xFold) {
-                    xFlat
-                } else {
-                    val s = xFlat - xFold
-                    val theta = s / r
-                    if (theta <= Math.PI.toFloat()) {
-                        xFold + r * kotlin.math.sin(theta)
-                    } else {
-                        xFold - (s - Math.PI.toFloat() * r)
-                    }
-                }
-                verts[idx++] = x
-                verts[idx++] = yFlat
-            }
-        }
-
-        drawIntoCanvas { canvas ->
-            canvas.nativeCanvas.drawBitmapMesh(
-                topBitmap,
-                MESH_COLS,
-                MESH_ROWS,
-                verts,
-                0,
-                null,
-                0,
+            canvas.nativeCanvas.drawBitmap(
+                bottomBitmap, Rect(0, 0, bottomBitmap.width, bottomBitmap.height),
+                android.graphics.RectF(bottomDraw.left, bottomDraw.top,
+                    bottomDraw.left + bottomDraw.scaledWidth, bottomDraw.top + bottomDraw.scaledHeight),
                 meshPaint,
             )
         }
+    }
 
-        // Crease shadow in the valley at xFold
-        val creaseWidth = (r * 0.75f).coerceAtLeast(8.dp.toPx())
-        val creaseAlpha = (0.4f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.45f)
-        if (creaseAlpha > 0.02f) {
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0.0f to Color.Transparent,
-                    0.7f to Color.Black.copy(alpha = creaseAlpha * 0.5f),
-                    1.0f to Color.Black.copy(alpha = creaseAlpha),
-                    startX = (xFold - creaseWidth).coerceAtLeast(left),
-                    endX = xFold,
-                ),
-                topLeft = Offset((xFold - creaseWidth).coerceAtLeast(left), top),
-                size = Size(xFold - (xFold - creaseWidth).coerceAtLeast(left), h),
-            )
-        }
+    val apex = left + computeSinglePageCurlX(
+        if (isPeelingFromRight) 1f else 0f, w, t, isPeelingFromRight, back = false,
+    )
+    val shadowWidth = (w * 0.06f).coerceAtLeast(4f)
+    val shadowAlpha = (0.20f * kotlin.math.sin(t * kotlin.math.PI.toFloat())).coerceAtLeast(0f)
+    val shadowStart = if (isPeelingFromRight) apex else (apex - shadowWidth).coerceAtLeast(left)
+    val shadowEnd = if (isPeelingFromRight) (apex + shadowWidth).coerceAtMost(left + w) else apex
+    if (shadowAlpha > 0.02f && shadowEnd > shadowStart) {
+        val dark = Color.Black.copy(alpha = shadowAlpha)
+        val mid = Color.Black.copy(alpha = shadowAlpha * 0.45f)
+        drawRect(
+            brush = if (isPeelingFromRight) Brush.horizontalGradient(
+                0f to dark, 0.4f to mid, 1f to Color.Transparent,
+                startX = shadowStart, endX = shadowEnd,
+            ) else Brush.horizontalGradient(
+                0f to Color.Transparent, 0.6f to mid, 1f to dark,
+                startX = shadowStart, endX = shadowEnd,
+            ),
+            topLeft = Offset(shadowStart, top),
+            size = Size(shadowEnd - shadowStart, h),
+        )
+    }
 
-        // Specular highlight along apex of the roll
-        val highlightWidth = r * 0.6f
-        val highlightAlpha = (0.22f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.25f)
-        if (highlightAlpha > 0.02f && xApex - highlightWidth > left) {
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0.0f to Color.Transparent,
-                    0.5f to Color.White.copy(alpha = highlightAlpha),
-                    1.0f to Color.Transparent,
-                    startX = xApex - highlightWidth,
-                    endX = (xApex + highlightWidth * 0.5f).coerceAtMost(left + w),
-                ),
-                topLeft = Offset(xApex - highlightWidth, top),
-                size = Size((xApex + highlightWidth * 0.5f).coerceAtMost(left + w) - (xApex - highlightWidth), h),
-            )
-        }
-
-        // Reverse side of page tint across the curl
-        val reverseAlpha = (0.28f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.35f)
-        if (reverseAlpha > 0.02f && xApex > xFold) {
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0.0f to Color(0xFFFBF0D9).copy(alpha = reverseAlpha),
-                    1.0f to Color.Transparent,
-                    startX = xFold,
-                    endX = xApex,
-                ),
-                topLeft = Offset(xFold, top),
-                size = Size(xApex - xFold, h),
-            )
-        }
-    } else {
-        // Peeling from Left edge to Right
-        val xFold = left + w * t
-        val xApex = (xFold - r).coerceAtLeast(left)
-
-        // Drop shadow onto underneath page to the left of the apex
-        val shadowWidth = (r * 1.8f).coerceAtLeast(12.dp.toPx())
-        val shadowAlpha = (0.55f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.65f)
-        if (shadowAlpha > 0.02f) {
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0.0f to Color.Transparent,
-                    0.6f to Color.Black.copy(alpha = shadowAlpha * 0.45f),
-                    1.0f to Color.Black.copy(alpha = shadowAlpha),
-                    startX = (xApex - shadowWidth).coerceAtLeast(left),
-                    endX = xApex,
-                ),
-                topLeft = Offset((xApex - shadowWidth).coerceAtLeast(left), top),
-                size = Size(xApex - (xApex - shadowWidth).coerceAtLeast(left), h),
-            )
-        }
-
-        // Deform top page mesh around the vertical cylinder
-        var idx = 0
+    // Collapse each hidden face to the cylinder horizon to avoid overlapping artwork.
+    fun drawFace(back: Boolean, vertices: FloatArray) {
+        var i = 0
         for (row in 0..MESH_ROWS) {
-            val v = row.toFloat() / MESH_ROWS
-            val yFlat = top + v * h
-
             for (col in 0..MESH_COLS) {
-                val u = col.toFloat() / MESH_COLS
-                val xFlat = left + u * w
-
-                val x = if (xFlat >= xFold) {
-                    xFlat
-                } else {
-                    val s = xFold - xFlat
-                    val theta = s / r
-                    if (theta <= Math.PI.toFloat()) {
-                        xFold - r * kotlin.math.sin(theta)
-                    } else {
-                        xFold + (s - Math.PI.toFloat() * r)
-                    }
-                }
-                verts[idx++] = x
-                verts[idx++] = yFlat
+                vertices[i++] = left + computeSinglePageCurlX(
+                    col.toFloat() / MESH_COLS, w, t, isPeelingFromRight, back,
+                )
+                vertices[i++] = top + row.toFloat() / MESH_ROWS * h
             }
         }
-
         drawIntoCanvas { canvas ->
             canvas.nativeCanvas.drawBitmapMesh(
-                topBitmap,
-                MESH_COLS,
-                MESH_ROWS,
-                verts,
-                0,
-                null,
-                0,
-                meshPaint,
-            )
-        }
-
-        // Crease shadow in the valley at xFold
-        val creaseWidth = (r * 0.75f).coerceAtLeast(8.dp.toPx())
-        val creaseAlpha = (0.4f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.45f)
-        if (creaseAlpha > 0.02f) {
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0.0f to Color.Black.copy(alpha = creaseAlpha),
-                    0.3f to Color.Black.copy(alpha = creaseAlpha * 0.5f),
-                    1.0f to Color.Transparent,
-                    startX = xFold,
-                    endX = (xFold + creaseWidth).coerceAtMost(left + w),
-                ),
-                topLeft = Offset(xFold, top),
-                size = Size((xFold + creaseWidth).coerceAtMost(left + w) - xFold, h),
-            )
-        }
-
-        // Specular highlight along apex of the roll
-        val highlightWidth = r * 0.6f
-        val highlightAlpha = (0.22f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.25f)
-        if (highlightAlpha > 0.02f && xApex + highlightWidth < left + w) {
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0.0f to Color.Transparent,
-                    0.5f to Color.White.copy(alpha = highlightAlpha),
-                    1.0f to Color.Transparent,
-                    startX = (xApex - highlightWidth * 0.5f).coerceAtLeast(left),
-                    endX = xApex + highlightWidth,
-                ),
-                topLeft = Offset((xApex - highlightWidth * 0.5f).coerceAtLeast(left), top),
-                size = Size(xApex + highlightWidth - (xApex - highlightWidth * 0.5f).coerceAtLeast(left), h),
-            )
-        }
-
-        // Reverse side of page tint across the curl
-        val reverseAlpha = (0.28f * kotlin.math.sin(t * Math.PI.toFloat())).coerceIn(0f, 0.35f)
-        if (reverseAlpha > 0.02f && xFold > xApex) {
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0.0f to Color.Transparent,
-                    1.0f to Color(0xFFFBF0D9).copy(alpha = reverseAlpha),
-                    startX = xApex,
-                    endX = xFold,
-                ),
-                topLeft = Offset(xApex, top),
-                size = Size(xFold - xApex, h),
+                topBitmap, MESH_COLS, MESH_ROWS, vertices, 0, null, 0, meshPaint,
             )
         }
     }
+    drawFace(back = false, vertsFront)
+    drawFace(back = true, vertsBack)
 }
+
 
 /**
  * Renders an open-book physical two-page spread curl turn.
@@ -964,7 +780,6 @@ private fun PageViewer(
     val meshPaint = remember { Paint().apply { isFilterBitmap = true } }
     val vertsFront = remember { FloatArray(MESH_VERT_COUNT) }
     val vertsBack = remember { FloatArray(MESH_VERT_COUNT) }
-    val verts = vertsFront
 
     val viewport = androidx.compose.ui.platform.LocalConfiguration.current
     val currentCurlDirection by rememberUpdatedState(curlDirection)
@@ -1260,9 +1075,14 @@ private fun PageViewer(
                                 topBitmap = bitmap,
                                 bottomBitmap = forwardUnderneath,
                                 draw = draw,
+                                bottomDraw = forwardUnderneath?.let {
+                                    computePageDraw(Panel.FULL_PAGE, it.width, it.height,
+                                        size.width, size.height, fitMode = fitMode)
+                                },
                                 progress = curlProgress,
                                 isPeelingFromRight = !rtl,
-                                verts = verts,
+                                vertsFront = vertsFront,
+                                vertsBack = vertsBack,
                                 meshPaint = meshPaint,
                             )
                         }
@@ -1272,10 +1092,13 @@ private fun PageViewer(
                                 drawCurlTurn(
                                     topBitmap = unrollingPage,
                                     bottomBitmap = bitmap,
-                                    draw = draw,
+                                    draw = computePageDraw(Panel.FULL_PAGE, unrollingPage.width, unrollingPage.height,
+                                        size.width, size.height, fitMode = fitMode),
+                                    bottomDraw = draw,
                                     progress = 1f - curlProgress,
                                     isPeelingFromRight = !rtl,
-                                    verts = verts,
+                                    vertsFront = vertsFront,
+                                    vertsBack = vertsBack,
                                     meshPaint = meshPaint,
                                 )
                             } else {
