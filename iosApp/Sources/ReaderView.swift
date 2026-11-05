@@ -539,7 +539,7 @@ struct ReaderView: View {
     }
 
     private var topBar: some View {
-        HStack(alignment: .center, spacing: 10) {
+        HStack(alignment: .center, spacing: 6) {
             Button { dismiss() } label: {
                 Image(systemName: "arrow.left")
                     .font(.system(size: 16, weight: .bold))
@@ -555,9 +555,11 @@ struct ReaderView: View {
                 Text(title).font(.archivo(14, weight: 800)).foregroundColor(Leaf.cream).lineLimit(1)
                     .accessibilityIdentifier("TopBarTitle")
                 Text(pageStatus).font(.archivo(10)).tracking(1.4).foregroundColor(Leaf.creamMuted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                     .accessibilityIdentifier("PageStatus")
             }
-            Spacer()
+            Spacer(minLength: 0)
 
             SpreadChip(spreadEnabled: isSpreadActive(for: UIScreen.main.bounds.size)) {
                 let screen = UIScreen.main.bounds.size
@@ -1070,6 +1072,8 @@ struct DirectionChip: View {
             .background(Leaf.cream.opacity(0.12))
             .clipShape(Capsule())
         }
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
         .accessibilityIdentifier("DirectionChip")
         .buttonStyle(.plain)
     }
@@ -1092,6 +1096,8 @@ struct SpreadChip: View {
             .background(Leaf.cream.opacity(0.12))
             .clipShape(Capsule())
         }
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
         .accessibilityIdentifier("SpreadChip")
         .buttonStyle(.plain)
     }
@@ -1114,6 +1120,8 @@ struct FitModeChip: View {
             .background(Leaf.cream.opacity(0.12))
             .clipShape(Capsule())
         }
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
         .accessibilityIdentifier("FitModeChip")
         .buttonStyle(.plain)
     }

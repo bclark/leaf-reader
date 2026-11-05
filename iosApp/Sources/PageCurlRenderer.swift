@@ -418,24 +418,19 @@ final class PageCurlRenderer {
             )
         }
 
-        // 2. Geometry of the vertical cylindrical roll
-        let baseR = w * 0.08
-        let r = max(baseR * (0.8 + 0.4 * sin(t * Float.pi)), 10.0)
-
-        // Paper tint color: 0xFFFBF0D9 -> RGB: (251/255, 240/255, 217/255)
-        let paperR: Float = 251.0 / 255.0
-        let paperG: Float = 240.0 / 255.0
-        let paperB: Float = 217.0 / 255.0
+        // A broad radius lets the sheet bend gradually instead of forming a tight roll.
+        let r = max(w * 0.30, 1.0)
 
         if isPeelingFromRight {
-            let xFold = left + w * (1.0 - t)
+            // Carry the broad bend past the page edge so it clears fully at completion.
+            let xFold = left + w - (w + r) * t
             let sMax = max((left + w) - xFold, 0.0)
             let thetaMax = sMax / r
-            let xApex = min(xFold + r * sin(min(thetaMax, Float.pi / 2.0)), left + w)
+            let xApex = min(max(xFold + r * sin(min(thetaMax, Float.pi / 2.0)), left), left + w)
 
             // Drop shadow onto underneath page to the right of the apex
-            let shadowWidth = max(r * 1.8, 12.0)
-            let shadowAlpha = min(max(0.55 * sin(t * Float.pi), 0.0), 0.65)
+            let shadowWidth = max(w * 0.06, 4.0)
+            let shadowAlpha = max(0.20 * sin(t * Float.pi), 0.0)
             if shadowAlpha > 0.02 && xApex < left + w {
                 let shadowEnd = min(xApex + shadowWidth, left + w)
                 let shadowMid = xApex + (shadowEnd - xApex) * 0.4
@@ -472,7 +467,7 @@ final class PageCurlRenderer {
                     } else {
                         let s = xFlat - xFold
                         let theta = min(s / r, Float.pi / 2.0)
-                        x = min(xFold + r * sin(theta), left + w)
+                        x = min(max(xFold + r * sin(theta), left), left + w)
                     }
                     frontGrid[row][col] = CurlVertex(position: [x, yFlat], texCoord: [u, v])
                 }
@@ -493,78 +488,23 @@ final class PageCurlRenderer {
                         let xFlat = left + u * w
                         let s = max(xFlat - xFold, (Float.pi / 2.0) * r)
                         let theta = min(s / r, Float.pi)
-                        let x = min(xFold + r * sin(theta), left + w)
+                        let x = min(max(xFold + r * sin(theta), left), left + w)
                         backGrid[row][col] = CurlVertex(position: [x, yFlat], texCoord: [u, v])
                     }
                 }
                 drawMesh(encoder: encoder, texture: topTex, grid: backGrid, viewportSize: viewportSize)
             }
 
-            // Crease shadow in the valley at xFold
-            let creaseWidth = max(r * 0.75, 8.0)
-            let creaseAlpha = min(max(0.4 * sin(t * Float.pi), 0.0), 0.45)
-            if creaseAlpha > 0.02 && xFold > left {
-                let creaseStart = max(xFold - creaseWidth, left)
-                let creaseMid = creaseStart + (xFold - creaseStart) * 0.7
-                drawGradientRect(
-                    encoder: encoder,
-                    xStart: creaseStart, xEnd: creaseMid, y: top, height: h,
-                    colorStart: [0, 0, 0, 0],
-                    colorEnd: [0, 0, 0, creaseAlpha * 0.5],
-                    viewportSize: viewportSize
-                )
-                drawGradientRect(
-                    encoder: encoder,
-                    xStart: creaseMid, xEnd: xFold, y: top, height: h,
-                    colorStart: [0, 0, 0, creaseAlpha * 0.5],
-                    colorEnd: [0, 0, 0, creaseAlpha],
-                    viewportSize: viewportSize
-                )
-            }
-
-            // Reverse side of page tint across the curl
-            let reverseAlpha = min(max(0.58 * sin(t * Float.pi), 0.0), 0.68)
-            if reverseAlpha > 0.02 && xApex > xFold {
-                drawGradientRect(
-                    encoder: encoder,
-                    xStart: xFold, xEnd: xApex, y: top, height: h,
-                    colorStart: [paperR, paperG, paperB, reverseAlpha],
-                    colorEnd: [paperR, paperG, paperB, reverseAlpha * 0.35],
-                    viewportSize: viewportSize
-                )
-            }
-
-            // Specular highlight along apex of the roll
-            let highlightWidth = r * 0.6
-            let highlightAlpha = min(max(0.22 * sin(t * Float.pi), 0.0), 0.25)
-            if highlightAlpha > 0.02 && xApex - highlightWidth > left {
-                let hStart = xApex - highlightWidth
-                let hEnd = min(xApex + highlightWidth * 0.5, left + w)
-                drawGradientRect(
-                    encoder: encoder,
-                    xStart: hStart, xEnd: xApex, y: top, height: h,
-                    colorStart: [1, 1, 1, 0],
-                    colorEnd: [1, 1, 1, highlightAlpha],
-                    viewportSize: viewportSize
-                )
-                drawGradientRect(
-                    encoder: encoder,
-                    xStart: xApex, xEnd: hEnd, y: top, height: h,
-                    colorStart: [1, 1, 1, highlightAlpha],
-                    colorEnd: [1, 1, 1, 0],
-                    viewportSize: viewportSize
-                )
-            }
         } else {
             // Peeling from Left edge to Right
-            let xFold = left + w * t
+            let xFold = left + (w + r) * t
             let sMax = max(xFold - left, 0.0)
             let thetaMax = sMax / r
-            let xApex = max(xFold - r * sin(min(thetaMax, Float.pi / 2.0)), left)
+            let xApex = min(max(xFold - r * sin(min(thetaMax, Float.pi / 2.0)), left), left + w)
 
             // Drop shadow onto underneath page to the left of the apex
-            let shadowWidth = max(r * 1.8, 12.0)
-            let shadowAlpha = min(max(0.55 * sin(t * Float.pi), 0.0), 0.65)
+            let shadowWidth = max(w * 0.06, 4.0)
+            let shadowAlpha = max(0.20 * sin(t * Float.pi), 0.0)
             if shadowAlpha > 0.02 && xApex > left {
                 let shadowStart = max(xApex - shadowWidth, left)
                 let shadowMid = shadowStart + (xApex - shadowStart) * 0.6
@@ -601,7 +541,7 @@ final class PageCurlRenderer {
                     } else {
                         let s = xFold - xFlat
                         let theta = min(s / r, Float.pi / 2.0)
-                        x = max(xFold - r * sin(theta), left)
+                        x = min(max(xFold - r * sin(theta), left), left + w)
                     }
                     frontGrid[row][col] = CurlVertex(position: [x, yFlat], texCoord: [u, v])
                 }
@@ -622,68 +562,13 @@ final class PageCurlRenderer {
                         let xFlat = left + u * w
                         let s = max(xFold - xFlat, (Float.pi / 2.0) * r)
                         let theta = min(s / r, Float.pi)
-                        let x = max(xFold - r * sin(theta), left)
+                        let x = min(max(xFold - r * sin(theta), left), left + w)
                         backGrid[row][col] = CurlVertex(position: [x, yFlat], texCoord: [u, v])
                     }
                 }
                 drawMesh(encoder: encoder, texture: topTex, grid: backGrid, viewportSize: viewportSize)
             }
 
-            // Crease shadow in the valley at xFold
-            let creaseWidth = max(r * 0.75, 8.0)
-            let creaseAlpha = min(max(0.4 * sin(t * Float.pi), 0.0), 0.45)
-            if creaseAlpha > 0.02 && xFold < left + w {
-                let creaseEnd = min(xFold + creaseWidth, left + w)
-                let creaseMid = xFold + (creaseEnd - xFold) * 0.3
-                drawGradientRect(
-                    encoder: encoder,
-                    xStart: xFold, xEnd: creaseMid, y: top, height: h,
-                    colorStart: [0, 0, 0, creaseAlpha],
-                    colorEnd: [0, 0, 0, creaseAlpha * 0.5],
-                    viewportSize: viewportSize
-                )
-                drawGradientRect(
-                    encoder: encoder,
-                    xStart: creaseMid, xEnd: creaseEnd, y: top, height: h,
-                    colorStart: [0, 0, 0, creaseAlpha * 0.5],
-                    colorEnd: [0, 0, 0, 0],
-                    viewportSize: viewportSize
-                )
-            }
-
-            // Reverse side of page tint across the curl
-            let reverseAlpha = min(max(0.58 * sin(t * Float.pi), 0.0), 0.68)
-            if reverseAlpha > 0.02 && xFold > xApex {
-                drawGradientRect(
-                    encoder: encoder,
-                    xStart: xApex, xEnd: xFold, y: top, height: h,
-                    colorStart: [paperR, paperG, paperB, reverseAlpha * 0.35],
-                    colorEnd: [paperR, paperG, paperB, reverseAlpha],
-                    viewportSize: viewportSize
-                )
-            }
-
-            // Specular highlight along apex of the roll
-            let highlightWidth = r * 0.6
-            let highlightAlpha = min(max(0.22 * sin(t * Float.pi), 0.0), 0.25)
-            if highlightAlpha > 0.02 && xApex + highlightWidth < left + w {
-                let hStart = max(xApex - highlightWidth * 0.5, left)
-                let hEnd = xApex + highlightWidth
-                drawGradientRect(
-                    encoder: encoder,
-                    xStart: hStart, xEnd: xApex, y: top, height: h,
-                    colorStart: [1, 1, 1, 0],
-                    colorEnd: [1, 1, 1, highlightAlpha],
-                    viewportSize: viewportSize
-                )
-                drawGradientRect(
-                    encoder: encoder,
-                    xStart: xApex, xEnd: hEnd, y: top, height: h,
-                    colorStart: [1, 1, 1, highlightAlpha],
-                    colorEnd: [1, 1, 1, 0],
-                    viewportSize: viewportSize
-                )
-            }
         }
 
         encoder.endEncoding()
