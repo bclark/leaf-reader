@@ -6,8 +6,11 @@ import android.graphics.Paint
 import android.graphics.Rect
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.AnimationVector4D
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.TwoWayConverter
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
@@ -74,6 +77,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -240,17 +245,22 @@ fun ReaderScreen(
     // bring the bars back with the chrome, and restore them when leaving the reader.
     val view = LocalView.current
     val window = (view.context as? Activity)?.window
+    val lightNavigationBar = MaterialTheme.colorScheme.background.luminance() > 0.5f
     LaunchedEffect(chromeVisible, window) {
         window ?: return@LaunchedEffect
         val controller = WindowCompat.getInsetsController(window, view)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.isAppearanceLightNavigationBars = false
         if (chromeVisible) controller.show(WindowInsetsCompat.Type.systemBars())
         else controller.hide(WindowInsetsCompat.Type.systemBars())
     }
     DisposableEffect(window) {
         onDispose {
             window ?: return@onDispose
-            WindowCompat.getInsetsController(window, view).show(WindowInsetsCompat.Type.systemBars())
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightNavigationBars = lightNavigationBar
+                show(WindowInsetsCompat.Type.systemBars())
+            }
         }
     }
 
@@ -280,6 +290,7 @@ fun ReaderScreen(
                 canAnimateTurn = canAnimateTurn,
                 onToggleChrome = { chromeVisible = !chromeVisible },
                 onShowFullPage = viewModel::showFullPage,
+                onDismiss = onBack,
             )
         }
 
@@ -729,6 +740,7 @@ private fun PageViewer(
     canAnimateTurn: (CurlDirection) -> Boolean,
     onToggleChrome: () -> Unit,
     onShowFullPage: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
     val bitmap = state.page ?: return
     val rtl = state.rightToLeft
@@ -777,6 +789,23 @@ private fun PageViewer(
         }
     }
 
+    var dismissOffset by remember { mutableStateOf(Offset.Zero) }
+    var dismissReturnJob by remember { mutableStateOf<Job?>(null) }
+    var dismissCommitted by remember { mutableStateOf(false) }
+
+    val returnDismissedPage: () -> Unit = {
+        dismissReturnJob?.cancel()
+        val from = dismissOffset
+        dismissReturnJob = scope.launch {
+            animate(1f, 0f, animationSpec = spring(
+                dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow,
+            )) { fraction, _ ->
+                dismissOffset = from * fraction
+            }
+            dismissOffset = Offset.Zero
+        }
+    }
+
     val meshPaint = remember { Paint().apply { isFilterBitmap = true } }
     val vertsFront = remember { FloatArray(MESH_VERT_COUNT) }
     val vertsBack = remember { FloatArray(MESH_VERT_COUNT) }
@@ -785,12 +814,18 @@ private fun PageViewer(
     val currentCurlDirection by rememberUpdatedState(curlDirection)
     val currentCanAnimateTurn by rememberUpdatedState(canAnimateTurn)
     val currentSettleTurn by rememberUpdatedState(onSettleTurn)
+    val currentDismiss by rememberUpdatedState(onDismiss)
     var pendingTap by remember { mutableStateOf<Job?>(null) }
 
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) pendingTap?.cancel()
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                pendingTap?.cancel()
+                dismissReturnJob?.cancel()
+                dismissOffset = Offset.Zero
+                dismissCommitted = false
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
@@ -806,7 +841,7 @@ private fun PageViewer(
                 try {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = true)
-                        if (currentCurlDirection != null) {
+                        if (currentCurlDirection != null || dismissCommitted) {
                             do { val event = awaitPointerEvent() } while (event.changes.any { it.pressed })
                             return@awaitEachGesture
                         }
@@ -817,6 +852,22 @@ private fun PageViewer(
                         var pastSlop = false
                         var cancelled = false
                         var isCurlDrag = false
+                        var isDismissDrag = false
+                        var dismissCandidate = false
+                        var dismissStart = Offset.Zero
+                        var dismissOrigin = Offset.Zero
+                        val dismissEngageDistance = ReaderDismissGesture.ENGAGE_DISTANCE_DP.dp.toPx()
+                        val containerHeight = size.height.toFloat()
+                        val contentHeight = if (isSpread) {
+                            computeSpreadDraw(leftBitmap.width, leftBitmap.height,
+                                rightBitmap.width, rightBitmap.height, size.width.toFloat(), containerHeight,
+                                fitMode = fitMode).totalHeight
+                        } else {
+                            computePageDraw(camera.value, image.width, image.height,
+                                size.width.toFloat(), containerHeight, fitMode = fitMode).scaledHeight
+                        }
+                        // Tall fit-to-width pages must remain scrollable; zoomed content keeps panning.
+                        val canDismiss = userScale <= 1.05f && contentHeight * userScale <= containerHeight + 1f
                         var activeDirection: CurlDirection? = null
                         var curDragT = 0f
                         val slop = viewConfiguration.touchSlop
@@ -841,7 +892,9 @@ private fun PageViewer(
 
                             if (!pastSlop && (abs(zoom - 1f) > 0.02f || pan.getDistance() > slop)) {
                                 pastSlop = true
-                                if (maxPointers == 1 && userScale <= 1.05f && abs(pan.x) > abs(pan.y)) {
+                                if (maxPointers == 1 && canDismiss && ReaderDismissGesture.isDownward(pan.x, pan.y)) {
+                                    dismissCandidate = true
+                                } else if (maxPointers == 1 && userScale <= 1.05f && abs(pan.x) > abs(pan.y)) {
                                     val dir = if (!rtl) {
                                         if (pan.x < 0f) CurlDirection.FORWARD else CurlDirection.BACKWARD
                                     } else {
@@ -860,6 +913,19 @@ private fun PageViewer(
                                 }
                             }
 
+                            if (dismissCandidate && maxPointers == 1 && !isDismissDrag &&
+                                pan.y >= dismissEngageDistance && ReaderDismissGesture.isDownward(pan.x, pan.y)) {
+                                dismissReturnJob?.cancel()
+                                dismissOrigin = dismissOffset
+                                // The first part of the swipe establishes intent without moving the artwork.
+                                dismissStart = pan * (dismissEngageDistance / pan.y)
+                                isDismissDrag = true
+                            }
+                            if (maxPointers > 1) dismissCandidate = false
+                            if (maxPointers > 1 && isDismissDrag) {
+                                isDismissDrag = false
+                                returnDismissedPage()
+                            }
                             if (isCurlDrag && maxPointers > 1) {
                                 onUpdateCurl(null, 0f)
                                 isCurlDrag = false
@@ -867,7 +933,11 @@ private fun PageViewer(
                             }
                             if (pastSlop) {
                                 pendingTap?.cancel()
-                                if (isCurlDrag && activeDirection != null) {
+                                if (isDismissDrag) {
+                                    val dragged = dismissOrigin + (pan - dismissStart) * ReaderDismissGesture.DRAG_RESISTANCE
+                                    dismissOffset = Offset(dragged.x, dragged.y.coerceAtLeast(0f))
+                                    event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                } else if (isCurlDrag && activeDirection != null) {
                                     event.changes.forEach { if (it.positionChanged()) it.consume() }
                                     val containerW = size.width.toFloat()
                                     val rawT = if (!rtl) {
@@ -919,7 +989,9 @@ private fun PageViewer(
                             }
                         } while (event.changes.any { it.pressed })
 
+                        if (dismissCommitted) return@awaitEachGesture
                         if (cancelled) {
+                            if (dismissOffset != Offset.Zero) returnDismissedPage()
                             onUpdateCurl(null, 0f)
                         } else if (!pastSlop) {
                             val w = size.width
@@ -945,6 +1017,25 @@ private fun PageViewer(
                                     pendingTap = null
                                 }
                             }
+                        } else if (isDismissDrag) {
+                            val velocity = velocityTracker.calculateVelocity()
+                            if (ReaderDismissGesture.shouldDismiss(dismissOffset.y, containerHeight, velocity.y)) {
+                                dismissCommitted = true
+                                val from = dismissOffset
+                                // Continue along the release direction, including a diagonal flick.
+                                val slope = if (velocity.y > 0f) velocity.x / velocity.y
+                                    else from.x / from.y.coerceAtLeast(1f)
+                                val travelY = containerHeight * 1.3f
+                                val target = from + Offset(slope.coerceIn(-2f, 2f) * travelY, travelY)
+                                dismissReturnJob = scope.launch {
+                                    animate(0f, 1f, animationSpec = tween(280, easing = LinearOutSlowInEasing)) { t, _ ->
+                                        dismissOffset = from + (target - from) * t
+                                    }
+                                    currentDismiss()
+                                }
+                            } else {
+                                returnDismissedPage()
+                            }
                         } else if (isCurlDrag && activeDirection != null) {
                             val velocity = velocityTracker.calculateVelocity().x
                             val velInTurnDir = if (!rtl) {
@@ -958,11 +1049,21 @@ private fun PageViewer(
                     }
                 } finally {
                     pendingTap?.cancel()
+                    dismissReturnJob?.cancel()
+                    if (!dismissCommitted) dismissOffset = Offset.Zero
                     onUpdateCurl(null, 0f)
                 }
             },
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        Canvas(modifier = Modifier.fillMaxSize().graphicsLayer {
+            // Transform only the artwork: gesture coordinates and reader controls stay stable.
+            val progress = ReaderDismissGesture.progress(dismissOffset.y, size.height)
+            translationX = dismissOffset.x
+            translationY = dismissOffset.y
+            rotationZ = (dismissOffset.x / size.width.coerceAtLeast(1f) * 14f).coerceIn(-10f, 10f)
+            scaleX = 1f - progress * 0.08f
+            scaleY = scaleX
+        }) {
             if (isSpread) {
                 val spread = computeSpreadDraw(
                     page1W = leftBitmap.width,

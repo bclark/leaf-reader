@@ -2,6 +2,9 @@ package net.digitalbc.leafreader.ui.theme
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.isSystemInDarkTheme
+import net.digitalbc.leafreader.data.settings.ThemeMode
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
@@ -20,6 +23,8 @@ private val LeafColorScheme = darkColorScheme(
     onSecondaryContainer = PaperWhite,
     tertiary = LeafAccent,
     onTertiary = DeepInk,
+    tertiaryContainer = LeafAccent,
+    onTertiaryContainer = DeepInk,
     background = DeepInk,
     onBackground = PaperWhite,
     surface = DeepInk,
@@ -41,10 +46,43 @@ private val LeafAmoledColorScheme = LeafColorScheme.copy(
     surfaceVariant = Color(0xFF0D1113),
 )
 
+private val LeafLightColorScheme = lightColorScheme(
+    primary = LeafPrimary,
+    onPrimary = PaperWhite,
+    primaryContainer = Color(0xFFDCE8D9),
+    onPrimaryContainer = LeafPrimaryDark,
+    secondary = LeafSecondary,
+    onSecondary = PaperWhite,
+    secondaryContainer = Color(0xFFE5EADD),
+    onSecondaryContainer = LeafPrimaryDark,
+    tertiary = Color(0xFF795C00),
+    onTertiary = Color.White,
+    tertiaryContainer = LeafAccent,
+    onTertiaryContainer = DeepInk,
+    background = Color(0xFFFAFAF7),
+    onBackground = DeepInk,
+    surface = Color(0xFFFAFAF7),
+    onSurface = DeepInk,
+    surfaceVariant = Color(0xFFEAEDE5),
+    onSurfaceVariant = Color(0xFF4A544C),
+    outline = Color(0xFF718075),
+    error = Color(0xFF9E354C),
+    onError = Color.White,
+)
+
 @Composable
-fun ComicReaderTheme(amoled: Boolean = false, content: @Composable () -> Unit) {
+fun ComicReaderTheme(
+    amoled: Boolean = false,
+    mode: ThemeMode = ThemeMode.SYSTEM,
+    content: @Composable () -> Unit,
+) {
+    val dark = mode.usesDarkTheme(isSystemInDarkTheme())
     MaterialTheme(
-        colorScheme = if (amoled) LeafAmoledColorScheme else LeafColorScheme,
+        colorScheme = when {
+            !dark -> LeafLightColorScheme
+            amoled -> LeafAmoledColorScheme
+            else -> LeafColorScheme
+        },
         typography = LeafTypography,
         content = content,
     )

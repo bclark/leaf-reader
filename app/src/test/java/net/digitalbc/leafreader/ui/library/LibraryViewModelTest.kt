@@ -163,6 +163,49 @@ class LibraryViewModelTest {
     }
 
     @Test
+    fun allFilterIncludesListsAlongsideSeriesAndStandaloneComics() = runBlocking {
+        fakeComicDao.setComics(listOf(
+            createComic(1, "Saga 01", series = "Saga", issueNumber = 1f),
+            createComic(2, "Saga 02", series = "Saga", issueNumber = 2f),
+            createComic(3, "Standalone"),
+        ))
+        fakeReadingListDao.setListsAndItems(
+            listOf(ReadingListEntity(10, "Favorites"), ReadingListEntity(11, "To explore")),
+            listOf(
+                ReadingListItemEntity(10, 3, sortOrder = 1),
+                ReadingListItemEntity(10, 1, sortOrder = 0),
+            ),
+        )
+
+        val items = withTimeout(3000) { viewModel.libraryItems.first { it.size == 4 } }
+        assertEquals(1, items.filterIsInstance<LibraryItem.SeriesStack>().size)
+        assertEquals(3L, items.filterIsInstance<LibraryItem.SingleComic>().single().comic.id)
+        val lists = items.filterIsInstance<LibraryItem.ReadingListItem>()
+        assertEquals(listOf(10L, 11L), lists.map { it.readingList.id })
+        assertEquals(listOf(1L, 3L), lists[0].previewComics.map { it.id })
+        assertEquals(2, lists[0].itemCount)
+        assertEquals(0, lists[1].itemCount)
+    }
+
+    @Test
+    fun allFilterFindsListsByNameEvenWithoutAnyComics() = runBlocking {
+        fakeReadingListDao.setListsAndItems(
+            listOf(ReadingListEntity(10, "Favorites"), ReadingListEntity(11, "To explore")),
+            emptyList(),
+        )
+        val all = withTimeout(3000) { viewModel.libraryItems.first { it.size == 2 } }
+        assertTrue(all.all { it is LibraryItem.ReadingListItem })
+
+        viewModel.setSearchQuery("  FAVOR  ")
+        val matches = withTimeout(3000) {
+            viewModel.libraryItems.first { it.size == 1 && it[0] is LibraryItem.ReadingListItem }
+        }
+        assertEquals(10L, (matches.single() as LibraryItem.ReadingListItem).readingList.id)
+        viewModel.setLibraryFilter(LibraryFilter.READING_LISTS)
+        assertEquals(matches, withTimeout(3000) { viewModel.libraryItems.first { it == matches } })
+    }
+
+    @Test
     fun readingListsFilterReturnsReadingListItems() = runBlocking {
         val c1 = createComic(1, "Comic 1")
         val c2 = createComic(2, "Comic 2")

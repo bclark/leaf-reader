@@ -12,6 +12,18 @@ import android.content.Context
 class AppSettings internal constructor(private val prefs: android.content.SharedPreferences) {
     constructor(context: Context) : this(loadPreferences(context))
 
+    var themeMode: ThemeMode
+        get() = runCatching {
+            ThemeMode.valueOf(prefs.getString("theme_mode", null) ?: if (amoledTheme) "DARK" else "SYSTEM")
+        }.getOrDefault(ThemeMode.SYSTEM)
+        set(value) { prefs.edit().putString("theme_mode", value.name).apply() }
+
+    var launcherIcon: LauncherIcon
+        get() = runCatching {
+            LauncherIcon.valueOf(prefs.getString("launcher_icon", "LIGHT") ?: "LIGHT")
+        }.getOrDefault(LauncherIcon.LIGHT)
+        set(value) { prefs.edit().putString("launcher_icon", value.name).apply() }
+
     var defaultRightToLeft: Boolean
         get() = prefs.getBoolean(KEY_DEFAULT_RTL, false)
         set(value) { prefs.edit().putBoolean(KEY_DEFAULT_RTL, value).apply() }

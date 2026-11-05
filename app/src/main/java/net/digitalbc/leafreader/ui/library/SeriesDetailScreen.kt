@@ -69,18 +69,13 @@ import net.digitalbc.leafreader.ui.brand.halftone
 import net.digitalbc.leafreader.ui.theme.Anton
 import net.digitalbc.leafreader.ui.theme.Archivo
 import net.digitalbc.leafreader.ui.theme.ComicRose
-import net.digitalbc.leafreader.ui.theme.Cream
 import net.digitalbc.leafreader.ui.theme.CreamMuted
 import net.digitalbc.leafreader.ui.theme.DeepInk
-import net.digitalbc.leafreader.ui.theme.DeepInkSurface
 import net.digitalbc.leafreader.ui.theme.Ink
-import net.digitalbc.leafreader.ui.theme.InkSoft
 import net.digitalbc.leafreader.ui.theme.LeafAccent
 import net.digitalbc.leafreader.ui.theme.LeafPrimary
 import net.digitalbc.leafreader.ui.theme.LeafSecondary
 import net.digitalbc.leafreader.ui.theme.Ochre
-import net.digitalbc.leafreader.ui.theme.PaperWhite
-import net.digitalbc.leafreader.ui.theme.PaperWhiteMuted
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -196,7 +191,7 @@ fun SeriesDetailScreen(
                 // Hero Card Header (Compact, Uncluttered Status Row)
                 item(span = { GridItemSpan(actualColumns) }) {
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = DeepInkSurface),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -225,7 +220,7 @@ fun SeriesDetailScreen(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(4.dp))
-                                        .background(InkSoft)
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
                                         .border(
                                             1.dp,
                                             if (allCompleted) LeafAccent.copy(alpha = 0.65f) else Ochre.copy(alpha = 0.6f),
@@ -237,7 +232,7 @@ fun SeriesDetailScreen(
                                         text = statusText,
                                         fontFamily = Anton,
                                         fontSize = 11.sp,
-                                        color = if (allCompleted) LeafAccent else Ochre,
+                                        color = if (allCompleted) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.tertiary,
                                         letterSpacing = 0.4.sp,
                                         maxLines = 1,
                                     )
@@ -251,7 +246,7 @@ fun SeriesDetailScreen(
                                             .fillMaxWidth()
                                             .height(3.dp)
                                             .clip(RoundedCornerShape(1.5.dp))
-                                            .background(InkSoft),
+                                            .background(MaterialTheme.colorScheme.surfaceVariant),
                                     ) {
                                         Box(
                                             modifier = Modifier
@@ -274,10 +269,10 @@ fun SeriesDetailScreen(
                                         modifier = Modifier
                                             .size(36.dp)
                                             .clip(RoundedCornerShape(6.dp))
-                                            .background(InkSoft)
+                                            .background(MaterialTheme.colorScheme.surfaceVariant)
                                             .border(
                                                 1.dp,
-                                                if (allCompleted) ComicRose.copy(alpha = 0.6f) else CreamMuted.copy(alpha = 0.35f),
+                                                if (allCompleted) ComicRose.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
                                                 RoundedCornerShape(6.dp),
                                             )
                                             .clickable { viewModel.markSeriesRead(seriesName, volume, !allCompleted) },
@@ -285,8 +280,8 @@ fun SeriesDetailScreen(
                                     ) {
                                         BookStatusBadgeIcon(
                                             isAllCompleted = allCompleted,
-                                            bookTint = if (allCompleted) ComicRose else Cream,
-                                            badgeColor = if (allCompleted) ComicRose else LeafAccent,
+                                            bookTint = if (allCompleted) ComicRose else MaterialTheme.colorScheme.onSurface,
+                                            badgeColor = if (allCompleted) ComicRose else MaterialTheme.colorScheme.tertiary,
                                             badgeGlyphTint = Ink,
                                         )
                                     }
@@ -347,7 +342,7 @@ fun SeriesDetailScreen(
 
             ExtendedFloatingActionButton(
                 onClick = { showAddComicsDialog = true },
-                containerColor = LeafAccent,
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                 contentColor = DeepInk,
                 shape = RoundedCornerShape(4.dp),
                 elevation = FloatingActionButtonDefaults.elevation(6.dp),
@@ -382,14 +377,14 @@ fun SeriesDetailScreen(
                 showAddComicsDialog = false
                 selectedToAdd = emptySet()
             },
-            title = { Text("Add Comics to $seriesName", fontFamily = Anton, color = PaperWhite) },
+            title = { Text("Add Comics to $seriesName", fontFamily = Anton, color = MaterialTheme.colorScheme.onSurface) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         "Select downloaded comics in your library to add to this series.",
                         fontFamily = Archivo,
                         fontSize = 12.sp,
-                        color = PaperWhiteMuted,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
 
                     if (availableComics.isEmpty()) {
@@ -397,7 +392,7 @@ fun SeriesDetailScreen(
                             "All downloaded comics in your library are already in this series.",
                             fontFamily = Archivo,
                             fontSize = 12.sp,
-                            color = CreamMuted,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(vertical = 12.dp),
                         )
                     } else {
@@ -411,10 +406,10 @@ fun SeriesDetailScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(4.dp))
-                                        .background(if (isSelected) DeepInkSurface else DeepInk)
+                                        .background(if (isSelected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface)
                                         .border(
                                             width = if (isSelected) 1.5.dp else 1.dp,
-                                            color = if (isSelected) Ochre else LeafSecondary.copy(alpha = 0.4f),
+                                            color = if (isSelected) MaterialTheme.colorScheme.tertiary else LeafSecondary.copy(alpha = 0.4f),
                                             shape = RoundedCornerShape(4.dp),
                                         )
                                         .clickable {
@@ -428,7 +423,7 @@ fun SeriesDetailScreen(
                                         modifier = Modifier
                                             .size(36.dp, 50.dp)
                                             .clip(RoundedCornerShape(3.dp))
-                                            .background(InkSoft),
+                                            .background(MaterialTheme.colorScheme.surfaceVariant),
                                     ) {
                                         val cover = rememberCover(comic.coverPath)
                                         if (cover != null) {
@@ -440,7 +435,7 @@ fun SeriesDetailScreen(
                                         fontFamily = Archivo,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.5.sp,
-                                        color = PaperWhite,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f),
@@ -449,8 +444,8 @@ fun SeriesDetailScreen(
                                         modifier = Modifier
                                             .size(20.dp)
                                             .clip(RoundedCornerShape(3.dp))
-                                            .background(if (isSelected) Ochre else DeepInk)
-                                            .border(1.5.dp, if (isSelected) Ochre else PaperWhiteMuted.copy(alpha = 0.45f), RoundedCornerShape(3.dp)),
+                                            .background(if (isSelected) Ochre else MaterialTheme.colorScheme.surface)
+                                            .border(1.5.dp, if (isSelected) Ochre else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f), RoundedCornerShape(3.dp)),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         if (isSelected) {
@@ -470,7 +465,7 @@ fun SeriesDetailScreen(
                         showAddComicsDialog = false
                         selectedToAdd = emptySet()
                     }) {
-                        Text("ADD (${selectedToAdd.size})", color = Ochre, fontWeight = FontWeight.Bold)
+                        Text("ADD (${selectedToAdd.size})", color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)
                     }
                 }
             },
@@ -479,10 +474,10 @@ fun SeriesDetailScreen(
                     showAddComicsDialog = false
                     selectedToAdd = emptySet()
                 }) {
-                    Text("CANCEL", color = PaperWhiteMuted)
+                    Text("CANCEL", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
-            containerColor = DeepInkSurface,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
         )
     }
 
@@ -491,7 +486,7 @@ fun SeriesDetailScreen(
         AlertDialog(
             onDismissRequest = { selectedComicForOptions = null },
             title = {
-                Text(comic.title.uppercase(), fontFamily = Anton, color = PaperWhite, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(comic.title.uppercase(), fontFamily = Anton, color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -499,7 +494,7 @@ fun SeriesDetailScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(4.dp))
-                            .background(DeepInk)
+                            .background(MaterialTheme.colorScheme.surface)
                             .border(1.dp, LeafSecondary.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
                             .clickable {
                                 val id = comic.id
@@ -510,15 +505,15 @@ fun SeriesDetailScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Ochre, modifier = Modifier.size(18.dp))
-                        Text(if (comic.lastPage > 0) "CONTINUE READING" else "READ COMIC", fontFamily = Anton, fontSize = 13.sp, color = PaperWhite)
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(18.dp))
+                        Text(if (comic.lastPage > 0) "CONTINUE READING" else "READ COMIC", fontFamily = Anton, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
                     }
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(4.dp))
-                            .background(DeepInk)
+                            .background(MaterialTheme.colorScheme.surface)
                             .border(1.dp, LeafSecondary.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
                             .clickable {
                                 val id = comic.id
@@ -532,14 +527,14 @@ fun SeriesDetailScreen(
                         Icon(
                             if (isRead) Icons.Default.Close else Icons.Default.Check,
                             contentDescription = null,
-                            tint = Ochre,
+                            tint = MaterialTheme.colorScheme.tertiary,
                             modifier = Modifier.size(18.dp),
                         )
                         Text(
                             if (isRead) "MARK AS UNREAD" else "MARK AS READ",
                             fontFamily = Anton,
                             fontSize = 13.sp,
-                            color = PaperWhite,
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                     }
 
@@ -547,7 +542,7 @@ fun SeriesDetailScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(4.dp))
-                            .background(DeepInk)
+                            .background(MaterialTheme.colorScheme.surface)
                             .border(1.dp, ComicRose.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
                             .clickable {
                                 val target = comic
@@ -566,18 +561,18 @@ fun SeriesDetailScreen(
             confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { selectedComicForOptions = null }) {
-                    Text("CLOSE", color = PaperWhiteMuted)
+                    Text("CLOSE", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
-            containerColor = DeepInkSurface,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
         )
     }
 
     comicToRemove?.let { comic ->
         AlertDialog(
             onDismissRequest = { comicToRemove = null },
-            title = { Text("Remove from series?", fontFamily = Anton, color = PaperWhite) },
-            text = { Text("Remove \"${comic.title}\" from $seriesName? The comic will remain in your library as a standalone comic.", color = PaperWhiteMuted) },
+            title = { Text("Remove from series?", fontFamily = Anton, color = MaterialTheme.colorScheme.onSurface) },
+            text = { Text("Remove \"${comic.title}\" from $seriesName? The comic will remain in your library as a standalone comic.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.updateComicsSeries(listOf(comic.id), null, null)
@@ -587,9 +582,9 @@ fun SeriesDetailScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { comicToRemove = null }) { Text("CANCEL", color = PaperWhiteMuted) }
+                TextButton(onClick = { comicToRemove = null }) { Text("CANCEL", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             },
-            containerColor = DeepInkSurface,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
         )
     }
 }
@@ -616,8 +611,8 @@ private fun SeriesComicItem(
                 .aspectRatio(0.7f)
                 .comicShadow(offset = shadowOffset, color = Color(0xB3000000))
                 .clip(RoundedCornerShape(4.dp))
-                .background(InkSoft)
-                .border(borderWidth, Ink, RoundedCornerShape(4.dp)),
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .border(borderWidth, Color.Transparent, RoundedCornerShape(4.dp)),
         ) {
             val cover = rememberCover(comic.coverPath)
             if (cover != null) {
@@ -632,14 +627,14 @@ private fun SeriesComicItem(
                     .padding(4.dp)
                     .size(22.dp)
                     .clip(CircleShape)
-                    .background(DeepInk.copy(alpha = 0.85f))
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
                     .clickable(onClick = onRemove),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Default.Close, contentDescription = "Remove from series", tint = ComicRose, modifier = Modifier.size(13.dp))
             }
 
-            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(progressHeight).background(Ink)) {
+            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(progressHeight).background(MaterialTheme.colorScheme.surface)) {
                 Box(Modifier.fillMaxWidth(pct).fillMaxHeight().background(Ochre))
             }
         }
@@ -648,7 +643,7 @@ private fun SeriesComicItem(
             fontFamily = Archivo,
             fontWeight = FontWeight.ExtraBold,
             fontSize = if (columns >= 5) 10.sp else if (columns >= 4) 11.sp else 12.sp,
-            color = Cream,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp),
@@ -659,7 +654,7 @@ private fun SeriesComicItem(
             fontFamily = Archivo,
             fontWeight = FontWeight.SemiBold,
             fontSize = if (columns >= 4) 8.5.sp else 9.5.sp,
-            color = CreamMuted,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 2.dp),
         )
     }

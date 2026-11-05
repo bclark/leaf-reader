@@ -92,11 +92,17 @@ fun AppNavHost() {
         }
         composable(Routes.MENU) {
             val amoled by app.amoledTheme.collectAsState()
+            val themeMode by app.themeMode.collectAsState()
+            val launcherIcon by app.launcherIcon.collectAsState()
             val pageSlide by app.pageSlideEnabled.collectAsState()
             val fitMode by app.pageFitMode.collectAsState()
             val portraitSpread by app.portraitSpread.collectAsState()
             val landscapeSpread by app.landscapeSpread.collectAsState()
             MenuScreen(
+                themeMode = themeMode,
+                onSetThemeMode = app::setThemeMode,
+                launcherIcon = launcherIcon,
+                onSetLauncherIcon = app::setLauncherIcon,
                 amoledTheme = amoled,
                 onSetAmoledTheme = app::setAmoledTheme,
                 pageSlideEnabled = pageSlide,

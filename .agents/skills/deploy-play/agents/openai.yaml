@@ -1,0 +1,4 @@
+interface:
+  display_name: "Deploy Play"
+  short_description: "Ship a tagged Leaf Android build and iOS handoff"
+  default_prompt: "Use $deploy-play to commit the approved Leaf changes, sync main, and publish the next Android release with friendly notes and an iOS handoff."

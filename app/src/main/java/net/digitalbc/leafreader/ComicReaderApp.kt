@@ -4,6 +4,9 @@ import android.app.Application
 import net.digitalbc.leafreader.data.db.AppDatabase
 import net.digitalbc.leafreader.data.library.LibraryRepository
 import net.digitalbc.leafreader.data.settings.AppSettings
+import net.digitalbc.leafreader.data.settings.ThemeMode
+import net.digitalbc.leafreader.data.settings.LauncherIcon
+import net.digitalbc.leafreader.data.settings.LauncherIcons
 import net.digitalbc.leafreader.detection.MlPanelDetector
 import net.digitalbc.leafreader.detection.NoopPanelSource
 import net.digitalbc.leafreader.detection.PanelSource
@@ -41,11 +44,30 @@ class ComicReaderApp : Application() {
         }
     }
 
+    private val _themeMode by lazy { MutableStateFlow(settings.themeMode) }
+    val themeMode: StateFlow<ThemeMode> by lazy { _themeMode.asStateFlow() }
+
+    fun setThemeMode(mode: ThemeMode) {
+        settings.themeMode = mode
+        _themeMode.value = mode
+    }
+
+    private val _launcherIcon by lazy { MutableStateFlow(settings.launcherIcon) }
+    val launcherIcon: StateFlow<LauncherIcon> by lazy { _launcherIcon.asStateFlow() }
+
+    fun setLauncherIcon(icon: LauncherIcon) {
+        LauncherIcons.apply(this, icon)
+        settings.launcherIcon = icon
+        _launcherIcon.value = icon
+    }
+
     /** Process-wide reactive theme flag so the whole UI re-themes the moment it's toggled. */
     private val _amoledTheme by lazy { MutableStateFlow(settings.amoledTheme) }
     val amoledTheme: StateFlow<Boolean> by lazy { _amoledTheme.asStateFlow() }
 
     fun setAmoledTheme(enabled: Boolean) {
+        // Resolve legacy AMOLED migration before changing the old preference.
+        settings.themeMode = themeMode.value
         settings.amoledTheme = enabled
         _amoledTheme.value = enabled
     }

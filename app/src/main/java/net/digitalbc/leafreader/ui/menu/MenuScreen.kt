@@ -57,6 +57,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import net.digitalbc.leafreader.data.settings.AppSettings
+import net.digitalbc.leafreader.data.settings.ThemeMode
+import net.digitalbc.leafreader.data.settings.LauncherIcon
 import net.digitalbc.leafreader.data.smb.SmbClient
 import net.digitalbc.leafreader.data.smb.SmbErrors
 import kotlinx.coroutines.CancellationException
@@ -68,17 +70,11 @@ import net.digitalbc.leafreader.ui.brand.halftone
 import net.digitalbc.leafreader.ui.theme.Anton
 import net.digitalbc.leafreader.ui.theme.Archivo
 import net.digitalbc.leafreader.ui.theme.Cream
-import net.digitalbc.leafreader.ui.theme.CreamMuted
 import net.digitalbc.leafreader.ui.theme.Crimson
-import net.digitalbc.leafreader.ui.theme.DeepInk
-import net.digitalbc.leafreader.ui.theme.DeepInkSurface
 import net.digitalbc.leafreader.ui.theme.Ink
-import net.digitalbc.leafreader.ui.theme.InkSoft
 import net.digitalbc.leafreader.ui.theme.LeafPrimary
 import net.digitalbc.leafreader.ui.theme.LeafSecondary
 import net.digitalbc.leafreader.ui.theme.Ochre
-import net.digitalbc.leafreader.ui.theme.PaperWhite
-import net.digitalbc.leafreader.ui.theme.PaperWhiteMuted
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import net.digitalbc.leafreader.data.backup.BackupConflictStrategy
@@ -99,6 +95,10 @@ private const val SUPPORT_KOFI_URL = "https://ko-fi.com/bryanclark"
 
 @Composable
 fun MenuScreen(
+    themeMode: ThemeMode,
+    onSetThemeMode: (ThemeMode) -> Unit,
+    launcherIcon: LauncherIcon,
+    onSetLauncherIcon: (LauncherIcon) -> Unit,
     amoledTheme: Boolean,
     onSetAmoledTheme: (Boolean) -> Unit,
     pageSlideEnabled: Boolean,
@@ -249,13 +249,40 @@ fun MenuScreen(
             Spacer(Modifier.size(28.dp))
 
             // ---- Theme ---------------------------------------------------------------
-            SectionLabel("THEME")
+            SectionLabel("APPEARANCE")
             Spacer(Modifier.size(10.dp))
-            ToggleRow(
-                title = "AMOLED Black",
-                subtitle = "True-black background — easy on OLED screens and battery.",
-                checked = amoledTheme,
-                onCheckedChange = onSetAmoledTheme,
+            AppearanceChoice(
+                title = "App theme",
+                options = listOf(ThemeMode.SYSTEM to "System", ThemeMode.LIGHT to "Light", ThemeMode.DARK to "Dark"),
+                selected = themeMode,
+                onSelect = onSetThemeMode,
+            )
+            Spacer(Modifier.size(12.dp))
+            if (themeMode != ThemeMode.LIGHT) {
+                ToggleRow(
+                    title = "AMOLED Black",
+                    subtitle = "Use a true-black background when the app is in dark mode.",
+                    checked = amoledTheme,
+                    onCheckedChange = onSetAmoledTheme,
+                )
+                Spacer(Modifier.size(12.dp))
+            }
+            AppearanceChoice(
+                title = "App icon",
+                options = listOf(LauncherIcon.LIGHT to "Light", LauncherIcon.DARK to "Dark"),
+                selected = launcherIcon,
+                onSelect = { icon ->
+                    runCatching { onSetLauncherIcon(icon) }.onFailure {
+                        Toast.makeText(context, "Could not change app icon. Please try again.", Toast.LENGTH_SHORT).show()
+                    }
+                },
+            )
+            Text(
+                "Your launcher controls themed icons and may take a moment to refresh the illustration.",
+                fontFamily = Archivo,
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
             )
 
             Spacer(Modifier.size(32.dp))
@@ -267,7 +294,7 @@ fun MenuScreen(
                 Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(6.dp))
-                    .background(InkSoft)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
@@ -278,7 +305,7 @@ fun MenuScreen(
                             fontFamily = Archivo,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
-                            color = Cream,
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
                             if (pageSlideEnabled) {
@@ -288,14 +315,14 @@ fun MenuScreen(
                             },
                             fontFamily = Archivo,
                             fontSize = 12.sp,
-                            color = CreamMuted,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 4.dp)
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(Ink)
+                                .background(MaterialTheme.colorScheme.surface)
                                 .padding(2.dp),
                             horizontalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
@@ -313,7 +340,7 @@ fun MenuScreen(
                                     fontFamily = Archivo,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 12.sp,
-                                    color = if (pageSlideEnabled) Ink else CreamMuted,
+                                    color = if (pageSlideEnabled) Ink else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                             Box(
@@ -330,7 +357,7 @@ fun MenuScreen(
                                     fontFamily = Archivo,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 12.sp,
-                                    color = if (!pageSlideEnabled) Ink else CreamMuted,
+                                    color = if (!pageSlideEnabled) Ink else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
@@ -343,7 +370,7 @@ fun MenuScreen(
                         fontFamily = Archivo,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
-                        color = Cream,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         if (pageFitMode == net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_WIDTH) {
@@ -353,14 +380,14 @@ fun MenuScreen(
                         },
                         fontFamily = Archivo,
                         fontSize = 12.sp,
-                        color = CreamMuted,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 4.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .background(Ink)
+                            .background(MaterialTheme.colorScheme.surface)
                             .padding(2.dp),
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
@@ -378,7 +405,7 @@ fun MenuScreen(
                                 fontFamily = Archivo,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
-                                color = if (pageFitMode == net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_PAGE) Ink else CreamMuted,
+                                color = if (pageFitMode == net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_PAGE) Ink else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         Box(
@@ -395,7 +422,7 @@ fun MenuScreen(
                                 fontFamily = Archivo,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
-                                color = if (pageFitMode == net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_WIDTH) Ink else CreamMuted,
+                                color = if (pageFitMode == net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_WIDTH) Ink else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
@@ -405,7 +432,7 @@ fun MenuScreen(
                 LayoutChoice("Landscape layout", landscapeSpread, onSetLandscapeSpread)
                 Text(
                     "The cover and wide pages stay single in either layout.",
-                    fontFamily = Archivo, fontSize = 11.sp, color = CreamMuted,
+                    fontFamily = Archivo, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Spacer(Modifier.size(32.dp))
@@ -417,7 +444,7 @@ fun MenuScreen(
                 Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(6.dp))
-                    .background(InkSoft)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -426,20 +453,20 @@ fun MenuScreen(
                     fontFamily = Archivo,
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
-                    color = Cream,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
                     "Choose how many comic covers appear per row on the library screen.",
                     fontFamily = Archivo,
                     fontSize = 12.sp,
-                    color = CreamMuted,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 4.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(Ink)
+                        .background(MaterialTheme.colorScheme.surface)
                         .padding(2.dp),
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
@@ -463,7 +490,7 @@ fun MenuScreen(
                                 fontFamily = Archivo,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
-                                color = if (isSelected) Ink else CreamMuted,
+                                color = if (isSelected) Ink else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
@@ -479,7 +506,7 @@ fun MenuScreen(
                 Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(6.dp))
-                    .background(InkSoft)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -565,7 +592,7 @@ fun MenuScreen(
                         color = when (smbValid) {
                             true -> Ochre
                             false -> Crimson
-                            null -> CreamMuted
+                            null -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
                     )
                 }
@@ -581,7 +608,7 @@ fun MenuScreen(
                     Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(6.dp))
-                        .background(InkSoft)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -590,7 +617,7 @@ fun MenuScreen(
                         fontFamily = Archivo,
                         fontSize = 12.sp,
                         lineHeight = 17.sp,
-                        color = CreamMuted,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Row(
                         Modifier.fillMaxWidth(),
@@ -600,7 +627,7 @@ fun MenuScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(if (isExporting) Ink else Ochre)
+                                .background(if (isExporting) MaterialTheme.colorScheme.surface else Ochre)
                                 .clickable(enabled = !isExporting && !isImporting) {
                                     val fileName = "leaf_backup_${SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())}.json"
                                     exportLauncher.launch(fileName)
@@ -613,14 +640,14 @@ fun MenuScreen(
                                 fontFamily = Anton,
                                 fontSize = 13.sp,
                                 letterSpacing = 0.5.sp,
-                                color = if (isExporting) CreamMuted else Ink,
+                                color = if (isExporting) MaterialTheme.colorScheme.onSurfaceVariant else Ink,
                             )
                         }
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(DeepInkSurface)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
                                 .border(1.5.dp, Ochre, RoundedCornerShape(4.dp))
                                 .clickable(enabled = !isExporting && !isImporting) {
                                     importLauncher.launch(arrayOf("application/json", "*/*"))
@@ -633,7 +660,7 @@ fun MenuScreen(
                                 fontFamily = Anton,
                                 fontSize = 13.sp,
                                 letterSpacing = 0.5.sp,
-                                color = PaperWhite,
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
                         }
                     }
@@ -653,7 +680,7 @@ fun MenuScreen(
                 fontFamily = Archivo,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 14.sp,
-                color = Cream,
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.size(14.dp))
             Text(
@@ -662,7 +689,7 @@ fun MenuScreen(
                 fontWeight = FontWeight.Medium,
                 fontSize = 13.sp,
                 lineHeight = 19.sp,
-                color = Cream,
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.size(14.dp))
             Text(
@@ -670,7 +697,7 @@ fun MenuScreen(
                 fontFamily = Archivo,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 11.sp,
-                color = Ochre,
+                color = MaterialTheme.colorScheme.tertiary,
                 modifier = Modifier.clickable(onClick = openSource).padding(top = 2.dp),
             )
             Spacer(Modifier.size(8.dp))
@@ -679,7 +706,7 @@ fun MenuScreen(
                 fontFamily = Archivo,
                 fontWeight = FontWeight.Medium,
                 fontSize = 12.sp,
-                color = CreamMuted,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.size(4.dp))
             Text(
@@ -687,7 +714,7 @@ fun MenuScreen(
                 fontFamily = Archivo,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 11.sp,
-                color = CreamMuted,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.clickable(onClick = openUpstream).padding(top = 2.dp),
             )
 
@@ -711,7 +738,7 @@ fun MenuScreen(
                 fontWeight = FontWeight.Medium,
                 fontSize = 12.sp,
                 lineHeight = 18.sp,
-                color = Cream,
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.size(12.dp))
             Row(
@@ -744,7 +771,7 @@ fun MenuScreen(
                 fontFamily = Archivo,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 11.sp,
-                color = Ochre,
+                color = MaterialTheme.colorScheme.tertiary,
                 modifier = Modifier
                     .clickable(
                         onClickLabel = stringResource(R.string.support_leaf_kofi_cd),
@@ -762,7 +789,7 @@ fun MenuScreen(
                 fontWeight = FontWeight.Medium,
                 fontSize = 12.sp,
                 lineHeight = 17.sp,
-                color = CreamMuted,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.size(12.dp))
             Row(
@@ -770,21 +797,21 @@ fun MenuScreen(
                     .fillMaxWidth()
                     .comicShadow(offset = 4.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(DeepInkSurface)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .border(1.5.dp, Ochre, RoundedCornerShape(4.dp))
                     .clickable(onClick = openUpstream)
                     .padding(vertical = 14.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Default.Favorite, contentDescription = null, tint = Ochre, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.Favorite, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(10.dp))
                 Text(
                     "SUPPORT ORIGINAL PROJECT",
                     fontFamily = Anton,
                     fontSize = 15.sp,
                     letterSpacing = 0.5.sp,
-                    color = PaperWhite,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
             }
             Spacer(Modifier.size(6.dp))
@@ -793,7 +820,7 @@ fun MenuScreen(
                 fontFamily = Archivo,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 11.sp,
-                color = Ochre,
+                color = MaterialTheme.colorScheme.tertiary,
                 modifier = Modifier.clickable(onClick = openUpstream).padding(top = 2.dp),
             )
         }
@@ -812,7 +839,7 @@ fun MenuScreen(
                     text = "THIRD-PARTY NOTICES",
                     fontFamily = Anton,
                     fontSize = 18.sp,
-                    color = PaperWhite,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
             },
             text = {
@@ -821,7 +848,7 @@ fun MenuScreen(
                         .fillMaxWidth()
                         .heightIn(max = 420.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(DeepInk)
+                        .background(MaterialTheme.colorScheme.surface)
                         .padding(12.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
@@ -830,7 +857,7 @@ fun MenuScreen(
                         fontFamily = Archivo,
                         fontSize = 11.sp,
                         lineHeight = 16.sp,
-                        color = Cream,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
             },
@@ -841,15 +868,15 @@ fun MenuScreen(
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(LICENSES_URL)))
                     }
                 }) {
-                    Text("VIEW ON GITHUB", color = Ochre, fontWeight = FontWeight.Bold)
+                    Text("VIEW ON GITHUB", color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showLicensesDialog = false }) {
-                    Text("CLOSE", color = PaperWhiteMuted)
+                    Text("CLOSE", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
-            containerColor = DeepInkSurface,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
         )
     }
 
@@ -864,7 +891,7 @@ fun MenuScreen(
                     text = "RESTORE BACKUP (v${preview.version})",
                     fontFamily = Anton,
                     fontSize = 18.sp,
-                    color = PaperWhite,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
             },
             text = {
@@ -873,7 +900,7 @@ fun MenuScreen(
                         text = "Exported: ${SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()).format(Date(preview.exportedAt))} (Leaf v${preview.appVersion})",
                         fontFamily = Archivo,
                         fontSize = 12.sp,
-                        color = CreamMuted,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
                         text = "• ${preview.totalComicsInBackup} comics in backup (${preview.matchingComicsCount} match existing library)\n" +
@@ -882,7 +909,7 @@ fun MenuScreen(
                         fontFamily = Archivo,
                         fontSize = 13.sp,
                         lineHeight = 19.sp,
-                        color = Cream,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.size(4.dp))
                     Text(
@@ -890,7 +917,7 @@ fun MenuScreen(
                         fontFamily = Archivo,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp,
-                        color = Ochre,
+                        color = MaterialTheme.colorScheme.tertiary,
                     )
                     Column(
                         Modifier.selectableGroup(),
@@ -906,7 +933,7 @@ fun MenuScreen(
                                 Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(if (isSelected) Ink else Color.Transparent)
+                                    .background(if (isSelected) MaterialTheme.colorScheme.surface else Color.Transparent)
                                     .selectable(
                                         selected = isSelected,
                                         onClick = { selectedStrategy = strat },
@@ -918,7 +945,7 @@ fun MenuScreen(
                                     Modifier
                                         .size(14.dp)
                                         .clip(CircleShape)
-                                        .border(2.dp, if (isSelected) Ochre else CreamMuted, CircleShape)
+                                        .border(2.dp, if (isSelected) Ochre else MaterialTheme.colorScheme.onSurfaceVariant, CircleShape)
                                         .background(if (isSelected) Ochre else Color.Transparent)
                                 )
                                 Spacer(Modifier.size(8.dp))
@@ -926,7 +953,7 @@ fun MenuScreen(
                                     text = label,
                                     fontFamily = Archivo,
                                     fontSize = 12.sp,
-                                    color = if (isSelected) PaperWhite else CreamMuted,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
@@ -951,7 +978,7 @@ fun MenuScreen(
                         }
                     }
                 ) {
-                    Text("APPLY RESTORE", color = Ochre, fontWeight = FontWeight.Bold)
+                    Text("APPLY RESTORE", color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -959,13 +986,46 @@ fun MenuScreen(
                     restorePreview = null
                     pendingBackupJson = null
                 }) {
-                    Text("CANCEL", color = PaperWhiteMuted)
+                    Text("CANCEL", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
-            containerColor = DeepInkSurface,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
         )
     }
 }
+}
+
+@Composable
+private fun <T> AppearanceChoice(
+    title: String,
+    options: List<Pair<T, String>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(title, fontFamily = Archivo, fontWeight = FontWeight.Bold,
+            fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+        Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            options.forEach { (value, label) ->
+                val active = value == selected
+                Box(
+                    Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(4.dp))
+                        .background(if (active) LeafPrimary else MaterialTheme.colorScheme.surface)
+                        .selectable(selected = active, role = androidx.compose.ui.semantics.Role.RadioButton,
+                            onClick = { onSelect(value) })
+                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(label, fontFamily = Archivo, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+                        color = if (active) Color.White else MaterialTheme.colorScheme.onSurface)
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -975,7 +1035,7 @@ private fun LinkRow(text: String, onClick: () -> Unit) {
         fontFamily = Archivo,
         fontWeight = FontWeight.SemiBold,
         fontSize = 12.sp,
-        color = Ochre,
+        color = MaterialTheme.colorScheme.tertiary,
         modifier = Modifier.clickable(onClick = onClick).padding(vertical = 2.dp),
     )
 }
@@ -994,13 +1054,13 @@ private fun SmbField(
         singleLine = true,
         visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
         colors = OutlinedTextFieldDefaults.colors(
-            focusedTextColor = Cream,
-            unfocusedTextColor = Cream,
-            focusedBorderColor = Ochre,
-            unfocusedBorderColor = CreamMuted,
-            focusedLabelColor = Ochre,
-            unfocusedLabelColor = CreamMuted,
-            cursorColor = Ochre,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+            focusedBorderColor = MaterialTheme.colorScheme.tertiary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            focusedLabelColor = MaterialTheme.colorScheme.tertiary,
+            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            cursorColor = MaterialTheme.colorScheme.tertiary,
         ),
         modifier = Modifier.fillMaxWidth(),
     )
@@ -1014,7 +1074,7 @@ private fun SectionLabel(text: String) {
         fontWeight = FontWeight.ExtraBold,
         fontSize = 9.sp,
         letterSpacing = 2.5.sp,
-        color = Ochre,
+        color = MaterialTheme.colorScheme.tertiary,
     )
 }
 
@@ -1029,7 +1089,7 @@ private fun ToggleRow(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
-            .background(InkSoft)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .clickable { onCheckedChange(!checked) }
             .padding(start = 16.dp, end = 10.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1040,7 +1100,7 @@ private fun ToggleRow(
                 fontFamily = Archivo,
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
-                color = Cream,
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
                 subtitle,
@@ -1048,7 +1108,7 @@ private fun ToggleRow(
                 fontWeight = FontWeight.Medium,
                 fontSize = 10.5.sp,
                 lineHeight = 14.sp,
-                color = CreamMuted,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
@@ -1057,11 +1117,11 @@ private fun ToggleRow(
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Ink,
-                checkedTrackColor = Ochre,
-                checkedBorderColor = Ochre,
-                uncheckedThumbColor = CreamMuted,
+                checkedTrackColor = MaterialTheme.colorScheme.tertiary,
+                checkedBorderColor = MaterialTheme.colorScheme.tertiary,
+                uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 uncheckedTrackColor = Ink,
-                uncheckedBorderColor = CreamMuted,
+                uncheckedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ),
         )
     }
@@ -1071,9 +1131,9 @@ private fun ToggleRow(
 @Composable
 private fun LayoutChoice(title: String, spread: Boolean, onChange: (Boolean) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, fontFamily = Archivo, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Cream)
+        Text(title, fontFamily = Archivo, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).background(Ink).padding(2.dp)
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.surface).padding(2.dp)
                 .selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
@@ -1088,7 +1148,7 @@ private fun LayoutChoice(title: String, spread: Boolean, onChange: (Boolean) -> 
                 ) {
                     Text(if (option) "Two-page spread" else "Single page",
                         fontFamily = Archivo, fontWeight = FontWeight.Bold, fontSize = 12.sp,
-                        color = if (spread == option) Ink else CreamMuted)
+                        color = if (spread == option) Ink else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

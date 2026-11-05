@@ -112,6 +112,24 @@ class LibraryViewModel(
             }
         }
 
+        val readingListCards = if (filter == LibraryFilter.ALL || filter == LibraryFilter.READING_LISTS) {
+            val filteredLists = if (query.isBlank()) {
+                lists
+            } else {
+                lists.filter { it.name.contains(query.trim(), ignoreCase = true) }
+            }
+            val comicMap = allComics.associateBy { it.id }
+            filteredLists.map { list ->
+                val listItems = allListItems.filter { it.listId == list.id }.sortedBy { it.sortOrder }
+                val listComics = listItems.mapNotNull { comicMap[it.comicId] }
+                LibraryItem.ReadingListItem(
+                    readingList = list,
+                    previewComics = listComics.take(4),
+                    itemCount = listComics.size,
+                )
+            }
+        } else emptyList()
+
         when (filter) {
             LibraryFilter.ALL -> {
                 val seriesGroups = filteredComics
@@ -156,7 +174,7 @@ class LibraryViewModel(
                         handledComicIds.add(comic.id)
                     }
                 }
-                items
+                items + readingListCards
             }
             LibraryFilter.SERIES -> {
                 val seriesGroups = filteredComics
@@ -184,23 +202,7 @@ class LibraryViewModel(
                     )
                 }.sortedBy { it.seriesName.lowercase() }
             }
-            LibraryFilter.READING_LISTS -> {
-                val filteredLists = if (query.isBlank()) {
-                    lists
-                } else {
-                    lists.filter { it.name.contains(query.trim(), ignoreCase = true) }
-                }
-                val comicMap = allComics.associateBy { it.id }
-                filteredLists.map { list ->
-                    val listItems = allListItems.filter { it.listId == list.id }.sortedBy { it.sortOrder }
-                    val listComics = listItems.mapNotNull { comicMap[it.comicId] }
-                    LibraryItem.ReadingListItem(
-                        readingList = list,
-                        previewComics = listComics.take(4),
-                        itemCount = listComics.size,
-                    )
-                }
-            }
+            LibraryFilter.READING_LISTS -> readingListCards
             LibraryFilter.UNREAD -> {
                 val unreadComics = filteredComics.filter { it.lastPage == 0 }
                 unreadComics.map { LibraryItem.SingleComic(it) }

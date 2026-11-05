@@ -14,5 +14,5 @@
 
     <!-- System & Launcher -->
     <color name="reader_background">@color/deep_ink</color>
-    <color name="ic_launcher_background">#FFFFFFFF</color>
+    <color name="ic_launcher_background">#FAFAF7</color>
 </resources>
