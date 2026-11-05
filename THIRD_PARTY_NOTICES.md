@@ -72,7 +72,7 @@ Upstream Source: https://github.com/omicronapps/7-Zip-JBinding-4Android (wraps 7
      - Unzip the APK archive (`unzip Leaf.apk -d /tmp/apk`).
      - Replace `lib/<abi>/lib7-Zip-JBinding.so` with a custom-compiled version of the library.
      - Re-align and re-sign the APK using `zipalign` and `apksigner`.
-- **Platform Scope:** iOS does **not** bundle 7-Zip-JBinding or any LGPL code; iOS uses `libarchive` (BSD-licensed) for RAR decompression.
+- **Platform Scope:** iOS does **not** bundle 7-Zip-JBinding; it uses `libarchive` (BSD-licensed) for RAR decompression. The iOS SMB transport spike separately embeds LGPL-covered AMSMB2/libsmb2 as described below.
 
 ---
 
@@ -100,3 +100,13 @@ Full text: [`THIRD_PARTY_LICENSES/AGPL-3.0.txt`](THIRD_PARTY_LICENSES/AGPL-3.0.t
 
 - Leaf is a fork of **Chika** (created by Chakra / Chalchitra Krida). Upstream source is maintained at https://github.com/batunii/chika.
 - The **Leaf** name, logo, and wordmarks are brand assets of this project. Trademark and brand rights for Chika / Chitra Katha remain reserved by their respective owners and are not governed by the code license.
+
+## iOS SMB transport spike — AMSMB2 / libsmb2
+
+- **AMSMB2 4.0.3**, revision `1726aaaf7adf63d7d1d2a0c5d1b0e635028215c0`: [source](https://github.com/amosavian/AMSMB2/tree/1726aaaf7adf63d7d1d2a0c5d1b0e635028215c0). Swift source headers identify MIT licensing, but the upstream repository and combined framework are **LGPL-2.1**.
+- Bundled **libsmb2**, revision `aff9fa6ba9f41cfd3c15d184554601ec3f6d8d03`: [source](https://github.com/sahlberg/libsmb2/tree/aff9fa6ba9f41cfd3c15d184554601ec3f6d8d03), **LGPL-2.1-or-later** for library/include code. Its examples are not compiled into Leaf.
+- `project.yml` pins the exact AMSMB2 release and explicitly embeds/signs its dynamic framework. libsmb2 is compiled into that framework, not directly into the Leaf executable. No upstream sources are modified.
+- License, upstream source links, copyrights and rebuild/replacement instructions ship in `iosApp/Sources/ThirdPartyNotices/`. The complete corresponding sources and build instructions must accompany any distribution under the applicable LGPL terms; archive the pinned source and submodule with release materials. App Store distribution review remains a release gate, not an assertion that dynamic linking alone resolves every obligation.
+- The selected release declares swift-atomics only for its own test target. It is not linked into the Leaf app.
+
+See [iOS SMB spike evidence](docs/SMB_IOS_SPIKE_RESULTS.md) for verification and pending acceptance checks.

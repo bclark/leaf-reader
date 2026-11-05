@@ -8,6 +8,7 @@ struct MenuView: View {
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
 
+    @State private var showingSmbSettings = false
     @State private var showingExporter = false
     @State private var exportDocument = BackupJSONDocument()
     @State private var showingImporter = false
@@ -42,6 +43,7 @@ struct MenuView: View {
     var body: some View {
         ZStack {
             settings.ground.ignoresSafeArea()
+                .sheet(isPresented: $showingSmbSettings) { SmbSettingsView() }
 
             VStack(spacing: 0) {
                 // App Bar: leafPrimary anchors the brand at the top of the screen
@@ -144,6 +146,11 @@ struct MenuView: View {
                         Spacer().frame(height: 32)
 
                         // ---- Library -----------------------------------------------------
+                        Button("SMB Drive Settings") { showingSmbSettings = true }
+                            .font(.archivo(14, weight: 700))
+                            .foregroundColor(Leaf.ochre)
+                            .padding(.bottom, 24)
+
                         SectionLabel("LIBRARY")
                         Spacer().frame(height: 10)
                         VStack(alignment: .leading, spacing: 8) {

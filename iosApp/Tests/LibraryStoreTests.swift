@@ -1,4 +1,5 @@
 import XCTest
+import Testing
 import SwiftUI
 import UIKit
 @testable import Leaf
@@ -487,5 +488,42 @@ private extension Data {
     mutating func appendUInt32LE(_ value: UInt32) {
         var le = value.littleEndian
         Swift.withUnsafeBytes(of: &le) { append(contentsOf: $0) }
+    }
+}
+
+@Suite(.serialized)
+@MainActor
+struct SeriesNameGroupingTests {
+    @Test func groupsAcrossVolumesAndKeepsVolumeMetadata() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        var urls: [URL] = []
+        defer {
+            for url in urls { ComicMetadataStore.clear(url); ReadingProgress.clear(url) }
+            try? FileManager.default.removeItem(at: root)
+        }
+        for (volume, issue) in [("10", Float(1)), ("2", Float(2)), ("2", Float(1))] {
+            let url = root.appendingPathComponent(UUID().uuidString + ".cbz")
+            try Data().write(to: url)
+            urls.append(url)
+            ComicMetadataStore.set(url, metadata: ComicMetadataRecord(
+                series: "Example", volume: volume, issueNumber: issue, userModified: true))
+        }
+        let store = LibraryStore(directory: root)
+        for filter in [LibraryFilter.all, .series] {
+            let items = store.libraryItems(filter: filter, searchQuery: "")
+            #expect(items.count == 1)
+            guard case .seriesStack(_, let volume, let issues, _, let total, _, _) = items.first else {
+                Issue.record("Expected a single series stack across volumes")
+                return
+            }
+            #expect(volume == nil)
+            #expect(total == 3)
+            #expect(issues == [urls[2], urls[1], urls[0]])
+        }
+        #expect(store.comics(inSeries: "EXAMPLE") == [urls[2], urls[1], urls[0]])
+        store.addToSeries(urls: [urls[0]], name: "Other")
+        #expect(ComicMetadataStore.get(urls[0])?.volume == "10")
+        #expect(store.comics(inSeries: "Example").count == 2)
     }
 }

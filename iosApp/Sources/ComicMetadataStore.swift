@@ -2,7 +2,7 @@ import Foundation
 import LeafShared
 
 /// Structured comic metadata (series, volume, issue number, year, title) matching Android's ComicEntity fields.
-public struct ComicMetadataRecord: Codable, Equatable {
+public struct ComicMetadataRecord: Codable, Equatable, Sendable {
     public var series: String?
     public var volume: String?
     public var issueNumber: Float?

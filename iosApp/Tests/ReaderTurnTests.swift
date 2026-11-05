@@ -654,7 +654,8 @@ final class ReaderTurnTests: XCTestCase {
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
-        let cbzURL = tempDir.appendingPathComponent("TestComic.cbz")
+        let cbzURL = tempDir.appendingPathComponent("TestComic-\(UUID().uuidString).cbz")
+        defer { ReadingProgress.clear(cbzURL) }
         guard let archive = Archive(url: cbzURL, accessMode: .create) else {
             XCTFail("Could not create test CBZ archive")
             return
@@ -762,7 +763,8 @@ final class ReaderTurnTests: XCTestCase {
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
-        let cbzURL = tempDir.appendingPathComponent("TestRTLSpreadComic.cbz")
+        let cbzURL = tempDir.appendingPathComponent("TestRTLSpreadComic-\(UUID().uuidString).cbz")
+        defer { ReadingProgress.clear(cbzURL) }
         guard let archive = Archive(url: cbzURL, accessMode: .create) else {
             XCTFail("Could not create test CBZ archive")
             return

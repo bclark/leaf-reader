@@ -25,6 +25,9 @@ settings:
     DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)
 
 packages:
+  AMSMB2:
+    url: https://github.com/amosavian/AMSMB2
+    exactVersion: "4.0.3"
   ZIPFoundation:
     url: https://github.com/weichsel/ZIPFoundation
     from: "0.9.19"
@@ -43,6 +46,9 @@ targets:
     sources:
       - path: Sources
     dependencies:
+      - package: AMSMB2
+        embed: true
+        codeSign: true
       - package: ZIPFoundation
       - package: SwiftArchive
         product: libarchive
@@ -52,9 +58,9 @@ targets:
         CFBundleDisplayName: Leaf
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        # The app uses no encryption beyond what the OS provides — declares export compliance so
-        # App Store Connect uploads don't stall on the manual questionnaire.
-        ITSAppUsesNonExemptEncryption: false
+        # SMB adds native cryptographic code. Leave export classification to the
+        # App Store questionnaire until the dependency review is recorded.
+        NSLocalNetworkUsageDescription: "Leaf connects to your SMB drive to browse and import comics you choose."
         UILaunchScreen: {}
         UIAppFonts:
           - Anton-Regular.ttf

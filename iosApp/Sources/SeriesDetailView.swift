@@ -17,21 +17,7 @@ struct SeriesDetailView: View {
     @State private var comicToRemove: URL?
 
     private var seriesComics: [URL] {
-        library.comics.filter { url in
-            let m = library.metadata[url.lastPathComponent]
-            guard let s = m?.series, s.caseInsensitiveCompare(seriesName) == .orderedSame else { return false }
-            if let vol = volume, !vol.isEmpty {
-                return (m?.volume ?? "").caseInsensitiveCompare(vol) == .orderedSame
-            }
-            return true
-        }.sorted { a, b in
-            let ma = library.metadata[a.lastPathComponent]
-            let mb = library.metadata[b.lastPathComponent]
-            let numA = ma?.issueNumber ?? Float.greatestFiniteMagnitude
-            let numB = mb?.issueNumber ?? Float.greatestFiniteMagnitude
-            if numA != numB { return numA < numB }
-            return a.lastPathComponent.localizedStandardCompare(b.lastPathComponent) == .orderedAscending
-        }
+        library.comics(inSeries: seriesName)
     }
 
     private var completedCount: Int {
@@ -403,7 +389,7 @@ struct SeriesDetailView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add (\(selectedToAdd.count))") {
-                        library.setSeries(urls: Array(selectedToAdd), series: seriesName, volume: volume)
+                        library.addToSeries(urls: Array(selectedToAdd), name: seriesName)
                         showAddComicsSheet = false
                     }
                     .foregroundColor(selectedToAdd.isEmpty ? Leaf.creamMuted : Leaf.ochre)

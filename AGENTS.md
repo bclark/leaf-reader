@@ -10,7 +10,7 @@ Instructions and architectural context for AI coding agents working in this repo
 When a user opens a `.cbz` (ZIP) or `.cbr` (RAR/RAR5) archive, an on-device YOLO TFLite/LiteRT model (`manga_panel_detector_int8.tflite`) detects panel and speech-balloon bounding boxes. A shared Kotlin Multiplatform pipeline fills coverage gaps, orders panels in reading direction (LTR for Western comics, RTL for manga), merges tiny adjacent panels, divides oversized/spread panels along speech-balloon gaps, and frames each region with smooth camera transitions.
 
 - **License:** Mozilla Public License 2.0 (`LICENSE`), with third-party notices in `THIRD_PARTY_NOTICES.md` (notably LGPL-2.1 for `7-Zip-JBinding-4Android` and Manga109-s dataset disclosure for the bundled model).
-- **Privacy & Offline Guarantee:** The app has **no `INTERNET` permission**, no telemetry, no ads, and no network dependencies at runtime (`PRIVACY.md`). Never add network permissions or analytics SDKs.
+- **Privacy & Offline Guarantee:** Reading remains offline. Android and iOS support optional user-initiated SMB imports using shared connection, path, listing and browser policy. Network access is limited to the user-configured SMB server during explicit connection/import actions. Never add telemetry, analytics, ads, automatic network requests, or cloud dependencies. Preserve local Files import regardless of network availability (`PRIVACY.md`).
 
 ---
 

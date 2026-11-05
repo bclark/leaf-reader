@@ -1,0 +1,15 @@
+AMSMB2 4.0.3 — native SMB transport spike
+Copyright © 2018 Mousavian. Swift source headers identify MIT licensing.
+The combined framework is licensed under LGPL-2.1 because it includes libsmb2.
+AMSMB2 source: https://github.com/amosavian/AMSMB2/tree/1726aaaf7adf63d7d1d2a0c5d1b0e635028215c0
+libsmb2 source: https://github.com/sahlberg/libsmb2/tree/aff9fa6ba9f41cfd3c15d184554601ec3f6d8d03
+libsmb2 library code: LGPL-2.1-or-later; copyright Ronnie Sahlberg and contributors.
+No upstream source modifications. No warranty; see bundled LGPL license and COPYING.
+
+Leaf links and embeds AMSMB2.framework dynamically. libsmb2 is compiled into that framework.
+Leaf source and build instructions: https://github.com/bclark/leaf-reader
+To rebuild with a modified library, use a modified checkout of the pinned AMSMB2 source
+(including its pinned libsmb2 submodule), replace the package source in iosApp/project.yml,
+regenerate the project, run pod install and build/re-sign Leaf.xcworkspace with your team.
+Do not statically link the combined library into Leaf. Source distribution and App Store
+license/export obligations must be checked before publishing this experimental feature.

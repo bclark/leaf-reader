@@ -21,7 +21,7 @@ enum CbrReader {
     }
 
     /// Reads every regular-file entry's bytes. Filtering to images and ordering is the caller's job.
-    static func readEntries(at url: URL) throws -> [Entry] {
+    static func readEntries(at url: URL, checkCancellation: () throws -> Void = {}) throws -> [Entry] {
         guard let handle = archive_read_new() else { throw CbrError.open }
         defer { archive_read_free(handle) }
         _ = archive_read_support_format_all(handle)
@@ -33,6 +33,7 @@ enum CbrReader {
         var results: [Entry] = []
         var entryPtr: OpaquePointer?
         while true {
+            try checkCancellation()
             let rc = archive_read_next_header(handle, &entryPtr)
             if rc == ARCHIVE_EOF { break }
             guard rc == ARCHIVE_OK || rc == ARCHIVE_WARN, let entry = entryPtr else { throw CbrError.read }
@@ -48,6 +49,7 @@ enum CbrReader {
             if size > 0 { bytes.reserveCapacity(Int(size)) }
             var buffer = [UInt8](repeating: 0, count: 64 * 1024)
             while true {
+                try checkCancellation()
                 let n = buffer.withUnsafeMutableBytes { archive_read_data(handle, $0.baseAddress, $0.count) }
                 if n == 0 { break }
                 guard n > 0 else { throw CbrError.read }

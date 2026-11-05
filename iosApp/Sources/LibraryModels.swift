@@ -33,8 +33,8 @@ public enum LibraryItem: Identifiable, Equatable {
         switch self {
         case .singleComic(let url, _):
             return "single-\(url.lastPathComponent)"
-        case .seriesStack(let seriesName, let volume, _, _, _, _, _):
-            return "series-\(seriesName.lowercased())-\(volume?.lowercased() ?? "")"
+        case .seriesStack(let seriesName, _, _, _, _, _, _):
+            return "series-\(seriesName.lowercased())"
         case .readingListItem(let list, _, _):
             return "list-\(list.id)"
         }

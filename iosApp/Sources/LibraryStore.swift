@@ -14,6 +14,8 @@ final class LibraryStore: ObservableObject {
     @Published var importError: String?
 
     private let dir: URL
+    private let importPipeline: ComicImportPipeline
+    private var pendingImports = 0
 
     /// Types the file importer allows. Includes the app's exported CBZ/CBR types plus the generic
     /// zip/archive/rar/pdf families so a plain .zip, .rar, or .pdf comic is selectable too.
@@ -32,11 +34,12 @@ final class LibraryStore: ObservableObject {
             dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("Comics", isDirectory: true)
         }
+        importPipeline = ComicImportPipeline(directory: dir)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         refresh()
     }
 
-    func refresh() {
+    func refresh(backfill: Bool = true) {
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         let comicFiles = files
             .filter { ["cbz", "zip", "pdf"].contains($0.pathExtension.lowercased()) }
@@ -49,54 +52,47 @@ final class LibraryStore: ObservableObject {
         comics = comicFiles
 
         // Backfill missing series/issue metadata for existing or newly discovered files
-        ComicMetadataStore.backfillMetadataIfNeeded(for: comicFiles)
+        if backfill { ComicMetadataStore.backfillMetadataIfNeeded(for: comicFiles) }
         metadata = ComicMetadataStore.all()
         readingLists = ReadingListStore.all()
     }
 
+    /// File-picker entry point; the async operation holds security scope through copying.
     func importComic(from url: URL) {
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-
-        let ext = url.pathExtension.lowercased()
-        let baseName = url.deletingPathExtension().lastPathComponent
-
-        let format = ComicFormatDetector.shared.detect(head: Self.leadingBytes(of: url), fileExtension: ext)
-        let dest = dir.appendingPathComponent(baseName + (format == .pdf ? ".pdf" : ".cbz"))
-
-        if format == .cbr {
-            let staged = FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
+        Task {
             do {
-                try FileManager.default.copyItem(at: url, to: staged)
-            } catch {
-                importError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)"
-                return
-            }
-            importing = true
-            Task {
-                defer { try? FileManager.default.removeItem(at: staged) }
-                do {
-                    try await CbrConverter.convertToCbz(source: staged, destination: dest)
-                    ReadingProgress.markOpened(dest)
-                    _ = ComicMetadataStore.parseAndStoreIfNeeded(dest)
-                } catch {
-                    importError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)"
-                }
-                importing = false
-                refresh()
-            }
-        } else {
-            do {
-                try? FileManager.default.removeItem(at: dest)
-                try FileManager.default.copyItem(at: url, to: dest)
-                ReadingProgress.markOpened(dest)
-                _ = ComicMetadataStore.parseAndStoreIfNeeded(dest)
+                _ = try await importComicAwaitingCompletion(from: url, collision: .replace)
+            } catch is CancellationError {
+                // Cancellation is not a failed comic.
             } catch {
                 importError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)"
             }
-            refresh()
         }
+    }
+
+    /// Returns only after preparation, atomic publication and metadata bookkeeping finish.
+    /// Remote callers should explicitly choose a collision policy; Keep Both is the safe default.
+    func importComicAwaitingCompletion(
+        from url: URL, originalName: String? = nil, expectedBytes: Int64? = nil,
+        collision: ComicImportCollision = .keepBoth,
+        phase: @escaping @Sendable (ComicImportPhase) -> Void = { _ in }
+    ) async throws -> URL {
+        pendingImports += 1
+        importing = true
+        defer {
+            pendingImports -= 1
+            importing = pendingImports > 0
+        }
+        let result = try await importPipeline.importFile(from: url,
+            originalName: originalName ?? url.lastPathComponent, expectedBytes: expectedBytes,
+            collision: collision, phase: phase)
+        // Do not check cancellation after publication: finish this transaction consistently.
+        ReadingProgress.markOpened(result.url)
+        if ComicMetadataStore.get(result.url) == nil {
+            ComicMetadataStore.set(result.url, metadata: result.metadata)
+        }
+        refresh(backfill: false)
+        return result.url
     }
 
     func delete(_ url: URL) {
@@ -147,15 +143,21 @@ final class LibraryStore: ObservableObject {
     }
 
     func markSeriesRead(seriesName: String, volume: String?, read: Bool) {
-        let matching = comics.filter { url in
-            let m = metadata[url.lastPathComponent]
-            guard let s = m?.series, s.caseInsensitiveCompare(seriesName) == .orderedSame else { return false }
-            if let vol = volume, !vol.isEmpty {
-                return (m?.volume ?? "").caseInsensitiveCompare(vol) == .orderedSame
-            }
-            return true
+        markComicsRead(urls: comics(inSeries: seriesName), read: read)
+    }
+
+    func comics(inSeries name: String) -> [URL] {
+        sortIssues(comics.filter {
+            metadata[$0.lastPathComponent]?.series?.caseInsensitiveCompare(name) == .orderedSame
+        })
+    }
+
+    func addToSeries(urls: [URL], name: String) {
+        for url in urls {
+            ComicMetadataStore.updateSeries(for: [url], series: name,
+                                            volume: metadata[url.lastPathComponent]?.volume)
         }
-        markComicsRead(urls: matching, read: read)
+        refresh()
     }
 
     // MARK: - Reading List Operations
@@ -220,8 +222,7 @@ final class LibraryStore: ObservableObject {
             var seriesGroups: [String: [URL]] = [:]
             for url in filteredComics {
                 if let s = metadata[url.lastPathComponent]?.series, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    let v = metadata[url.lastPathComponent]?.volume ?? ""
-                    let key = "\(s)__\(v)".lowercased()
+                    let key = s.lowercased()
                     seriesGroups[key, default: []].append(url)
                 }
             }
@@ -232,8 +233,7 @@ final class LibraryStore: ObservableObject {
             for url in filteredComics {
                 if handled.contains(url) { continue }
                 if let s = metadata[url.lastPathComponent]?.series, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    let v = metadata[url.lastPathComponent]?.volume ?? ""
-                    let key = "\(s)__\(v)".lowercased()
+                    let key = s.lowercased()
                     if let group = seriesGroups[key], group.count >= 2 {
                         let sortedIssues = sortIssues(group)
                         let nextIssue = sortedIssues.first { !ReadingProgress.isCompleted($0) }
@@ -245,7 +245,7 @@ final class LibraryStore: ObservableObject {
                         items.append(
                             .seriesStack(
                                 seriesName: metadata[group[0].lastPathComponent]?.series ?? "Series",
-                                volume: metadata[group[0].lastPathComponent]?.volume,
+                                volume: nil,
                                 issues: sortedIssues,
                                 topCoverComic: nextIssue,
                                 totalIssues: sortedIssues.count,
@@ -266,8 +266,7 @@ final class LibraryStore: ObservableObject {
             var seriesGroups: [String: [URL]] = [:]
             for url in filteredComics {
                 if let s = metadata[url.lastPathComponent]?.series, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    let v = metadata[url.lastPathComponent]?.volume ?? ""
-                    let key = "\(s)__\(v)".lowercased()
+                    let key = s.lowercased()
                     seriesGroups[key, default: []].append(url)
                 }
             }
@@ -282,7 +281,7 @@ final class LibraryStore: ObservableObject {
 
                 return LibraryItem.seriesStack(
                     seriesName: metadata[group[0].lastPathComponent]?.series ?? "Series",
-                    volume: metadata[group[0].lastPathComponent]?.volume,
+                    volume: nil,
                     issues: sortedIssues,
                     topCoverComic: nextIssue,
                     totalIssues: sortedIssues.count,
@@ -317,6 +316,10 @@ final class LibraryStore: ObservableObject {
         urls.sorted { a, b in
             let ma = metadata[a.lastPathComponent]
             let mb = metadata[b.lastPathComponent]
+            let volumeA = ma?.volume ?? ""
+            let volumeB = mb?.volume ?? ""
+            let volumeOrder = volumeA.localizedStandardCompare(volumeB)
+            if volumeOrder != .orderedSame { return volumeOrder == .orderedAscending }
             let numA = ma?.issueNumber ?? Float.greatestFiniteMagnitude
             let numB = mb?.issueNumber ?? Float.greatestFiniteMagnitude
             if numA != numB { return numA < numB }
@@ -324,15 +327,4 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    /// Reads up to the first 8 bytes of a file so `ComicFormatDetector` can check magic numbers.
-    private static func leadingBytes(of url: URL) -> KotlinByteArray {
-        guard let handle = try? FileHandle(forReadingFrom: url),
-              let data = try? handle.read(upToCount: 8) else {
-            return KotlinByteArray(size: 0)
-        }
-        try? handle.close()
-        let out = KotlinByteArray(size: Int32(data.count))
-        for (i, b) in data.enumerated() { out.set(index: Int32(i), value: Int8(bitPattern: b)) }
-        return out
-    }
 }

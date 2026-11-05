@@ -28,6 +28,8 @@ struct LibraryView: View {
 
     @State private var selectedFilter: LibraryFilter = .all
     @State private var showPicker = false
+    @State private var showImportSource = false
+    @State private var showSmbBrowser = false
     @State private var showMenu = false
 
     // Single comic awaiting delete confirmation
@@ -168,6 +170,13 @@ struct LibraryView: View {
                 MenuView()
                     .environmentObject(settings)
                     .environmentObject(library)
+            }
+            .confirmationDialog("Add Comics", isPresented: $showImportSource, titleVisibility: .visible) {
+                Button("From Files") { showPicker = true }
+                Button("From SMB Drive") { showSmbBrowser = true }
+            }
+            .sheet(isPresented: $showSmbBrowser) {
+                SmbBrowserView().environmentObject(library)
             }
             .fileImporter(
                 isPresented: $showPicker,
@@ -648,7 +657,7 @@ struct LibraryView: View {
                                 newListNameInput = ""
                                 showCreateListAlert = true
                             } else {
-                                showPicker = true
+                                showImportSource = true
                             }
                         }
                     }
