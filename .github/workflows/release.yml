@@ -1,7 +1,7 @@
 name: Release
 
-# Tag a commit (e.g. `git tag v1.0.0 && git push origin v1.0.0`) to build a signed
-# release AAB + APK and publish them on a GitHub Release.
+# Push a v* tag to publish Android release artifacts and reader-friendly notes.
+# Artifacts are signed only when the repository signing secrets are configured.
 on:
   push:
     tags: [ "v*" ]
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   release:
-    name: Build & publish signed release
+    name: Build & publish Android release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -45,6 +45,9 @@ jobs:
             echo "Error: Tag version '$TAG_VERSION' does not match versionName in app/build.gradle.kts"
             exit 1
           fi
+
+      - name: Verify reader-friendly release notes exist
+        run: test -s "docs/releases/${GITHUB_REF_NAME}.md"
 
       - name: Decode signing keystore
         run: |
@@ -79,8 +82,10 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
-          fail_on_unmatched_files: false
+          name: Leaf ${{ steps.ver.outputs.name }}
+          body_path: docs/releases/${{ github.ref_name }}.md
+          generate_release_notes: false
+          fail_on_unmatched_files: true
           # Tags with a suffix (e.g. v0.2.0-beta, v1.0.0-rc1) publish as a GitHub pre-release.
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |

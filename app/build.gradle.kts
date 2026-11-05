@@ -14,8 +14,8 @@ android {
         applicationId = "net.digitalbc.leafreader"
         minSdk = 26
         targetSdk = 36
-        versionName = "0.3.5"
-        versionCode = 30500
+        versionName = "0.3.6"
+        versionCode = 30600
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
