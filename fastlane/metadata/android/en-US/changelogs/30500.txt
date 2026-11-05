@@ -1,0 +1,1 @@
+Refined 3D page turns, series grouping and reading-list controls. Added portable library backups and more durable reading progress. Improved SMB imports with shared path validation, stable folder browsing, transfer progress and safer cancellation.
