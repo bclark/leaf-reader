@@ -96,6 +96,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -1780,9 +1781,14 @@ fun SmbDriveScreen(
     viewModel: LibraryViewModel,
     onBack: () -> Unit,
 ) {
-    val entries by viewModel.smbEntries.collectAsStateWithLifecycle()
-    val loading by viewModel.smbLoading.collectAsStateWithLifecycle()
-    val path by viewModel.smbPath.collectAsStateWithLifecycle()
+    val browser by viewModel.smbBrowser.collectAsStateWithLifecycle()
+    val entries = browser.entries
+    val loading = browser.loading
+    val path = browser.path
+    val selectedPaths = browser.selectedPaths
+    DisposableEffect(viewModel) {
+        onDispose { viewModel.cancelSmbBrowse() }
+    }
     val importing by viewModel.importing.collectAsStateWithLifecycle()
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
     val importStatus by viewModel.importStatus.collectAsStateWithLifecycle()
@@ -1790,7 +1796,6 @@ fun SmbDriveScreen(
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    var selectedPaths by remember(path, entries) { mutableStateOf(emptySet<String>()) }
     val fileEntries = remember(entries) { entries.filter { !it.isDirectory } }
     val selectedCount = selectedPaths.size
     val totalFiles = fileEntries.size
@@ -1800,7 +1805,7 @@ fun SmbDriveScreen(
     }
 
     BackHandler(enabled = !importing && selectedCount > 0) {
-        selectedPaths = emptySet()
+        viewModel.clearSmbSelection()
     }
 
     LaunchedEffect(message) {
@@ -1830,9 +1835,9 @@ fun SmbDriveScreen(
                         .background(PaperWhite.copy(alpha = 0.14f))
                         .clickable {
                             if (selectedCount > 0) {
-                                selectedPaths = emptySet()
+                                viewModel.clearSmbSelection()
                             } else if (path.isNotEmpty()) {
-                                viewModel.loadSmbDirectory(path.substringBeforeLast('\\', ""))
+                                viewModel.loadSmbDirectory(net.digitalbc.leafreader.data.smb.SmbPaths.parent(path))
                             } else {
                                 onBack()
                             }
@@ -1897,7 +1902,7 @@ fun SmbDriveScreen(
                                         .clip(RoundedCornerShape(4.dp))
                                         .background(DeepInkSurface)
                                         .border(1.dp, DeepInk, RoundedCornerShape(4.dp))
-                                        .clickable { selectedPaths = emptySet() }
+                                        .clickable { viewModel.clearSmbSelection() }
                                         .padding(horizontal = 8.dp, vertical = 4.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
@@ -1915,7 +1920,7 @@ fun SmbDriveScreen(
                                     .background(if (allSelected) Ochre else DeepInkSurface)
                                     .border(1.dp, if (allSelected) Ochre else DeepInk, RoundedCornerShape(4.dp))
                                     .clickable {
-                                        selectedPaths = if (allSelected) emptySet() else fileEntries.map { it.path }.toSet()
+                                        if (allSelected) viewModel.clearSmbSelection() else viewModel.selectAllSmb()
                                     }
                                     .padding(horizontal = 8.dp, vertical = 4.dp),
                                 contentAlignment = Alignment.Center,
@@ -1961,7 +1966,7 @@ fun SmbDriveScreen(
                                         if (entry.isDirectory) {
                                             viewModel.loadSmbDirectory(entry.path)
                                         } else {
-                                            selectedPaths = if (isSelected) selectedPaths - entry.path else selectedPaths + entry.path
+                                            viewModel.toggleSmbSelection(entry.path)
                                         }
                                     },
                                 )
@@ -1990,7 +1995,7 @@ fun SmbDriveScreen(
                         onCancel = { viewModel.cancelImport() },
                     )
 
-                    if (selectedCount > 0 && !importing) {
+                    if (selectedCount > 0 && !importing && !loading) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2026,7 +2031,7 @@ fun SmbDriveScreen(
                                         .clickable {
                                             val toImport = fileEntries.filter { it.path in selectedPaths }
                                             viewModel.importSmbComics(toImport) {
-                                                selectedPaths = emptySet()
+                                                viewModel.clearSmbSelection()
                                             }
                                             onBack()
                                         }
@@ -2678,7 +2683,7 @@ private fun ReadingListCard(
 @Composable
 private fun AddTile(
     importing: Boolean,
-    progress: Float,
+    progress: Float?,
     status: String? = null,
     detail: String? = null,
     columns: Int = 2,
@@ -2692,7 +2697,7 @@ private fun AddTile(
     val spacing = if (columns >= 4) 6.dp else 10.dp
     val contentPadding = if (columns >= 4) 8.dp else 16.dp
     val strokeWidth = if (columns >= 4) 2.dp else 3.dp
-    val pct = (progress * 100).toInt().coerceIn(0, 100)
+    val pct = ((progress ?: 0f) * 100).toInt().coerceIn(0, 100)
 
     Box(
         Modifier
@@ -2728,8 +2733,8 @@ private fun AddTile(
             }
             Text(
                 if (importing) {
-                    if (status != null) "$pct% · $status".uppercase()
-                    else if (progress > 0f) "LOADING $pct%"
+                    if (status != null) (if (progress == null) status else "$pct% · $status").uppercase()
+                    else if ((progress ?: 0f) > 0f) "LOADING $pct%"
                     else "LOADING…"
                 } else if (isListsFilter) "CREATE LIST" else "LOAD COMIC",
                 fontFamily = Anton,
@@ -2740,12 +2745,8 @@ private fun AddTile(
                 textAlign = TextAlign.Center,
             )
             if (importing) {
-                LinearProgressIndicator(
-                    progress = { if (progress > 0f) progress else 0.05f },
-                    color = LeafAccent,
-                    trackColor = DeepInk,
-                    modifier = Modifier.fillMaxWidth().height(if (columns >= 4) 4.dp else 6.dp).clip(RoundedCornerShape(3.dp)),
-                )
+                ImportProgressBar(progress,
+                    Modifier.fillMaxWidth().height(if (columns >= 4) 4.dp else 6.dp).clip(RoundedCornerShape(3.dp)))
                 if (detail != null) {
                     Text(
                         detail,
@@ -2780,9 +2781,19 @@ private fun AddTile(
 }
 
 @Composable
+private fun ImportProgressBar(progress: Float?, modifier: Modifier) {
+    if (progress == null) {
+        LinearProgressIndicator(color = LeafAccent, trackColor = DeepInk, modifier = modifier)
+    } else {
+        LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) },
+            color = LeafAccent, trackColor = DeepInk, modifier = modifier)
+    }
+}
+
+@Composable
 private fun ImportProgressBanner(
     importing: Boolean,
-    progress: Float,
+    progress: Float?,
     status: String?,
     detail: String?,
     onCancel: () -> Unit,
@@ -2794,7 +2805,7 @@ private fun ImportProgressBanner(
         exit = fadeOut() + shrinkVertically(),
         modifier = modifier,
     ) {
-        val pct = (progress * 100).toInt().coerceIn(0, 100)
+        val pct = ((progress ?: 0f) * 100).toInt().coerceIn(0, 100)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2838,7 +2849,7 @@ private fun ImportProgressBanner(
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     ) {
                         Text(
-                            text = "$pct%",
+                            text = if (progress == null) "IMPORTING" else "$pct%",
                             fontFamily = Anton,
                             fontSize = 13.sp,
                             color = LeafAccent,
@@ -2847,15 +2858,8 @@ private fun ImportProgressBanner(
                     }
                 }
 
-                LinearProgressIndicator(
-                    progress = { if (progress > 0f) progress else 0.05f },
-                    color = LeafAccent,
-                    trackColor = DeepInk,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(7.dp)
-                        .clip(RoundedCornerShape(3.5.dp)),
-                )
+                ImportProgressBar(progress,
+                    Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(3.5.dp)))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2863,7 +2867,7 @@ private fun ImportProgressBanner(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = detail ?: if (progress > 0f) "$pct% completed" else "Connecting…",
+                        text = detail ?: if ((progress ?: 0f) > 0f) "$pct% completed" else "Connecting…",
                         fontFamily = Archivo,
                         fontSize = 11.5.sp,
                         color = PaperWhiteMuted,

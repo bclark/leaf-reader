@@ -10,6 +10,13 @@ import net.digitalbc.leafreader.data.db.ReadingListEntity
 import net.digitalbc.leafreader.data.library.LibraryRepository
 import net.digitalbc.leafreader.data.settings.AppSettings
 import net.digitalbc.leafreader.data.smb.SmbEntry
+import net.digitalbc.leafreader.data.smb.SmbBrowserState
+import net.digitalbc.leafreader.data.smb.SmbBrowserLogic
+import net.digitalbc.leafreader.data.smb.SmbClient
+import net.digitalbc.leafreader.data.smb.SmbErrors
+import net.digitalbc.leafreader.data.smb.SmbImportPhase
+import net.digitalbc.leafreader.data.smb.SmbImportProgress
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -54,6 +61,7 @@ sealed interface LibraryItem {
 class LibraryViewModel(
     private val repository: LibraryRepository,
     private val settings: AppSettings,
+    private val listSmbDirectory: suspend (String) -> Result<List<SmbEntry>> = repository::listSmbDirectory,
 ) : ViewModel() {
 
     init {
@@ -211,8 +219,8 @@ class LibraryViewModel(
     private val _importing = MutableStateFlow(false)
     val importing: StateFlow<Boolean> = _importing.asStateFlow()
 
-    private val _importProgress = MutableStateFlow(0f)
-    val importProgress: StateFlow<Float> = _importProgress.asStateFlow()
+    private val _importProgress = MutableStateFlow<Float?>(0f)
+    val importProgress: StateFlow<Float?> = _importProgress.asStateFlow()
 
     private val _importStatus = MutableStateFlow<String?>(null)
     val importStatus: StateFlow<String?> = _importStatus.asStateFlow()
@@ -223,14 +231,18 @@ class LibraryViewModel(
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
-    private val _smbPath = MutableStateFlow("")
-    val smbPath: StateFlow<String> = _smbPath.asStateFlow()
+    private val _smbBrowser = MutableStateFlow(SmbBrowserState.empty())
+    val smbBrowser: StateFlow<SmbBrowserState> = _smbBrowser.asStateFlow()
+    private var smbListingJob: Job? = null
+    private var smbConnectionKey: Triple<String, String, String>? = null
 
-    private val _smbEntries = MutableStateFlow<List<SmbEntry>>(emptyList())
-    val smbEntries: StateFlow<List<SmbEntry>> = _smbEntries.asStateFlow()
-
-    private val _smbLoading = MutableStateFlow(false)
-    val smbLoading: StateFlow<Boolean> = _smbLoading.asStateFlow()
+    fun toggleSmbSelection(path: String) { _smbBrowser.update { SmbBrowserLogic.toggle(it, path) } }
+    fun selectAllSmb() { _smbBrowser.update(SmbBrowserLogic::selectAll) }
+    fun clearSmbSelection() { _smbBrowser.update(SmbBrowserLogic::clearSelection) }
+    fun cancelSmbBrowse() {
+        smbListingJob?.cancel()
+        _smbBrowser.update(SmbBrowserLogic::cancel)
+    }
 
     private val _isEditMode = MutableStateFlow(false)
     val isEditMode: StateFlow<Boolean> = _isEditMode.asStateFlow()
@@ -242,20 +254,18 @@ class LibraryViewModel(
 
     fun cancelImport() {
         importJob?.cancel()
-        importJob = null
-        _importing.value = false
-        _importProgress.value = 0f
-        _importStatus.value = null
-        _importDetail.value = null
-        _message.value = "Import cancelled."
+        // Keep the job reference until its cleanup completes so the next batch can join it.
+        _message.value = "Cancelling import…"
     }
 
     fun importComic(uri: Uri) = importComics(listOf(uri))
 
     fun importComics(uris: List<Uri>) {
         if (uris.isEmpty()) return
-        importJob?.cancel()
+        val previousImport = importJob
+        previousImport?.cancel()
         importJob = viewModelScope.launch(Dispatchers.IO) {
+            previousImport?.join()
             _importing.value = true
             _importProgress.value = 0f
             _importDetail.value = null
@@ -321,13 +331,36 @@ class LibraryViewModel(
     }
 
     fun loadSmbDirectory(path: String = "") {
-        viewModelScope.launch {
-            _smbPath.value = path
-            _smbLoading.value = true
-            val result = repository.listSmbDirectory(path)
-            _smbLoading.value = false
-            result.onSuccess { _smbEntries.value = it }
-                .onFailure { _message.value = "Drive error: ${it.message ?: "Connection failed"}" }
+        val connectionKey = Triple(settings.smbHost, settings.smbShare, settings.smbUsername)
+        if (smbConnectionKey != connectionKey) {
+            smbListingJob?.cancel()
+            _smbBrowser.update(SmbBrowserLogic::reset)
+            smbConnectionKey = connectionKey
+        }
+        val request = try { SmbBrowserLogic.begin(_smbBrowser.value, path) }
+            catch (error: IllegalArgumentException) {
+                _message.value = SmbErrors.message(error)
+                return
+            }
+        smbListingJob?.cancel()
+        _smbBrowser.value = request
+        smbListingJob = viewModelScope.launch {
+            try {
+                val result = listSmbDirectory(request.pendingPath!!)
+                result.onSuccess { entries ->
+                    _smbBrowser.update { SmbBrowserLogic.complete(it, request.generation, entries) }
+                }.onFailure { error ->
+                    if (_smbBrowser.value.generation == request.generation) {
+                        _smbBrowser.update { SmbBrowserLogic.fail(it, request.generation, SmbErrors.kind(error)) }
+                        _message.value = SmbErrors.message(error)
+                    }
+                }
+            } catch (error: CancellationException) {
+                _smbBrowser.update {
+                    if (it.generation == request.generation) SmbBrowserLogic.cancel(it) else it
+                }
+                throw error
+            }
         }
     }
 
@@ -336,18 +369,27 @@ class LibraryViewModel(
 
     fun importSmbComics(entries: List<SmbEntry>, onFinished: () -> Unit = {}) {
         if (entries.isEmpty()) return
-        importJob?.cancel()
+        val config = try { SmbClient.configuration(settings) } catch (error: IllegalArgumentException) {
+            _message.value = SmbErrors.message(error)
+            return
+        }
+        val password = settings.smbPassword
+        val selectedEntries = entries.toList()
+        val previousImport = importJob
+        previousImport?.cancel()
         importJob = viewModelScope.launch(Dispatchers.IO) {
+            previousImport?.join()
             _importing.value = true
             _importProgress.value = 0f
             _importDetail.value = "Connecting to drive…"
+            _importProgress.value = null
             var importedCount = 0
             var failedCount = 0
             var wasCancelled = false
-            val total = entries.size
+            val total = selectedEntries.size
 
             try {
-                for ((index, entry) in entries.withIndex()) {
+                for ((index, entry) in selectedEntries.withIndex()) {
                     if (!isActive) {
                         wasCancelled = true
                         break
@@ -357,8 +399,10 @@ class LibraryViewModel(
 
                     val result = repository.importSmbComic(
                         entry = entry,
+                        config = config,
+                        password = password,
                         onProgress = { transfer ->
-                            val overall = (index + transfer.fraction) / total
+                            val overall = SmbImportProgress.fraction(index, total, transfer, SmbImportPhase.DOWNLOADING)
                             _importProgress.value = overall
                             val speedText = formatSpeed(transfer.bytesPerSec)
                             val bytesText = if (transfer.totalBytes > 0L) {

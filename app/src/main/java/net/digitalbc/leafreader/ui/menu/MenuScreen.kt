@@ -58,6 +58,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import net.digitalbc.leafreader.data.settings.AppSettings
 import net.digitalbc.leafreader.data.smb.SmbClient
+import net.digitalbc.leafreader.data.smb.SmbErrors
+import kotlinx.coroutines.CancellationException
 import androidx.compose.material3.Surface
 import net.digitalbc.leafreader.ui.brand.LeafWordmark
 import net.digitalbc.leafreader.ui.brand.OchreBadge
@@ -519,7 +521,9 @@ fun MenuScreen(
                             smbStatusMessage = "Testing connection…"
                             scope.launch {
                                 val res = withContext(Dispatchers.IO) {
-                                    runCatching { SmbClient.testConnection(settings) }
+                                    try { Result.success(SmbClient.testConnection(settings)) }
+                                    catch (error: CancellationException) { throw error }
+                                    catch (error: Exception) { Result.failure(error) }
                                 }
                                 smbTesting = false
                                 res.onSuccess {
@@ -527,7 +531,7 @@ fun MenuScreen(
                                     smbStatusMessage = "✓ Connection valid — saved"
                                 }.onFailure { err ->
                                     smbValid = false
-                                    smbStatusMessage = "✕ Connection failed: ${err.message ?: "Unable to connect"}"
+                                    smbStatusMessage = "✕ ${SmbErrors.message(err)}"
                                 }
                             }
                         }

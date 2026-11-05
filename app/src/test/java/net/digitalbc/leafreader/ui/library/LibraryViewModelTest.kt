@@ -270,7 +270,7 @@ class LibraryViewModelTest {
 
         viewModel.updateComicsSeries(listOf(1L, 2L), "New Mutants", "Vol 1")
         withTimeout(3000) {
-            while (fakeComicDao.getAll().find { it.id == 1L }?.series != "New Mutants") {
+            while (fakeComicDao.getAll().any { it.series != "New Mutants" || it.volume != "Vol 1" }) {
                 kotlinx.coroutines.delay(10)
             }
         }
@@ -406,6 +406,56 @@ class LibraryViewModelTest {
         }
         assertTrue(fakeReadingListDao.getAllLists().isEmpty())
         assertTrue(fakeReadingListDao.getAllItems().isEmpty())
+    }
+
+    @Test
+    fun smbLateListingCannotReplaceTheNewerFolder() {
+        val pending = mutableMapOf<String, kotlin.coroutines.Continuation<Result<List<net.digitalbc.leafreader.data.smb.SmbEntry>>>>()
+        val vm = LibraryViewModel(repository, settings) { path ->
+            kotlin.coroutines.suspendCoroutine { pending[path] = it }
+        }.also { stores += ViewModelStore().apply { put("smb", it) } }
+        vm.loadSmbDirectory("first")
+        vm.loadSmbDirectory("second")
+        val entry = net.digitalbc.leafreader.data.smb.SmbEntry("book.cbz", "second/book.cbz", false)
+        pending.getValue("second").resumeWith(Result.success(Result.success(listOf(entry))))
+        pending.getValue("first").resumeWith(Result.success(Result.success(emptyList())))
+        assertEquals("second", vm.smbBrowser.value.path)
+        assertEquals(listOf(entry), vm.smbBrowser.value.entries)
+        assertTrue(!vm.smbBrowser.value.loading)
+    }
+
+    @Test
+    fun smbFailedNavigationRetainsTheUsableFolderAndSelection() {
+        val entry = net.digitalbc.leafreader.data.smb.SmbEntry("book.cbz", "book.cbz", false)
+        val vm = LibraryViewModel(repository, settings) { path ->
+            if (path.isEmpty()) Result.success(listOf(entry))
+            else Result.failure(java.io.IOException("private server details"))
+        }.also { stores += ViewModelStore().apply { put("smb", it) } }
+        vm.loadSmbDirectory()
+        vm.toggleSmbSelection("book.cbz")
+        vm.loadSmbDirectory("denied")
+        assertEquals("", vm.smbBrowser.value.path)
+        assertEquals(listOf(entry), vm.smbBrowser.value.entries)
+        assertEquals(setOf("book.cbz"), vm.smbBrowser.value.selectedPaths)
+        assertTrue(vm.message.value?.contains("private") != true)
+        vm.cancelSmbBrowse()
+        assertTrue(!vm.smbBrowser.value.loading)
+    }
+
+    @Test
+    fun changingSmbServerClearsThePreviousServersListingEvenWhenTheNewRequestFails() {
+        val entry = net.digitalbc.leafreader.data.smb.SmbEntry("book.cbz", "book.cbz", false)
+        settings.smbHost = "server-a"
+        val vm = LibraryViewModel(repository, settings) {
+            if (settings.smbHost == "server-a") Result.success(listOf(entry))
+            else Result.failure(java.io.IOException())
+        }.also { stores += ViewModelStore().apply { put("smb", it) } }
+        vm.loadSmbDirectory()
+        vm.toggleSmbSelection("book.cbz")
+        settings.smbHost = "server-b"
+        vm.loadSmbDirectory()
+        assertTrue(vm.smbBrowser.value.entries.isEmpty())
+        assertTrue(vm.smbBrowser.value.selectedPaths.isEmpty())
     }
 
     private class FakeComicDao : ComicDao {

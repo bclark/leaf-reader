@@ -1,6 +1,5 @@
 package net.digitalbc.leafreader.data.smb
 
-import net.digitalbc.leafreader.data.archive.NaturalOrderComparator
 import net.digitalbc.leafreader.data.settings.AppSettings
 import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.msfscc.FileAttributes
@@ -12,65 +11,44 @@ import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.SmbConfig
 import com.hierynomus.smbj.auth.AuthenticationContext
 import com.hierynomus.smbj.share.DiskShare
+import kotlinx.coroutines.CancellationException
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.EnumSet
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-data class SmbEntry(
-    val name: String,
-    val path: String,
-    val isDirectory: Boolean,
-    val sizeBytes: Long = 0L,
-)
-
-data class SmbTransferProgress(
-    val fraction: Float,
-    val bytesTransferred: Long,
-    val totalBytes: Long,
-    val bytesPerSec: Long,
-)
-
 object SmbClient {
+    fun configuration(settings: AppSettings): SmbConnectionConfig =
+        SmbConnectionConfig.fromInputs(settings.smbHost, settings.smbShare, settings.smbUsername)
 
-    private val COMIC_EXTENSIONS = setOf("cbz", "cbr", "pdf", "zip", "rar")
+    fun testConnection(settings: AppSettings) = testConnection(configuration(settings), settings.smbPassword)
 
-    fun testConnection(settings: AppSettings) {
-        require(settings.smbHost.isNotBlank()) { "Host / IP is required" }
-        require(settings.smbShare.isNotBlank()) { "Share is required" }
-        withShare(settings) { share, basePath ->
-            share.list(basePath)
-        }
+    fun testConnection(config: SmbConnectionConfig, password: String) {
+        withShare(config, password, { false }) { share -> share.list(wirePath(config.basePath)) }
     }
 
-    fun listDirectory(settings: AppSettings, relativePath: String): List<SmbEntry> =
-        withShare(settings) { share, basePath ->
-            val fullPath = joinPath(basePath, relativePath)
-            share.list(fullPath).mapNotNull { info ->
+    fun listDirectory(settings: AppSettings, relativePath: String, isCancelled: () -> Boolean = { false }): List<SmbEntry> =
+        listDirectory(configuration(settings), settings.smbPassword, relativePath, isCancelled)
+
+    fun listDirectory(config: SmbConnectionConfig, password: String, relativePath: String,
+                      isCancelled: () -> Boolean = { false }): List<SmbEntry> {
+        val directory = SmbPaths.normalize(relativePath)
+        val fullPath = wirePath(SmbPaths.join(config.basePath, directory))
+        return withShare(config, password, isCancelled) { share ->
+            val entries = share.list(fullPath).mapNotNull { info ->
                 val name = info.fileName
-                if (name == "." || name == ".." || name.startsWith(".")) return@mapNotNull null
-                val isDir = EnumWithValue.EnumUtils.isSet(
-                    info.fileAttributes,
-                    FileAttributes.FILE_ATTRIBUTE_DIRECTORY,
-                )
-                val ext = name.substringAfterLast('.', "").lowercase()
-                if (!isDir && ext !in COMIC_EXTENSIONS) return@mapNotNull null
-                val childRelPath = joinPath(relativePath, name)
-                SmbEntry(
-                    name = name,
-                    path = childRelPath,
-                    isDirectory = isDir,
-                    sizeBytes = info.endOfFile,
-                )
-            }.sortedWith { a, b ->
-                if (a.isDirectory != b.isDirectory) {
-                    if (a.isDirectory) -1 else 1
-                } else {
-                    NaturalOrderComparator.compare(a.name, b.name)
-                }
+                if (!SmbPaths.isChildName(name) || name.startsWith('.')) return@mapNotNull null
+                // Do not follow reparse points that could escape the configured base directory.
+                if (EnumWithValue.EnumUtils.isSet(info.fileAttributes, FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT)) return@mapNotNull null
+                SmbEntry(name, SmbPaths.child(directory, name),
+                    EnumWithValue.EnumUtils.isSet(info.fileAttributes, FileAttributes.FILE_ATTRIBUTE_DIRECTORY),
+                    info.endOfFile.coerceAtLeast(0L))
             }
+            SmbListing.prepare(directory, entries)
         }
+    }
 
     fun downloadToFile(
         settings: AppSettings,
@@ -78,113 +56,87 @@ object SmbClient {
         dest: File,
         onProgress: (SmbTransferProgress) -> Unit = {},
         isCancelled: () -> Boolean = { false },
+    ) = downloadToFile(configuration(settings), settings.smbPassword, entry, dest, onProgress, isCancelled)
+
+    fun downloadToFile(
+        config: SmbConnectionConfig,
+        password: String,
+        entry: SmbEntry,
+        dest: File,
+        onProgress: (SmbTransferProgress) -> Unit = {},
+        isCancelled: () -> Boolean = { false },
     ) {
-        withShare(settings) { share, basePath ->
-            val fullPath = joinPath(basePath, entry.path)
-            share.openFile(
-                fullPath,
-                EnumSet.of(AccessMask.GENERIC_READ),
-                null,
-                EnumSet.of(SMB2ShareAccess.FILE_SHARE_READ),
-                SMB2CreateDisposition.FILE_OPEN,
-                null,
-            ).use { remoteFile ->
-                val total = entry.sizeBytes.takeIf { it > 0L }
-                    ?: runCatching { remoteFile.fileInformation.standardInformation.endOfFile }.getOrNull()?.takeIf { it > 0L }
-                    ?: runCatching { share.getFileInformation(fullPath).standardInformation.endOfFile }.getOrDefault(0L)
-                remoteFile.inputStream.use { input ->
-                    BufferedOutputStream(FileOutputStream(dest), 1024 * 1024).use { output ->
-                        val buf = ByteArray(1024 * 1024)
-                        var copied = 0L
-                        var read = 0
-                        var lastReportTime = System.currentTimeMillis()
-                        var lastReportBytes = 0L
-                        var currentSpeed = 0L
-
-                        // Initial report
-                        onProgress(SmbTransferProgress(0f, 0L, total, 0L))
-
-                        while (!isCancelled() && input.read(buf).also { read = it } >= 0) {
-                            if (isCancelled()) {
-                                throw kotlinx.coroutines.CancellationException("Transfer cancelled")
-                            }
-                            output.write(buf, 0, read)
-                            copied += read
-                            val now = System.currentTimeMillis()
-                            val elapsed = now - lastReportTime
-                            if (elapsed >= 150) {
-                                val bytesDelta = copied - lastReportBytes
-                                currentSpeed = (bytesDelta * 1000L) / elapsed
-                                lastReportTime = now
-                                lastReportBytes = copied
-                                val fraction = if (total > 0L) (copied.toFloat() / total).coerceIn(0f, 1f) else 0f
-                                onProgress(SmbTransferProgress(fraction, copied, total, currentSpeed))
-                            }
+        require(!entry.isDirectory && SmbListing.isImportable(entry.name)) { "Not an importable comic" }
+        val path = SmbPaths.normalize(entry.path)
+        require(path.substringAfterLast('/') == entry.name) { "Invalid SMB entry path" }
+        val fullPath = wirePath(SmbPaths.join(config.basePath, path))
+        try {
+            withShare(config, password, isCancelled) { share ->
+                share.openFile(fullPath, EnumSet.of(AccessMask.GENERIC_READ), null,
+                    EnumSet.of(SMB2ShareAccess.FILE_SHARE_READ), SMB2CreateDisposition.FILE_OPEN, null).use { remote ->
+                    // Stat again at open time: a server file may have changed since the listing.
+                    val total = remote.fileInformation.standardInformation.endOfFile
+                    remote.inputStream.use { input ->
+                        BufferedOutputStream(FileOutputStream(dest), 1024 * 1024).use { output ->
+                            copySmbStream(input, output, total, onProgress, isCancelled)
                         }
-                        if (isCancelled()) {
-                            throw kotlinx.coroutines.CancellationException("Transfer cancelled")
-                        }
-                        val finalFraction = if (total > 0L) 1f else 0f
-                        onProgress(SmbTransferProgress(finalFraction, copied, total, currentSpeed))
                     }
                 }
             }
+        } catch (error: Exception) {
+            dest.delete()
+            throw error
         }
     }
 
-    private fun <T> withShare(settings: AppSettings, block: (DiskShare, String) -> T): T {
-        val rawHost = settings.smbHost.removePrefix("smb://").trim().trim('/')
-        val host = rawHost.substringBefore(':')
-        val port = rawHost.substringAfter(':', "").toIntOrNull()
-        val rawShare = settings.smbShare.replace('\\', '/').trim('/')
-        val shareName = rawShare.substringBefore('/')
-        val basePath = rawShare.substringAfter('/', "")
+    private fun <T> withShare(config: SmbConnectionConfig, password: String,
+                             isCancelled: () -> Boolean, block: (DiskShare) -> T): T {
+        checkSmbCancellation(isCancelled)
+        val auth = if (config.username.isBlank()) AuthenticationContext.anonymous()
+                   else AuthenticationContext(config.username, password.toCharArray(), config.domain)
+        val smbConfig = SmbConfig.builder()
+            .withDialects(SMB2Dialect.SMB_3_1_1, SMB2Dialect.SMB_3_0_2, SMB2Dialect.SMB_3_0,
+                SMB2Dialect.SMB_2_1, SMB2Dialect.SMB_2_0_2)
+            .withReadBufferSize(1024 * 1024).withBufferSize(1024 * 1024)
+            .withTimeout(60, TimeUnit.SECONDS).withReadTimeout(60, TimeUnit.SECONDS)
+            .withMultiProtocolNegotiate(true).withSigningRequired(false).withDfsEnabled(false).build()
 
-        val auth = if (settings.smbUsername.isBlank()) {
-            AuthenticationContext.anonymous()
-        } else {
-            val userRaw = settings.smbUsername
-            val domain = if ('\\' in userRaw) userRaw.substringBefore('\\') else ""
-            val user = userRaw.substringAfter('\\')
-            AuthenticationContext(user, settings.smbPassword.toCharArray(), domain)
-        }
-
-        val config = SmbConfig.builder()
-            .withDialects(
-                SMB2Dialect.SMB_3_1_1,
-                SMB2Dialect.SMB_3_0_2,
-                SMB2Dialect.SMB_3_0,
-                SMB2Dialect.SMB_2_1,
-                SMB2Dialect.SMB_2_0_2,
-            )
-            .withReadBufferSize(1024 * 1024)
-            .withBufferSize(1024 * 1024)
-            .withTimeout(60, TimeUnit.SECONDS)
-            .withReadTimeout(60, TimeUnit.SECONDS)
-            .withMultiProtocolNegotiate(true)
-            .withSigningRequired(false)
-            .withDfsEnabled(false)
-            .build()
-
-        SMBClient(config).use { client ->
-            val connection = if (port != null) client.connect(host, port) else client.connect(host)
-            connection.use { conn ->
-                conn.authenticate(auth).use { session ->
-                    (session.connectShare(shareName) as DiskShare).use { share ->
-                        return block(share, basePath)
+        try {
+            SMBClient(smbConfig).use { client ->
+                client.connect(config.host, config.port).use { connection ->
+                    // Closing this operation's connection releases a blocked read on cancellation.
+                    // Initial socket connection still has the finite SMBJ timeout.
+                    val monitor = Executors.newSingleThreadScheduledExecutor { work ->
+                        Thread(work, "leaf-smb-cancel").apply { isDaemon = true }
+                    }
+                    val poll = monitor.scheduleWithFixedDelay({
+                        if (isCancelled()) runCatching { connection.close(true) }
+                    }, 0, 100, TimeUnit.MILLISECONDS)
+                    try {
+                        checkSmbCancellation(isCancelled)
+                        connection.authenticate(auth).use { session ->
+                            (session.connectShare(config.share) as DiskShare).use { share ->
+                                checkSmbCancellation(isCancelled)
+                                val result = block(share)
+                                checkSmbCancellation(isCancelled)
+                                return result
+                            }
+                        }
+                    } finally {
+                        poll.cancel(true)
+                        monitor.shutdownNow()
                     }
                 }
             }
+        } catch (error: Exception) {
+            checkSmbCancellation(isCancelled)
+            throw error
         }
     }
 
-    private fun joinPath(parent: String, child: String): String {
-        val p = parent.trim('/', '\\')
-        val c = child.trim('/', '\\')
-        return when {
-            p.isEmpty() -> c
-            c.isEmpty() -> p
-            else -> "$p\\$c"
-        }
-    }
+    private fun wirePath(path: String): String = path.replace('/', '\\')
+}
+
+internal fun checkSmbCancellation(isCancelled: () -> Boolean) {
+    if (isCancelled()) throw CancellationException("SMB operation cancelled")
 }

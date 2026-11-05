@@ -26,6 +26,9 @@ import net.digitalbc.leafreader.data.db.ReadingListEntity
 import net.digitalbc.leafreader.data.db.ReadingListItemEntity
 import net.digitalbc.leafreader.data.settings.AppSettings
 import net.digitalbc.leafreader.data.smb.SmbClient
+import net.digitalbc.leafreader.data.smb.SmbConnectionConfig
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import net.digitalbc.leafreader.data.smb.SmbEntry
 import net.digitalbc.leafreader.data.smb.SmbTransferProgress
 import kotlinx.coroutines.CancellationException
@@ -318,13 +321,22 @@ class LibraryRepository(
 
     suspend fun listSmbDirectory(relativePath: String): Result<List<SmbEntry>> =
         withContext(Dispatchers.IO) {
-            runCatching { SmbClient.listDirectory(settings, relativePath) }
+            val operation = currentCoroutineContext()
+            try {
+                Result.success(SmbClient.listDirectory(settings, relativePath) { !operation.isActive })
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Result.failure(error)
+            }
         }
 
     suspend fun importSmbComic(
         entry: SmbEntry,
         onProgress: (SmbTransferProgress) -> Unit = {},
         isCancelled: () -> Boolean = { false },
+        config: SmbConnectionConfig = SmbClient.configuration(settings),
+        password: String = settings.smbPassword,
     ): Result<Long> = withContext(Dispatchers.IO) {
         val token = UUID.randomUUID().toString()
         val comicsDir = File(context.filesDir, "comics").apply { mkdirs() }
@@ -334,16 +346,16 @@ class LibraryRepository(
         val dest = File(comicsDir, "$token.$ext")
 
         try {
-            SmbClient.downloadToFile(settings, entry, dest, onProgress, isCancelled)
+            SmbClient.downloadToFile(config, password, entry, dest, onProgress, isCancelled)
             if (isCancelled()) {
                 dest.delete()
-                return@withContext Result.failure(CancellationException("SMB import cancelled"))
+                throw CancellationException("SMB import cancelled")
             }
             indexCopiedFile(dest, coversDir, token, title, source = "smb")
         } catch (t: Throwable) {
             dest.delete()
             if (t is CancellationException) throw t
-            Log.e(TAG, "SMB import failed", t)
+            Log.e(TAG, "SMB import failed")
             Result.failure(t)
         }
     }
