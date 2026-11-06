@@ -1,8 +1,20 @@
 import SwiftUI
 import LeafShared
 
-/// App-wide UI settings, persisted in UserDefaults — the iOS counterpart to Android's AppSettings.
+/// App appearance is independent of the Home Screen icon choice.
+enum AppTheme: String, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+
+}
+
+/// App-wide UI settings, persisted in UserDefaults.
 final class LeafSettings: ObservableObject {
+    @Published var theme: AppTheme {
+        didSet { defaults.set(theme.rawValue, forKey: "leaf.appTheme") }
+    }
+
     private static let amoledKey = "leaf.amoledTheme"
     private static let pageSlideKey = "leaf.pageSlideEnabled"
     private static let pageFitModeKey = "leaf.pageFitMode"
@@ -12,7 +24,7 @@ final class LeafSettings: ObservableObject {
     private static let legacyAmoledKey = "chika.amoledTheme"
     private static let legacyPageSlideKey = "chika.pageSlideEnabled"
     private static let legacyLibraryColumnsKey = "chika.libraryColumns"
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
 
     @Published var amoled: Bool {
         didSet { defaults.set(amoled, forKey: Self.amoledKey) }
@@ -43,7 +55,14 @@ final class LeafSettings: ObservableObject {
         didSet { defaults.set(libraryColumns, forKey: Self.libraryColumnsKey) }
     }
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let savedTheme = defaults.string(forKey: "leaf.appTheme").flatMap(AppTheme.init(rawValue:))
+        let oldAmoled = defaults.object(forKey: Self.amoledKey) != nil
+            ? defaults.bool(forKey: Self.amoledKey) : defaults.bool(forKey: Self.legacyAmoledKey)
+        theme = savedTheme ?? (oldAmoled ? .dark : .system)
+        // Persist even System on first launch, so later AMOLED changes never rerun migration.
+        defaults.set((savedTheme ?? (oldAmoled ? .dark : .system)).rawValue, forKey: "leaf.appTheme")
         if defaults.object(forKey: Self.amoledKey) != nil {
             amoled = defaults.bool(forKey: Self.amoledKey)
         } else {
@@ -83,8 +102,8 @@ final class LeafSettings: ObservableObject {
     }
 
     /// Full-screen ground: true black in AMOLED, brand ink otherwise.
-    var ground: Color { amoled ? .black : Leaf.ink }
+    var ground: Color { Leaf.adaptive(light: 0xFAFAF7, dark: amoled ? 0x000000 : 0x14191C) }
 
     /// Soft raised surface (rows, chips): near-black in AMOLED, brand ink-soft otherwise.
-    var groundSoft: Color { amoled ? Color(hex: 0x101010) : Leaf.inkSoft }
+    var groundSoft: Color { Leaf.adaptive(light: 0xEAEDE5, dark: amoled ? 0x101010 : 0x1E2529) }
 }

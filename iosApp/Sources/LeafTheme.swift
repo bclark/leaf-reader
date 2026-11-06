@@ -4,6 +4,20 @@ import CoreText
 
 /// Leaf brand palette — kept in sync with the Android theme (Color.kt).
 enum Leaf {
+    static func adaptive(light: UInt32, dark: UInt32) -> Color {
+        Color(uiColor: UIColor { traits in
+            let hex = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: CGFloat((hex >> 16) & 255) / 255,
+                           green: CGFloat((hex >> 8) & 255) / 255,
+                           blue: CGFloat(hex & 255) / 255, alpha: 1)
+        })
+    }
+    static let text = adaptive(light: 0x14191C, dark: 0xF9F9FB)
+    static let secondaryText = adaptive(light: 0x4A544C, dark: 0xA0A2A3)
+    static let surface = adaptive(light: 0xFAFAF7, dark: 0x14191C)
+    static let raisedSurface = adaptive(light: 0xEAEDE5, dark: 0x1E2529)
+    static let goldText = adaptive(light: 0x795C00, dark: 0xD4AF37)
+
     // Leaf Brand Primary & Secondary
     static let leafPrimary = Color(hex: 0x1C3A27)      // Forest Primary
     static let leafPrimaryDark = Color(hex: 0x122519)  // Deep Forest

@@ -8,6 +8,11 @@ enum CoverLoader {
     private static let cache = NSCache<NSURL, UIImage>()
     private static let countCache = NSCache<NSURL, NSNumber>()
 
+    /// Reuse an already-visible thumbnail without doing disk I/O during presentation.
+    static func cachedCover(for url: URL) -> UIImage? {
+        cache.object(forKey: url as NSURL)
+    }
+
     /// Loads a comic's cover thumbnail (page 0) AND its page count in a single archive open, both
     /// cached. Page count feeds the library's "N pages" label for unread comics (Android parity).
     static func load(for url: URL) async -> (cover: UIImage?, pageCount: Int) {

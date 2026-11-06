@@ -206,7 +206,9 @@ final class LibraryStoreTests: XCTestCase {
         let solo = try makeTestCbz(named: "Watchmen #01.cbz", pageCount: 6)
 
         let store = LibraryStore(directory: tempDir)
-        let allItems = store.libraryItems(filter: .all, searchQuery: "")
+        let allItems = store.libraryItems(filter: .all, searchQuery: "").filter {
+            if case .readingListItem = $0 { return false }; return true
+        }
 
         XCTAssertEqual(allItems.count, 2, "Expected 1 SeriesStack (Deadpool 1-3) + 1 SingleComic (Watchmen #01)")
 
@@ -294,7 +296,6 @@ final class LibraryStoreTests: XCTestCase {
             seriesName: "Invincible",
             volume: nil,
             library: store,
-            onOpenComic: { _ in },
             onDismiss: {}
         )
         XCTAssertTrue(viewFresh.heroButtonText.hasPrefix("START:"), "Expected START: prefix when fresh, got \(viewFresh.heroButtonText)")
@@ -307,7 +308,6 @@ final class LibraryStoreTests: XCTestCase {
             seriesName: "Invincible",
             volume: nil,
             library: store,
-            onOpenComic: { _ in },
             onDismiss: {}
         )
         XCTAssertTrue(viewContinue.heroButtonText.hasPrefix("CONTINUE:"), "Expected CONTINUE: prefix when in progress, got \(viewContinue.heroButtonText)")
@@ -319,7 +319,6 @@ final class LibraryStoreTests: XCTestCase {
             seriesName: "Invincible",
             volume: nil,
             library: store,
-            onOpenComic: { _ in },
             onDismiss: {}
         )
         XCTAssertTrue(viewAllRead.heroButtonText.hasPrefix("READ FROM START:"), "Expected READ FROM START: when all completed, got \(viewAllRead.heroButtonText)")
@@ -357,7 +356,6 @@ final class LibraryStoreTests: XCTestCase {
         let detailFresh = ReadingListDetailView(
             listId: created.id,
             library: store,
-            onOpenComic: { _ in },
             onDismiss: {}
         )
         XCTAssertEqual(detailFresh.heroButtonText, "START: EVENT PART 1")
@@ -371,7 +369,6 @@ final class LibraryStoreTests: XCTestCase {
         let detailAfterReorder = ReadingListDetailView(
             listId: created.id,
             library: store,
-            onOpenComic: { _ in },
             onDismiss: {}
         )
         XCTAssertEqual(detailAfterReorder.heroButtonText, "START: EVENT PART 2")
@@ -440,14 +437,12 @@ final class LibraryStoreTests: XCTestCase {
             seriesName: "Deadpool",
             volume: "1",
             library: store,
-            onOpenComic: { _ in },
             onDismiss: {}
         ).environmentObject(settings)
 
         let listDetail = ReadingListDetailView(
             listId: list.id,
             library: store,
-            onOpenComic: { _ in },
             onDismiss: {}
         ).environmentObject(settings)
 
@@ -459,7 +454,7 @@ final class LibraryStoreTests: XCTestCase {
             }
             seriesDetail
             listDetail
-        })
+        }.environmentObject(settings))
         window.rootViewController = host
         window.makeKeyAndVisible()
 
@@ -511,7 +506,9 @@ struct SeriesNameGroupingTests {
         }
         let store = LibraryStore(directory: root)
         for filter in [LibraryFilter.all, .series] {
-            let items = store.libraryItems(filter: filter, searchQuery: "")
+            let items = store.libraryItems(filter: filter, searchQuery: "").filter {
+                if case .readingListItem = $0 { return false }; return true
+            }
             #expect(items.count == 1)
             guard case .seriesStack(_, let volume, let issues, _, let total, _, _) = items.first else {
                 Issue.record("Expected a single series stack across volumes")

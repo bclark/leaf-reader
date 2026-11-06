@@ -126,6 +126,7 @@ struct LeafMark: View {
 
 /// "LEAF" lockup (cream Anton with Leaf icon).
 struct LeafWordmark: View {
+    var color: Color = Leaf.cream
     var body: some View {
         HStack(spacing: 8) {
             Image("LeafMark")
@@ -134,7 +135,7 @@ struct LeafWordmark: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             Text("LEAF")
                 .font(.anton(28))
-                .foregroundColor(Leaf.cream)
+                .foregroundColor(color)
         }
     }
 }
@@ -168,7 +169,7 @@ struct BookStatusBadgeIcon: View {
         ZStack(alignment: .bottomTrailing) {
             Image(systemName: isAllCompleted ? "book.closed.fill" : "book.fill")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(Leaf.cream)
+                .foregroundColor(Leaf.text)
                 .frame(width: 22, height: 22, alignment: .topLeading)
 
             Circle()

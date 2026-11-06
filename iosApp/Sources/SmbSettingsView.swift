@@ -2,6 +2,7 @@ import SwiftUI
 import LeafShared
 
 struct SmbSettingsView: View {
+    @EnvironmentObject private var settings: LeafSettings
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var profile = SmbProfile.load() ?? SmbProfile()
@@ -42,8 +43,8 @@ struct SmbSettingsView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(Leaf.ink)
-            .tint(Leaf.ochre)
+            .background(settings.ground)
+            .tint(Leaf.goldText)
             .navigationTitle("SMB Drive")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.disabled(busy) } }
             .interactiveDismissDisabled(busy)
@@ -56,7 +57,7 @@ struct SmbSettingsView: View {
             .onDisappear { task?.cancel(); password = "" }
             .onChange(of: scenePhase) { phase in if phase == .background { task?.cancel() } }
         }
-        .preferredColorScheme(.dark)
+        .leafAppearance(settings.theme)
     }
 
     private func save() {

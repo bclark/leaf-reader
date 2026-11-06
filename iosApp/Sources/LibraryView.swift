@@ -1,11 +1,5 @@
 import SwiftUI
 
-/// Identifiable wrapper so the reader can be presented via `.fullScreenCover(item:)`.
-private struct OpenComic: Identifiable {
-    let url: URL
-    var id: String { url.absoluteString }
-}
-
 /// Identifiable wrapper so a series detail can be presented via `.fullScreenCover(item:)`.
 private struct OpenSeries: Identifiable {
     let name: String
@@ -51,6 +45,7 @@ struct LibraryView: View {
     @State private var showAddToListSheet = false
 
     // Detail screens
+    @Namespace private var coverTransition
     @State private var openComic: OpenComic?
     @State private var openSeries: OpenSeries?
     @State private var openReadingList: OpenReadingList?
@@ -135,19 +130,14 @@ struct LibraryView: View {
                 }
             }
             .navigationBarHidden(true)
-            .fullScreenCover(item: $openComic) { item in
-                ReaderView(comicURL: item.url)
-                    .environmentObject(settings)
-                    .onDisappear { library.refresh() }
+            .comicReaderPresentation(item: $openComic, namespace: coverTransition) {
+                library.refresh()
             }
             .fullScreenCover(item: $openSeries) { series in
                 SeriesDetailView(
                     seriesName: series.name,
                     volume: series.volume,
                     library: library,
-                    onOpenComic: { url in
-                        openComic = OpenComic(url: url)
-                    },
                     onDismiss: { openSeries = nil }
                 )
                 .environmentObject(settings)
@@ -157,9 +147,6 @@ struct LibraryView: View {
                 ReadingListDetailView(
                     listId: listTarget.id,
                     library: library,
-                    onOpenComic: { url in
-                        openComic = OpenComic(url: url)
-                    },
                     onDismiss: { openReadingList = nil },
                     initialShowAddComics: listTarget.showAddComics
                 )
@@ -189,10 +176,10 @@ struct LibraryView: View {
                 }
             }
             .sheet(isPresented: $showSetSeriesSheet) {
-                setSeriesSheet
+                setSeriesSheet.leafAppearance(settings.theme)
             }
             .sheet(isPresented: $showAddToListSheet) {
-                addToListSheet
+                addToListSheet.leafAppearance(settings.theme)
             }
             .alert("Create Reading List", isPresented: $showCreateListAlert) {
                 TextField("e.g. Summer Crossover Event", text: $newListNameInput)
@@ -297,10 +284,10 @@ struct LibraryView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(searchQuery.isEmpty ? Leaf.creamMuted : Leaf.ochre)
-                    TextField("SEARCH COMICS OR SERIES…", text: $searchQuery)
+                        .foregroundColor(searchQuery.isEmpty ? Leaf.secondaryText : Leaf.ochre)
+                    TextField("SEARCH COMICS, SERIES OR LISTS…", text: $searchQuery)
                         .font(.archivo(13, weight: 600))
-                        .foregroundColor(Leaf.paperWhite)
+                        .foregroundColor(Leaf.text)
                         .tint(Leaf.ochre)
                         .textInputAutocapitalization(.characters)
                         .disableAutocorrection(true)
@@ -308,14 +295,14 @@ struct LibraryView: View {
                         Button { searchQuery = "" } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 16))
-                                .foregroundColor(Leaf.paperWhite.opacity(0.6))
+                                .foregroundColor(Leaf.text.opacity(0.6))
                         }
                         .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
-                .background(Leaf.deepInkSurface)
+                .background(settings.groundSoft)
                 .clipShape(RoundedCornerShape(cornerRadius: 6))
                 .overlay(
                     RoundedCornerShape(cornerRadius: 6)
@@ -329,6 +316,7 @@ struct LibraryView: View {
         .padding(.top, 10)
         .padding(.bottom, 6)
         .frame(maxWidth: .infinity)
+        .background(Leaf.leafPrimary.ignoresSafeArea(edges: .top))
     }
 
     // Filter pill row: ALL | SERIES | LISTS | UNREAD
@@ -344,10 +332,10 @@ struct LibraryView: View {
                     } label: {
                         Text(filter.label)
                             .font(.archivo(11, weight: 700))
-                            .foregroundColor(isSelected ? Leaf.ink : Leaf.cream)
+                            .foregroundColor(isSelected ? Leaf.ink : Leaf.text)
                             .padding(.horizontal, 13)
                             .padding(.vertical, 6)
-                            .background(isSelected ? Leaf.ochre : Leaf.inkSoft)
+                            .background(isSelected ? Leaf.ochre : settings.groundSoft)
                             .clipShape(Capsule())
                             .overlay(
                                 Capsule().stroke(isSelected ? Leaf.ochre : Leaf.ink, lineWidth: 1)
@@ -386,10 +374,10 @@ struct LibraryView: View {
                     } label: {
                         Text("EDIT")
                             .font(.anton(11))
-                            .foregroundColor(Leaf.cream)
+                            .foregroundColor(Leaf.text)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(Leaf.inkSoft)
+                            .background(settings.groundSoft)
                             .clipShape(RoundedCornerShape(cornerRadius: 3))
                             .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.ink, lineWidth: 1))
                     }
@@ -404,10 +392,10 @@ struct LibraryView: View {
                     } label: {
                         Text(allSelected ? "DESELECT ALL" : "SELECT ALL")
                             .font(.anton(11))
-                            .foregroundColor(allSelected ? Leaf.ink : Leaf.cream)
+                            .foregroundColor(allSelected ? Leaf.ink : Leaf.text)
                             .padding(.horizontal, 9)
                             .padding(.vertical, 5)
-                            .background(allSelected ? Leaf.ochre : Leaf.inkSoft)
+                            .background(allSelected ? Leaf.ochre : settings.groundSoft)
                             .clipShape(RoundedCornerShape(cornerRadius: 3))
                             .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.ink, lineWidth: 1))
                     }
@@ -435,7 +423,7 @@ struct LibraryView: View {
                     VStack(alignment: .trailing, spacing: 1) {
                         Text("COLUMNS")
                             .font(.archivo(7, weight: 600))
-                            .foregroundColor(Leaf.creamMuted)
+                            .foregroundColor(Leaf.secondaryText)
                         HStack(spacing: 1) {
                             ForEach(availableColumns(for: width), id: \.self) { count in
                                 let isSelected = actualColumns(for: width) == count
@@ -446,7 +434,7 @@ struct LibraryView: View {
                                 } label: {
                                     Text("\(count)")
                                         .font(.archivo(11.5, weight: 700))
-                                        .foregroundColor(isSelected ? Leaf.ink : Leaf.creamMuted)
+                                        .foregroundColor(isSelected ? Leaf.ink : Leaf.secondaryText)
                                         .padding(.horizontal, 7)
                                         .padding(.vertical, 3.5)
                                         .background(isSelected ? Leaf.ochre : Color.clear)
@@ -456,7 +444,7 @@ struct LibraryView: View {
                             }
                         }
                         .padding(1)
-                        .background(Leaf.inkSoft)
+                        .background(settings.groundSoft)
                         .clipShape(RoundedCornerShape(cornerRadius: 3))
                         .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.ink, lineWidth: 1))
                     }
@@ -469,7 +457,7 @@ struct LibraryView: View {
                         VStack(alignment: .trailing, spacing: 1) {
                             Text("NEW COMICS")
                                 .font(.archivo(7, weight: 600))
-                                .foregroundColor(Leaf.creamMuted)
+                                .foregroundColor(Leaf.secondaryText)
                             Text(defaultRTL ? "RTL" : "LTR")
                                 .font(.archivo(12, weight: 700))
                                 .foregroundColor(Leaf.ink)
@@ -503,7 +491,7 @@ struct LibraryView: View {
                     VStack(spacing: 12) {
                         Text("No items matching “\(searchQuery)”")
                             .font(.archivo(13))
-                            .foregroundColor(Leaf.creamMuted)
+                            .foregroundColor(Leaf.secondaryText)
                             .padding(.top, 36)
                         Button { searchQuery = "" } label: {
                             Text("CLEAR SEARCH")
@@ -521,7 +509,7 @@ struct LibraryView: View {
                 } else if items.isEmpty {
                     Text(emptyMessage)
                         .font(.archivo(13))
-                        .foregroundColor(Leaf.creamMuted)
+                        .foregroundColor(Leaf.secondaryText)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 18)
                         .padding(.vertical, 14)
@@ -543,7 +531,8 @@ struct LibraryView: View {
                                     progress: ReadingProgress.get(url),
                                     columns: cols,
                                     isEditMode: isEditMode,
-                                    isSelected: selectedComics.contains(url)
+                                    isSelected: selectedComics.contains(url),
+                                    coverTransition: coverTransition
                                 )
                             }
                             .buttonStyle(.plain)
@@ -692,11 +681,11 @@ struct LibraryView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(selectedComics.count) \(selectedComics.count == 1 ? "COMIC" : "COMICS") SELECTED")
                     .font(.anton(14))
-                    .foregroundColor(Leaf.paperWhite)
+                    .foregroundColor(Leaf.text)
                     .lineLimit(1)
                 Text("Group into series, add to list, or delete")
                     .font(.archivo(10.5))
-                    .foregroundColor(Leaf.creamMuted)
+                    .foregroundColor(Leaf.secondaryText)
                     .lineLimit(1)
             }
 
@@ -737,7 +726,7 @@ struct LibraryView: View {
             } label: {
                 Text("DELETE")
                     .font(.anton(11))
-                    .foregroundColor(Leaf.paperWhite)
+                    .foregroundColor(Leaf.text)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
                     .background(selectedComics.isEmpty ? Leaf.crimson.opacity(0.4) : Leaf.crimson)
@@ -748,7 +737,7 @@ struct LibraryView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Leaf.deepInkSurface.ignoresSafeArea(edges: [.bottom, .horizontal]))
+        .background(settings.groundSoft.ignoresSafeArea(edges: [.bottom, .horizontal]))
         .overlay(
             Rectangle().frame(height: 1).foregroundColor(Leaf.ink),
             alignment: .top
@@ -764,33 +753,33 @@ struct LibraryView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     Text("Comics with the same Series Name automatically collapse into a Series Stack.")
                         .font(.archivo(13))
-                        .foregroundColor(Leaf.creamMuted)
+                        .foregroundColor(Leaf.secondaryText)
                         .padding(.top, 16)
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text("SERIES NAME")
                             .font(.anton(12))
-                            .foregroundColor(Leaf.cream)
+                            .foregroundColor(Leaf.text)
                         TextField("e.g. Deadpool", text: $seriesInputName)
                             .font(.archivo(14, weight: 600))
                             .padding(10)
-                            .background(Leaf.deepInkSurface)
+                            .background(settings.groundSoft)
                             .clipShape(RoundedCornerShape(cornerRadius: 4))
                             .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Leaf.inkSoft, lineWidth: 1))
-                            .foregroundColor(Leaf.cream)
+                            .foregroundColor(Leaf.text)
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text("VOLUME (OPTIONAL)")
                             .font(.anton(12))
-                            .foregroundColor(Leaf.cream)
+                            .foregroundColor(Leaf.text)
                         TextField("e.g. Vol. 1", text: $seriesInputVolume)
                             .font(.archivo(14, weight: 600))
                             .padding(10)
-                            .background(Leaf.deepInkSurface)
+                            .background(settings.groundSoft)
                             .clipShape(RoundedCornerShape(cornerRadius: 4))
                             .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Leaf.inkSoft, lineWidth: 1))
-                            .foregroundColor(Leaf.cream)
+                            .foregroundColor(Leaf.text)
                     }
 
                     Spacer()
@@ -802,7 +791,7 @@ struct LibraryView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { showSetSeriesSheet = false }
-                        .foregroundColor(Leaf.ochre)
+                        .foregroundColor(Leaf.goldText)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
@@ -817,7 +806,7 @@ struct LibraryView: View {
                             selectedComics.removeAll()
                         }
                     }
-                    .foregroundColor(Leaf.ochre)
+                    .foregroundColor(Leaf.goldText)
                 }
             }
         }
@@ -837,17 +826,17 @@ struct LibraryView: View {
                             } label: {
                                 HStack {
                                     Image(systemName: "plus.circle.fill")
-                                        .foregroundColor(Leaf.ochre)
+                                        .foregroundColor(Leaf.goldText)
                                     Text("CREATE NEW READING LIST")
                                         .font(.anton(13))
-                                        .foregroundColor(Leaf.cream)
+                                        .foregroundColor(Leaf.text)
                                 }
                             }
-                            .listRowBackground(Leaf.deepInkSurface)
+                            .listRowBackground(settings.groundSoft)
                         }
 
                         if !library.readingLists.isEmpty {
-                            Section(header: Text("EXISTING LISTS").font(.anton(11)).foregroundColor(Leaf.creamMuted)) {
+                            Section(header: Text("EXISTING LISTS").font(.anton(11)).foregroundColor(Leaf.secondaryText)) {
                                 ForEach(library.readingLists) { list in
                                     Button {
                                         library.addComicsToReadingList(listId: list.id, urls: Array(selectedComics))
@@ -861,18 +850,18 @@ struct LibraryView: View {
                                             VStack(alignment: .leading, spacing: 3) {
                                                 Text(list.name)
                                                     .font(.archivo(13, weight: 600))
-                                                    .foregroundColor(Leaf.cream)
+                                                    .foregroundColor(Leaf.text)
                                                 Text("\(list.itemFilenames.count) comics")
                                                     .font(.archivo(11))
-                                                    .foregroundColor(Leaf.creamMuted)
+                                                    .foregroundColor(Leaf.secondaryText)
                                             }
                                             Spacer()
                                             Image(systemName: "chevron.right")
                                                 .font(.system(size: 13, weight: .bold))
-                                                .foregroundColor(Leaf.creamMuted)
+                                                .foregroundColor(Leaf.secondaryText)
                                         }
                                     }
-                                    .listRowBackground(Leaf.deepInkSurface)
+                                    .listRowBackground(settings.groundSoft)
                                 }
                             }
                         }
@@ -885,7 +874,7 @@ struct LibraryView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { showAddToListSheet = false }
-                        .foregroundColor(Leaf.ochre)
+                        .foregroundColor(Leaf.goldText)
                 }
             }
         }
@@ -895,6 +884,7 @@ struct LibraryView: View {
 /// Interactive neat stack card matching Android's ComicStackCard.
 /// Supports 3-layer paper card styling with bottom-left issue badge and vertical downward cover peel!
 struct ComicStackCard: View {
+    @EnvironmentObject private var settings: LeafSettings
     let seriesName: String
     let volume: String?
     let issues: [URL]
@@ -966,12 +956,14 @@ struct ComicStackCard: View {
                             Image(uiImage: layer3CoverImage)
                                 .resizable()
                                 .scaledToFill()
-                                .opacity(0.85)
+                                .overlay(Color.black.opacity(peelProgress >= 0.35 ? 0 : 0.28)
+                                    .animation(.easeInOut(duration: 0.18), value: peelProgress >= 0.35))
                         }
                     }
                     .aspectRatio(0.7, contentMode: .fit)
                     .clipShape(RoundedCornerShape(cornerRadius: 4))
-                    .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Leaf.ink, lineWidth: 1.5))
+                    .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Color.clear, lineWidth: 1.5))
+                    .shadow(color: .black.opacity(0.24), radius: columns >= 4 ? 3 : 5, y: 3)
                     .scaleEffect(x: lerp(0.93, 0.96, peelProgress), y: 1.0, anchor: .center)
                     .offset(y: lerp(-8, -4, peelProgress))
                 }
@@ -984,22 +976,24 @@ struct ComicStackCard: View {
                                 Image(uiImage: layer2CoverImage)
                                     .resizable()
                                     .scaledToFill()
-                                    .opacity(Double(lerp(0.92, 1.0, peelProgress)))
                             } else {
                                 GeneratedCover(title: seriesName.uppercased(), columns: columns)
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .clipped()
+                        .overlay(Color.black.opacity(peelProgress >= 0.35 ? 0 : 0.16)
+                            .animation(.easeInOut(duration: 0.18), value: peelProgress >= 0.35))
 
                         stackBadge(issueNumber: layer2IssueNum)
 
                         progressBarView
                     }
                     .aspectRatio(0.7, contentMode: .fit)
-                    .background(Leaf.deepInkSurface)
+                    .background(settings.groundSoft)
                     .clipShape(RoundedCornerShape(cornerRadius: 4))
-                    .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Leaf.ink, lineWidth: 2))
+                    .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Color.clear, lineWidth: 2))
+                    .shadow(color: .black.opacity(totalIssues == 2 ? 0.24 : 0), radius: columns >= 4 ? 3 : 5, y: 3)
                     .scaleEffect(x: lerp(0.96, 1.0, peelProgress), y: 1.0, anchor: .center)
                     .offset(y: lerp(-4, 0, peelProgress))
                 }
@@ -1035,9 +1029,9 @@ struct ComicStackCard: View {
                 .clipShape(RoundedCornerShape(cornerRadius: 4))
                 .overlay(
                     RoundedCornerShape(cornerRadius: 4)
-                        .stroke(isSelected ? Leaf.ochre : Leaf.ink, lineWidth: isSelected ? 3 : (columns >= 4 ? 2 : 3))
+                        .stroke(isSelected ? Leaf.ochre : Color.clear, lineWidth: isSelected ? 3 : (columns >= 4 ? 2 : 3))
                 )
-                .comicShadow(offset: columns >= 4 ? 3 : 5, color: .black.opacity(0.70), corner: 4)
+                .shadow(color: .black.opacity(totalIssues <= 1 ? 0.24 : 0), radius: columns >= 4 ? 3 : 5, y: 3)
                 .offset(y: peelOffsetY)
                 .opacity(peelProgress > 0.75 ? Double(max(0, 1 - (peelProgress - 0.75) / 0.25)) : 1.0)
             }
@@ -1056,6 +1050,8 @@ struct ComicStackCard: View {
                         // Only peel on downward vertical drags so horizontal/upward scrolls pass through
                         if dy > 0 && abs(dy) > abs(dx) {
                             peelOffsetY = min(dy, cardHeight * 1.15)
+                        } else if peelOffsetY > 0 {
+                            peelOffsetY = max(0, min(dy, cardHeight * 1.15))
                         }
                     }
                     .onEnded { value in
@@ -1063,7 +1059,7 @@ struct ComicStackCard: View {
                         let dy = value.translation.height
                         let predictedDy = value.predictedEndTranslation.height
                         let threshold = cardHeight * 0.35
-                        if dy > threshold || (predictedDy - dy) > 120 {
+                        if (dy > threshold && predictedDy >= dy - 120) || (dy >= cardHeight * 0.15 && predictedDy - dy > 120) {
                             withAnimation(.easeOut(duration: 0.18)) {
                                 peelOffsetY = cardHeight * 1.15
                             }
@@ -1082,14 +1078,14 @@ struct ComicStackCard: View {
             // Series Name in Archivo ExtraBold
             Text(seriesName.uppercased())
                 .font(.archivo(columns >= 4 ? 10.5 : 12, weight: 800))
-                .foregroundColor(Leaf.cream)
+                .foregroundColor(Leaf.text)
                 .lineLimit(2)
                 .padding(.top, columns >= 4 ? 6 : 9)
 
             // Subtitle: X issues · Y unread
             Text("\(totalIssues) issues · \(unreadIssues > 0 ? "\(unreadIssues) unread" : "all read")")
                 .font(.archivo(columns >= 4 ? 8.5 : 9.5, weight: 600))
-                .foregroundColor(unreadIssues > 0 ? Leaf.ochre : Leaf.creamMuted)
+                .foregroundColor(unreadIssues > 0 ? Leaf.goldText : Leaf.secondaryText)
                 .lineLimit(1)
                 .padding(.top, 2)
         }
@@ -1151,6 +1147,7 @@ struct ComicStackCard: View {
 /// Reading List Card displayed in the library grid — "Messy Stack" visual with rotated layers
 /// and downward cover peel matching Android's `ReadingListCard`.
 struct ReadingListCard: View {
+    @EnvironmentObject private var settings: LeafSettings
     let list: ReadingListRecord
     let previewUrls: [URL]
     let itemCount: Int
@@ -1215,12 +1212,14 @@ struct ReadingListCard: View {
                             Image(uiImage: layer3CoverImage)
                                 .resizable()
                                 .scaledToFill()
-                                .opacity(0.85)
+                                .overlay(Color.black.opacity(peelProgress >= 0.35 ? 0 : 0.28)
+                                    .animation(.easeInOut(duration: 0.18), value: peelProgress >= 0.35))
                         }
                     }
                     .aspectRatio(0.7, contentMode: .fit)
                     .clipShape(RoundedCornerShape(cornerRadius: 4))
-                    .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Leaf.ink, lineWidth: 1.5))
+                    .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Color.clear, lineWidth: 1.5))
+                    .shadow(color: .black.opacity(0.24), radius: columns >= 4 ? 3 : 5, y: 3)
                     .rotationEffect(.degrees(Double(lerp(-6, 5, peelProgress))))
                     .offset(
                         x: lerp(-6, 7, peelProgress),
@@ -1236,13 +1235,14 @@ struct ReadingListCard: View {
                                 Image(uiImage: layer2CoverImage)
                                     .resizable()
                                     .scaledToFill()
-                                    .opacity(Double(lerp(0.85, 1.0, peelProgress)))
                             } else {
                                 GeneratedCover(title: list.name.uppercased(), columns: columns)
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .clipped()
+                        .overlay(Color.black.opacity(peelProgress >= 0.35 ? 0 : 0.16)
+                            .animation(.easeInOut(duration: 0.18), value: peelProgress >= 0.35))
 
                         Text("ITEM \(layer2ItemNum) OF \(itemCount)")
                             .font(.anton(columns >= 4 ? 7.5 : 8.5))
@@ -1258,9 +1258,10 @@ struct ReadingListCard: View {
                             .padding(columns >= 4 ? 4 : 6)
                     }
                     .aspectRatio(0.7, contentMode: .fit)
-                    .background(Leaf.deepInkSurface)
+                    .background(settings.groundSoft)
                     .clipShape(RoundedCornerShape(cornerRadius: 4))
-                    .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Leaf.ink, lineWidth: 2))
+                    .overlay(RoundedCornerShape(cornerRadius: 4).stroke(Color.clear, lineWidth: 2))
+                    .shadow(color: .black.opacity(itemCount == 2 ? 0.24 : 0), radius: columns >= 4 ? 3 : 5, y: 3)
                     .rotationEffect(.degrees(Double(lerp(5, 0, peelProgress))))
                     .offset(
                         x: lerp(7, 0, peelProgress),
@@ -1308,9 +1309,9 @@ struct ReadingListCard: View {
                 .clipShape(RoundedCornerShape(cornerRadius: 4))
                 .overlay(
                     RoundedCornerShape(cornerRadius: 4)
-                        .stroke(Leaf.ink, lineWidth: columns >= 4 ? 2 : 3)
+                        .stroke(Color.clear, lineWidth: columns >= 4 ? 2 : 3)
                 )
-                .comicShadow(offset: columns >= 4 ? 3 : 5, color: .black.opacity(0.70), corner: 4)
+                .shadow(color: .black.opacity(itemCount <= 1 ? 0.24 : 0), radius: columns >= 4 ? 3 : 5, y: 3)
                 .offset(y: peelOffsetY)
                 .opacity(peelProgress > 0.75 ? Double(max(0, 1 - (peelProgress - 0.75) / 0.25)) : 1.0)
             }
@@ -1326,6 +1327,8 @@ struct ReadingListCard: View {
                         let dx = value.translation.width
                         if dy > 0 && abs(dy) > abs(dx) {
                             peelOffsetY = min(dy, cardHeight * 1.15)
+                        } else if peelOffsetY > 0 {
+                            peelOffsetY = max(0, min(dy, cardHeight * 1.15))
                         }
                     }
                     .onEnded { value in
@@ -1333,7 +1336,7 @@ struct ReadingListCard: View {
                         let dy = value.translation.height
                         let predictedDy = value.predictedEndTranslation.height
                         let threshold = cardHeight * 0.35
-                        if dy > threshold || (predictedDy - dy) > 120 {
+                        if (dy > threshold && predictedDy >= dy - 120) || (dy >= cardHeight * 0.15 && predictedDy - dy > 120) {
                             withAnimation(.easeOut(duration: 0.18)) {
                                 peelOffsetY = cardHeight * 1.15
                             }
@@ -1351,13 +1354,13 @@ struct ReadingListCard: View {
 
             Text(list.name.uppercased())
                 .font(.archivo(columns >= 4 ? 10.5 : 12, weight: 800))
-                .foregroundColor(Leaf.cream)
+                .foregroundColor(Leaf.text)
                 .lineLimit(2)
                 .padding(.top, columns >= 4 ? 6 : 9)
 
             Text("\(itemCount) \(itemCount == 1 ? "item" : "items")")
                 .font(.archivo(columns >= 4 ? 8.5 : 9.5, weight: 600))
-                .foregroundColor(Leaf.creamMuted)
+                .foregroundColor(Leaf.secondaryText)
                 .lineLimit(1)
                 .padding(.top, 2)
         }
@@ -1383,11 +1386,13 @@ struct ReadingListCard: View {
 
 /// A single comic in the grid
 struct ComicCard: View {
+    @EnvironmentObject private var settings: LeafSettings
     let url: URL
     let progress: Progress?
     var columns: Int = 2
     var isEditMode: Bool = false
     var isSelected: Bool = false
+    var coverTransition: Namespace.ID? = nil
     @State private var cover: UIImage?
     @State private var pages = 0
 
@@ -1436,23 +1441,24 @@ struct ComicCard: View {
             }
             .aspectRatio(0.7, contentMode: .fit)
             .frame(maxHeight: 430)
-            .background(Leaf.inkSoft)
+            .background(settings.groundSoft)
             .clipShape(RoundedCornerShape(cornerRadius: 4))
+            .comicCoverSource(url: url, namespace: coverTransition)
             .overlay(
                 RoundedCornerShape(cornerRadius: 4)
-                    .stroke(isSelected ? Leaf.ochre : Leaf.ink, lineWidth: isSelected ? 3 : (columns >= 4 ? 2 : 3))
+                    .stroke(isSelected ? Leaf.ochre : Color.clear, lineWidth: isSelected ? 3 : (columns >= 4 ? 2 : 3))
             )
-            .comicShadow(offset: columns >= 4 ? 3 : 5, color: .black.opacity(0.70), corner: 4)
+            .shadow(color: .black.opacity(0.24), radius: columns >= 4 ? 3 : 5, y: 3)
 
             Text(title)
-                .font(.archivo(columns >= 4 ? 10 : 12, weight: 800)).foregroundColor(Leaf.cream)
+                .font(.archivo(columns >= 4 ? 10 : 12, weight: 800)).foregroundColor(Leaf.text)
                 .lineLimit(2).multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, columns >= 4 ? 6 : 9)
             Text(started
                  ? "\(Int(pct * 100))% · pg \(lastPage + 1)/\(pageCount)"
                  : "\(pageCount) pages")
-                .font(.archivo(columns >= 4 ? 8.5 : 9.5)).foregroundColor(Leaf.creamMuted)
+                .font(.archivo(columns >= 4 ? 8.5 : 9.5)).foregroundColor(Leaf.secondaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 2)
         }
@@ -1508,7 +1514,7 @@ struct AddTile: View {
                         Image(systemName: "plus").font(.system(size: iconSize, weight: .bold)).foregroundColor(Leaf.ink)
                     }
                 }
-                Text(title).font(.anton(titleSize)).foregroundColor(Leaf.cream)
+                Text(title).font(.anton(titleSize)).foregroundColor(Leaf.text)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .aspectRatio(0.7, contentMode: .fit)
@@ -1516,7 +1522,7 @@ struct AddTile: View {
             .halftone(color: Leaf.ochre, alpha: 0.10)
             .overlay(
                 RoundedCornerShape(cornerRadius: 4)
-                    .stroke(Leaf.creamMuted, style: StrokeStyle(lineWidth: strokeWidth, dash: [14, 10]))
+                    .stroke(Leaf.secondaryText, style: StrokeStyle(lineWidth: strokeWidth, dash: [14, 10]))
             )
             .clipShape(RoundedCornerShape(cornerRadius: 4))
         }

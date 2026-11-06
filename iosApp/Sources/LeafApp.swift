@@ -8,6 +8,7 @@ struct LeafApp: App {
         WindowGroup {
             LibraryView()
                 .environmentObject(settings)
+                .leafAppearance(settings.theme)
         }
     }
 }

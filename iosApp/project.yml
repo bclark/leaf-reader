@@ -107,6 +107,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(PRODUCT_BUNDLE_IDENTIFIER)
         DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)
         TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIconLight AppIconDark"
+
         # $(inherited) keeps the values CocoaPods injects via its xcconfig (needed to link
         # TensorFlowLite) alongside our Kotlin-framework search path / link flag.
         # Both SDK variants are conditional — an unconditional device path would also be passed to

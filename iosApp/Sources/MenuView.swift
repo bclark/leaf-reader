@@ -71,13 +71,24 @@ struct MenuView: View {
                         Spacer().frame(height: 24)
 
                         // ---- Theme -------------------------------------------------------
-                        SectionLabel("THEME")
+                        SectionLabel("APPEARANCE")
                         Spacer().frame(height: 10)
-                        ToggleRow(
-                            title: "AMOLED Black",
-                            subtitle: "True-black background — easy on OLED screens and battery.",
-                            isOn: $settings.amoled
-                        )
+                        VStack(alignment: .leading, spacing: 16) {
+                            Picker("App Theme", selection: $settings.theme) {
+                                ForEach(AppTheme.allCases) { mode in
+                                    Text(mode.title).tag(mode)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            if settings.theme != .light {
+                                ToggleRow(
+                                    title: "AMOLED Black",
+                                    subtitle: "Use true black when the app is in dark mode.",
+                                    isOn: $settings.amoled
+                                )
+                            }
+                            AppIconPicker()
+                        }
 
                         Spacer().frame(height: 32)
 
@@ -89,12 +100,12 @@ struct MenuView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Page Fit")
                                     .font(.archivo(14, weight: 700))
-                                    .foregroundColor(Leaf.cream)
+                                    .foregroundColor(Leaf.text)
                                 Text(settings.pageFitMode == .fitWidth
                                      ? "Fit page to screen width for easier reading of small text and speech bubbles."
                                      : "Fit the entire page on screen.")
                                     .font(.archivo(12, weight: 400))
-                                    .foregroundColor(Leaf.creamMuted)
+                                    .foregroundColor(Leaf.secondaryText)
 
                                 HStack(spacing: 2) {
                                     Button {
@@ -102,7 +113,7 @@ struct MenuView: View {
                                     } label: {
                                         Text("FIT TO PAGE")
                                             .font(.archivo(12, weight: 700))
-                                            .foregroundColor(settings.pageFitMode == .fitPage ? Leaf.ink : Leaf.creamMuted)
+                                            .foregroundColor(settings.pageFitMode == .fitPage ? Leaf.ink : Leaf.secondaryText)
                                             .frame(maxWidth: .infinity)
                                             .padding(.vertical, 8)
                                             .background(settings.pageFitMode == .fitPage ? Leaf.ochre : Color.clear)
@@ -115,7 +126,7 @@ struct MenuView: View {
                                     } label: {
                                         Text("FIT TO WIDTH")
                                             .font(.archivo(12, weight: 700))
-                                            .foregroundColor(settings.pageFitMode == .fitWidth ? Leaf.ink : Leaf.creamMuted)
+                                            .foregroundColor(settings.pageFitMode == .fitWidth ? Leaf.ink : Leaf.secondaryText)
                                             .frame(maxWidth: .infinity)
                                             .padding(.vertical, 8)
                                             .background(settings.pageFitMode == .fitWidth ? Leaf.ochre : Color.clear)
@@ -124,7 +135,7 @@ struct MenuView: View {
                                     .buttonStyle(.plain)
                                 }
                                 .padding(2)
-                                .background(Leaf.ink)
+                                .background(settings.ground)
                                 .clipShape(RoundedCornerShape(cornerRadius: 4))
                                 .padding(.top, 4)
                             }
@@ -137,10 +148,10 @@ struct MenuView: View {
 
                             Text("The cover and wide pages stay single in either layout.")
                                 .font(.archivo(11, weight: 400))
-                                .foregroundColor(Leaf.creamMuted)
+                                .foregroundColor(Leaf.secondaryText)
                         }
                         .padding(16)
-                        .background(Leaf.inkSoft)
+                        .background(settings.groundSoft)
                         .clipShape(RoundedCornerShape(cornerRadius: 6))
 
                         Spacer().frame(height: 32)
@@ -148,7 +159,7 @@ struct MenuView: View {
                         // ---- Library -----------------------------------------------------
                         Button("SMB Drive Settings") { showingSmbSettings = true }
                             .font(.archivo(14, weight: 700))
-                            .foregroundColor(Leaf.ochre)
+                            .foregroundColor(Leaf.goldText)
                             .padding(.bottom, 24)
 
                         SectionLabel("LIBRARY")
@@ -156,10 +167,10 @@ struct MenuView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Grid Columns")
                                 .font(.archivo(14, weight: 700))
-                                .foregroundColor(Leaf.cream)
+                                .foregroundColor(Leaf.text)
                             Text("Choose how many comic covers appear per row on the library screen.")
                                 .font(.archivo(12, weight: 400))
-                                .foregroundColor(Leaf.creamMuted)
+                                .foregroundColor(Leaf.secondaryText)
 
                             HStack(spacing: 2) {
                                 ForEach([2, 3, 4, 6], id: \.self) { count in
@@ -169,7 +180,7 @@ struct MenuView: View {
                                     } label: {
                                         Text("\(count) COL")
                                             .font(.archivo(12, weight: 700))
-                                            .foregroundColor(isSelected ? Leaf.ink : Leaf.creamMuted)
+                                            .foregroundColor(isSelected ? Leaf.ink : Leaf.secondaryText)
                                             .frame(maxWidth: .infinity)
                                             .padding(.vertical, 8)
                                             .background(isSelected ? Leaf.ochre : Color.clear)
@@ -179,12 +190,12 @@ struct MenuView: View {
                                 }
                             }
                             .padding(2)
-                            .background(Leaf.ink)
+                            .background(settings.ground)
                             .clipShape(RoundedCornerShape(cornerRadius: 4))
                             .padding(.top, 4)
                         }
                         .padding(16)
-                        .background(Leaf.inkSoft)
+                        .background(settings.groundSoft)
                         .clipShape(RoundedCornerShape(cornerRadius: 6))
 
                         Spacer().frame(height: 32)
@@ -195,11 +206,11 @@ struct MenuView: View {
                         VStack(alignment: .leading, spacing: 14) {
                             Text("Cross-Platform Backup")
                                 .font(.archivo(14, weight: 700))
-                                .foregroundColor(Leaf.cream)
+                                .foregroundColor(Leaf.text)
                             Text("Export or restore your reading progress, metadata, custom reading lists, and app preferences. Backups are cross-platform compatible between iOS and Android.")
                                 .font(.archivo(12, weight: 400))
                                 .lineSpacing(3)
-                                .foregroundColor(Leaf.creamMuted)
+                                .foregroundColor(Leaf.secondaryText)
 
                             HStack(spacing: 12) {
                                 Button {
@@ -229,10 +240,10 @@ struct MenuView: View {
                                         Text("RESTORE BACKUP")
                                             .font(.archivo(12, weight: 700))
                                     }
-                                    .foregroundColor(Leaf.cream)
+                                    .foregroundColor(Leaf.text)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 10)
-                                    .background(Leaf.ink)
+                                    .background(settings.ground)
                                     .clipShape(RoundedCornerShape(cornerRadius: 4))
                                     .comicShadow(offset: 2, color: .black.opacity(0.5), corner: 4)
                                 }
@@ -241,7 +252,7 @@ struct MenuView: View {
                             .padding(.top, 4)
                         }
                         .padding(16)
-                        .background(Leaf.inkSoft)
+                        .background(settings.groundSoft)
                         .clipShape(RoundedCornerShape(cornerRadius: 6))
 
                         Spacer().frame(height: 32)
@@ -249,28 +260,28 @@ struct MenuView: View {
                         // ---- About -------------------------------------------------------
                         SectionLabel("ABOUT")
                         Spacer().frame(height: 16)
-                        LeafWordmark()
+                        LeafWordmark(color: Leaf.text)
                         Spacer().frame(height: 12)
                         OchreBadge(text: "VERSION \(version)")
                         Spacer().frame(height: 14)
                         Text("A comic reader for iOS")
-                            .font(.archivo(14, weight: 600)).foregroundColor(Leaf.cream)
+                            .font(.archivo(14, weight: 600)).foregroundColor(Leaf.text)
                         Spacer().frame(height: 14)
                         Text("Leaf is an offline comic reader with on-device ML panel detection, interactive page flip, and multi-format archives.")
-                            .font(.archivo(13)).lineSpacing(4).foregroundColor(Leaf.cream)
+                            .font(.archivo(13)).lineSpacing(4).foregroundColor(Leaf.text)
                         Spacer().frame(height: 14)
                         Link(destination: Self.repoURL) {
                             Text("Source: github.com/bclark/leaf-reader")
-                                .font(.archivo(11, weight: 600)).foregroundColor(Leaf.ochre)
+                                .font(.archivo(11, weight: 600)).foregroundColor(Leaf.goldText)
                                 .padding(.top, 2)
                         }
                         Spacer().frame(height: 10)
                         Text("Forked with appreciation from Chika by Chakra.")
-                            .font(.archivo(12)).foregroundColor(Leaf.creamMuted)
+                            .font(.archivo(12)).foregroundColor(Leaf.secondaryText)
                         Spacer().frame(height: 6)
                         Link(destination: Self.upstreamURL) {
                             Text("Upstream: github.com/batunii/chika")
-                                .font(.archivo(11, weight: 600)).foregroundColor(Leaf.creamMuted)
+                                .font(.archivo(11, weight: 600)).foregroundColor(Leaf.secondaryText)
                                 .padding(.top, 2)
                         }
 
@@ -278,26 +289,26 @@ struct MenuView: View {
                         Link(destination: Self.privacyURL) {
                             HStack {
                                 Text("Privacy policy — Leaf collects no data.")
-                                    .font(.archivo(12)).foregroundColor(Leaf.cream)
+                                    .font(.archivo(12)).foregroundColor(Leaf.text)
                                 Spacer()
                                 Image(systemName: "arrow.up.right")
-                                    .font(.system(size: 11, weight: .bold)).foregroundColor(Leaf.creamMuted)
+                                    .font(.system(size: 11, weight: .bold)).foregroundColor(Leaf.secondaryText)
                             }
                             .padding(12)
-                            .background(Leaf.inkSoft)
+                            .background(settings.groundSoft)
                             .clipShape(RoundedCornerShape(cornerRadius: 4))
                         }
                         Spacer().frame(height: 8)
                         Link(destination: Self.licensesURL) {
                             HStack {
                                 Text("Open-source licenses & notices.")
-                                    .font(.archivo(12)).foregroundColor(Leaf.cream)
+                                    .font(.archivo(12)).foregroundColor(Leaf.text)
                                 Spacer()
                                 Image(systemName: "arrow.up.right")
-                                    .font(.system(size: 11, weight: .bold)).foregroundColor(Leaf.creamMuted)
+                                    .font(.system(size: 11, weight: .bold)).foregroundColor(Leaf.secondaryText)
                             }
                             .padding(12)
-                            .background(Leaf.inkSoft)
+                            .background(settings.groundSoft)
                             .clipShape(RoundedCornerShape(cornerRadius: 4))
                         }
 
@@ -309,7 +320,7 @@ struct MenuView: View {
                         Text("Enjoying Leaf? You can leave an optional tip to support development. All features remain free.")
                             .font(.archivo(12, weight: 500))
                             .lineSpacing(4)
-                            .foregroundColor(Leaf.cream)
+                            .foregroundColor(Leaf.text)
                         Spacer().frame(height: 12)
                         Button {
                             UIApplication.shared.open(Self.kofiURL)
@@ -337,7 +348,7 @@ struct MenuView: View {
                         Link(destination: Self.kofiURL) {
                             Text("ko-fi.com/bryanclark")
                                 .font(.archivo(11, weight: 600))
-                                .foregroundColor(Leaf.ochre)
+                                .foregroundColor(Leaf.goldText)
                         }
 
                         Spacer().frame(height: 24)
@@ -346,21 +357,21 @@ struct MenuView: View {
                         Text("Support the upstream creator of Chika:")
                             .font(.archivo(12, weight: 500))
                             .lineSpacing(3)
-                            .foregroundColor(Leaf.creamMuted)
+                            .foregroundColor(Leaf.secondaryText)
                         Spacer().frame(height: 12)
                         Link(destination: Self.upstreamURL) {
                             HStack(spacing: 10) {
                                 Image(systemName: "heart.fill")
                                     .font(.system(size: 16))
-                                    .foregroundColor(Leaf.ochre)
+                                    .foregroundColor(Leaf.goldText)
                                 Text("SUPPORT ORIGINAL PROJECT")
                                     .font(.anton(15))
                                     .tracking(0.5)
-                                    .foregroundColor(Leaf.cream)
+                                    .foregroundColor(Leaf.text)
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
-                            .background(Leaf.deepInkSurface)
+                            .background(settings.groundSoft)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 4)
                                     .stroke(Leaf.ochre, lineWidth: 1.5)
@@ -372,7 +383,7 @@ struct MenuView: View {
                         Link(destination: Self.upstreamURL) {
                             Text("github.com/batunii/chika")
                                 .font(.archivo(11, weight: 600))
-                                .foregroundColor(Leaf.ochre)
+                                .foregroundColor(Leaf.goldText)
                         }
                     }
                     .padding(.horizontal, 24)
@@ -385,14 +396,14 @@ struct MenuView: View {
                 VStack {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(Leaf.ochre)
+                            .foregroundColor(Leaf.goldText)
                         Text(toast)
                             .font(.archivo(13, weight: 600))
-                            .foregroundColor(Leaf.cream)
+                            .foregroundColor(Leaf.text)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
-                    .background(Leaf.inkSoft)
+                    .background(settings.groundSoft)
                     .clipShape(Capsule())
                     .comicShadow(offset: 4, color: .black.opacity(0.6), corner: 20)
                     .padding(.top, 60)
@@ -402,6 +413,7 @@ struct MenuView: View {
                 .zIndex(100)
             }
         }
+        .leafAppearance(settings.theme)
         .navigationBarHidden(true)
         .fileExporter(
             isPresented: $showingExporter,
@@ -476,6 +488,7 @@ struct MenuView: View {
                     }
                 )
                 .environmentObject(settings)
+                .leafAppearance(settings.theme)
             }
         }
         .alert("Backup Error", isPresented: $showingErrorAlert) {
@@ -564,9 +577,9 @@ private struct RestorePreviewSheet: View {
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(Leaf.cream)
+                            .foregroundColor(Leaf.text)
                             .frame(width: 32, height: 32)
-                            .background(Leaf.cream.opacity(0.12))
+                            .background(Leaf.text.opacity(0.12))
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
@@ -581,21 +594,21 @@ private struct RestorePreviewSheet: View {
                         HStack(spacing: 8) {
                             Image(systemName: "clock")
                                 .font(.system(size: 12))
-                                .foregroundColor(Leaf.ochre)
+                                .foregroundColor(Leaf.goldText)
                             Text("Exported \(formattedExportDate)")
                                 .font(.archivo(12, weight: 600))
-                                .foregroundColor(Leaf.cream)
+                                .foregroundColor(Leaf.text)
                             Spacer()
                             Text("v\(preview.appVersion)")
                                 .font(.archivo(11, weight: 600))
-                                .foregroundColor(Leaf.creamMuted)
+                                .foregroundColor(Leaf.secondaryText)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(Leaf.inkSoft)
+                                .background(settings.groundSoft)
                                 .clipShape(RoundedCornerShape(cornerRadius: 3))
                         }
                         .padding(12)
-                        .background(Leaf.inkSoft)
+                        .background(settings.groundSoft)
                         .clipShape(RoundedCornerShape(cornerRadius: 6))
 
                         // Backup Contents Summary
@@ -603,47 +616,47 @@ private struct RestorePreviewSheet: View {
                             Text("BACKUP CONTENTS")
                                 .font(.anton(13))
                                 .tracking(0.5)
-                                .foregroundColor(Leaf.ochre)
+                                .foregroundColor(Leaf.goldText)
 
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack(spacing: 8) {
                                     Image(systemName: "books.vertical.fill")
                                         .font(.system(size: 13))
-                                        .foregroundColor(Leaf.creamMuted)
+                                        .foregroundColor(Leaf.secondaryText)
                                         .frame(width: 20)
                                     Text("\(preview.totalComicsInBackup) comics in backup")
                                         .font(.archivo(13, weight: 600))
-                                        .foregroundColor(Leaf.cream)
+                                        .foregroundColor(Leaf.text)
                                     if preview.matchingComicsCount > 0 {
                                         Text("(\(preview.matchingComicsCount) match library)")
                                             .font(.archivo(12, weight: 400))
-                                            .foregroundColor(Leaf.ochre)
+                                            .foregroundColor(Leaf.goldText)
                                     }
                                 }
 
                                 HStack(spacing: 8) {
                                     Image(systemName: "list.bullet.rectangle.fill")
                                         .font(.system(size: 13))
-                                        .foregroundColor(Leaf.creamMuted)
+                                        .foregroundColor(Leaf.secondaryText)
                                         .frame(width: 20)
                                     Text("\(preview.readingListsCount) reading lists")
                                         .font(.archivo(13, weight: 600))
-                                        .foregroundColor(Leaf.cream)
+                                        .foregroundColor(Leaf.text)
                                 }
 
                                 HStack(spacing: 8) {
                                     Image(systemName: "slider.horizontal.3")
                                         .font(.system(size: 13))
-                                        .foregroundColor(Leaf.creamMuted)
+                                        .foregroundColor(Leaf.secondaryText)
                                         .frame(width: 20)
                                     Text(preview.hasSettings ? "Includes app preferences" : "No preferences included")
                                         .font(.archivo(13, weight: 600))
-                                        .foregroundColor(Leaf.cream)
+                                        .foregroundColor(Leaf.text)
                                 }
                             }
                         }
                         .padding(16)
-                        .background(Leaf.inkSoft)
+                        .background(settings.groundSoft)
                         .clipShape(RoundedCornerShape(cornerRadius: 6))
 
                         // Strategy Selector
@@ -651,7 +664,7 @@ private struct RestorePreviewSheet: View {
                             Text("CONFLICT RESOLUTION")
                                 .font(.anton(13))
                                 .tracking(0.5)
-                                .foregroundColor(Leaf.ochre)
+                                .foregroundColor(Leaf.goldText)
 
                             VStack(spacing: 8) {
                                 ForEach(BackupConflictStrategy.allCases) { strategy in
@@ -661,20 +674,20 @@ private struct RestorePreviewSheet: View {
                                         HStack(alignment: .top, spacing: 12) {
                                             Image(systemName: selectedStrategy == strategy ? "record.circle.fill" : "circle")
                                                 .font(.system(size: 16))
-                                                .foregroundColor(selectedStrategy == strategy ? Leaf.ochre : Leaf.creamMuted)
+                                                .foregroundColor(selectedStrategy == strategy ? Leaf.ochre : Leaf.secondaryText)
                                                 .padding(.top, 2)
                                             VStack(alignment: .leading, spacing: 3) {
                                                 Text(strategy.title)
                                                     .font(.archivo(13, weight: 700))
-                                                    .foregroundColor(Leaf.cream)
+                                                    .foregroundColor(Leaf.text)
                                                 Text(strategy.subtitle)
                                                     .font(.archivo(11, weight: 400))
-                                                    .foregroundColor(Leaf.creamMuted)
+                                                    .foregroundColor(Leaf.secondaryText)
                                             }
                                             Spacer()
                                         }
                                         .padding(12)
-                                        .background(selectedStrategy == strategy ? Leaf.ink.opacity(0.8) : Leaf.inkSoft)
+                                        .background(selectedStrategy == strategy ? settings.ground : settings.groundSoft)
                                         .clipShape(RoundedCornerShape(cornerRadius: 6))
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 6)
@@ -708,7 +721,7 @@ private struct RestorePreviewSheet: View {
                             } label: {
                                 Text("CANCEL")
                                     .font(.archivo(13, weight: 700))
-                                    .foregroundColor(Leaf.creamMuted)
+                                    .foregroundColor(Leaf.secondaryText)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 10)
                             }
@@ -729,13 +742,14 @@ private struct SectionLabel: View {
     init(_ text: String) { self.text = text }
     var body: some View {
         Text(text.uppercased())
-            .font(.archivo(9, weight: 800)).tracking(2.5).foregroundColor(Leaf.ochre)
+            .font(.archivo(9, weight: 800)).tracking(2.5).foregroundColor(Leaf.goldText)
     }
 }
 
 /// A titled settings row with a trailing switch. Tapping anywhere on the row toggles it, and the
-/// ground stays ink-soft even in AMOLED (matching Android's hardcoded InkSoft row).
+/// surface follows the resolved appearance and AMOLED preference.
 private struct ToggleRow: View {
+    @EnvironmentObject private var settings: LeafSettings
     let title: String
     let subtitle: String
     @Binding var isOn: Bool
@@ -743,15 +757,15 @@ private struct ToggleRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.archivo(14, weight: 700)).foregroundColor(Leaf.cream)
+                Text(title).font(.archivo(14, weight: 700)).foregroundColor(Leaf.text)
                 Text(subtitle)
-                    .font(.archivo(10.5, weight: 500)).lineSpacing(3).foregroundColor(Leaf.creamMuted)
+                    .font(.archivo(10.5, weight: 500)).lineSpacing(3).foregroundColor(Leaf.secondaryText)
             }
             Spacer(minLength: 0)
             LeafSwitch(isOn: $isOn)
         }
         .padding(.init(top: 12, leading: 16, bottom: 12, trailing: 10))
-        .background(Leaf.inkSoft)
+        .background(settings.groundSoft)
         .clipShape(RoundedCornerShape(cornerRadius: 6))
         .contentShape(Rectangle())
         .onTapGesture { withAnimation(.easeInOut(duration: 0.15)) { isOn.toggle() } }
@@ -767,9 +781,9 @@ private struct LeafSwitch: View {
         ZStack(alignment: isOn ? .trailing : .leading) {
             Capsule()
                 .fill(isOn ? Leaf.ochre : Leaf.ink)
-                .overlay(Capsule().stroke(isOn ? Leaf.ochre : Leaf.creamMuted, lineWidth: 2))
+                .overlay(Capsule().stroke(isOn ? Leaf.ochre : Leaf.secondaryText, lineWidth: 2))
             Circle()
-                .fill(isOn ? Leaf.ink : Leaf.creamMuted)
+                .fill(isOn ? Leaf.ink : Leaf.secondaryText)
                 .padding(3)
         }
         .frame(width: 46, height: 28)
@@ -779,6 +793,7 @@ private struct LeafSwitch: View {
 
 /// Two-option layout selector (Single page vs Two-page spread), matching Android's LayoutChoice.
 private struct LayoutChoiceView: View {
+    @EnvironmentObject private var settings: LeafSettings
     let title: String
     @Binding var isSpread: Bool
 
@@ -786,14 +801,14 @@ private struct LayoutChoiceView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.archivo(14, weight: 700))
-                .foregroundColor(Leaf.cream)
+                .foregroundColor(Leaf.text)
             HStack(spacing: 2) {
                 Button {
                     isSpread = false
                 } label: {
                     Text("Single page")
                         .font(.archivo(12, weight: 700))
-                        .foregroundColor(!isSpread ? Leaf.ink : Leaf.creamMuted)
+                        .foregroundColor(!isSpread ? Leaf.ink : Leaf.secondaryText)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                         .background(!isSpread ? Leaf.ochre : Color.clear)
@@ -806,7 +821,7 @@ private struct LayoutChoiceView: View {
                 } label: {
                     Text("Two-page spread")
                         .font(.archivo(12, weight: 700))
-                        .foregroundColor(isSpread ? Leaf.ink : Leaf.creamMuted)
+                        .foregroundColor(isSpread ? Leaf.ink : Leaf.secondaryText)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                         .background(isSpread ? Leaf.ochre : Color.clear)
@@ -815,7 +830,7 @@ private struct LayoutChoiceView: View {
                 .buttonStyle(.plain)
             }
             .padding(2)
-            .background(Leaf.ink)
+            .background(settings.ground)
             .clipShape(RoundedCornerShape(cornerRadius: 4))
             .padding(.top, 4)
         }

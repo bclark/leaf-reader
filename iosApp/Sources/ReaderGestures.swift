@@ -13,10 +13,14 @@ struct ReaderGestures: UIViewRepresentable {
     /// Cumulative pinch scale since the gesture began (1.0 at start), and the end signal to commit.
     var onPinchChanged: (CGFloat) -> Void
     var onPinchEnded: () -> Void
-    /// Cumulative pan translation since the gesture began; end reports final translation, px/s
+    /// Cumulative pan translation since the gesture began; end reports final translation, points/s
     /// velocity, and the max simultaneous touch count (so a 1-finger flick can be told from a pinch).
     var onPanChanged: (CGSize) -> Void
     var onPanEnded: (_ translation: CGSize, _ velocity: CGSize, _ maxTouches: Int) -> Void
+
+    var onPanBegan: (_ touches: Int) -> Void = { _ in }
+    var onPanCancelled: () -> Void = {}
+    var onMultipleTouches: () -> Void = {}
 
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
@@ -82,6 +86,7 @@ struct ReaderGestures: UIViewRepresentable {
 
         @objc func handlePinch(_ g: UIPinchGestureRecognizer) {
             switch g.state {
+            case .began: parent.onMultipleTouches()
             case .changed: parent.onPinchChanged(g.scale)
             case .ended, .cancelled: parent.onPinchEnded()
             default: break
@@ -94,10 +99,16 @@ struct ReaderGestures: UIViewRepresentable {
             switch g.state {
             case .began:
                 maxTouches = g.numberOfTouches
+                parent.onPanBegan(maxTouches)
+                parent.onPanChanged(CGSize(width: t.x, height: t.y))
             case .changed:
                 maxTouches = max(maxTouches, g.numberOfTouches)
+                if maxTouches > 1 { parent.onMultipleTouches() }
                 parent.onPanChanged(CGSize(width: t.x, height: t.y))
-            case .ended, .cancelled:
+            case .cancelled, .failed:
+                parent.onPanCancelled()
+                maxTouches = 1
+            case .ended:
                 let v = g.velocity(in: view)
                 parent.onPanEnded(CGSize(width: t.x, height: t.y), CGSize(width: v.x, height: v.y), maxTouches)
                 maxTouches = 1

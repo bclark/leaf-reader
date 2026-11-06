@@ -2,6 +2,7 @@ import SwiftUI
 import LeafShared
 
 struct SmbBrowserView: View {
+    @EnvironmentObject private var settings: LeafSettings
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -65,7 +66,7 @@ struct SmbBrowserView: View {
                         } label: {
                             HStack {
                                 Image(systemName: entry.isDirectory ? "folder" : (model.state.selectedPaths.contains(entry.path) ? "checkmark.circle.fill" : "circle"))
-                                Text(entry.name).foregroundStyle(Leaf.cream)
+                                Text(entry.name).foregroundStyle(Leaf.text)
                                 Spacer()
                                 if entry.isDirectory { Image(systemName: "chevron.right") }
                             }
@@ -91,8 +92,8 @@ struct SmbBrowserView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(Leaf.ink)
-            .tint(Leaf.ochre)
+            .background(settings.ground)
+            .tint(Leaf.goldText)
             .navigationTitle("SMB Drive")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") {
@@ -113,6 +114,6 @@ struct SmbBrowserView: View {
             .onDisappear { model.cancel() }
             .onChange(of: scenePhase) { phase in if phase == .background { model.cancel() } }
         }
-        .preferredColorScheme(.dark)
+        .leafAppearance(settings.theme)
     }
 }

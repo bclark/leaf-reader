@@ -217,6 +217,14 @@ final class LibraryStore: ObservableObject {
             }
         }()
 
+        let listItems: [LibraryItem] = {
+            let filteredLists = q.isEmpty ? readingLists : readingLists.filter { $0.name.lowercased().contains(q) }
+            return filteredLists.map { list in
+                let previewUrls = list.itemFilenames.compactMap { comicMap[$0] }
+                return LibraryItem.readingListItem(list: list, previewUrls: previewUrls, itemCount: previewUrls.count)
+            }
+        }()
+
         switch filter {
         case .all:
             var seriesGroups: [String: [URL]] = [:]
@@ -260,7 +268,7 @@ final class LibraryStore: ObservableObject {
                 items.append(.singleComic(url: url, metadata: metadata[url.lastPathComponent]))
                 handled.insert(url)
             }
-            return items
+            return items + listItems
 
         case .series:
             var seriesGroups: [String: [URL]] = [:]
@@ -297,11 +305,7 @@ final class LibraryStore: ObservableObject {
             }
 
         case .readingLists:
-            let filteredLists = q.isEmpty ? readingLists : readingLists.filter { $0.name.lowercased().contains(q) }
-            return filteredLists.map { list in
-                let previewUrls = list.itemFilenames.compactMap { comicMap[$0] }
-                return LibraryItem.readingListItem(list: list, previewUrls: previewUrls, itemCount: previewUrls.count)
-            }
+            return listItems
 
         case .unread:
             return filteredComics.filter { url in

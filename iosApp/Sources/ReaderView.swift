@@ -30,6 +30,7 @@ struct DisplaySpread: Equatable {
 /// responsive tap zones, smooth interactive page drag flipping, and bottom scrubber.
 struct ReaderView: View {
     let comicURL: URL
+    var openingCover: UIImage? = nil
 
     private enum LoadState {
         case loading
@@ -39,6 +40,9 @@ struct ReaderView: View {
 
     private static let ioQueue = DispatchQueue(label: "leaf.reader.io", qos: .userInitiated)
 
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
+    @StateObject private var dismissal = ReaderDismissMotion()
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var settings: LeafSettings
     @State private var state: LoadState = .loading
@@ -117,11 +121,18 @@ struct ReaderView: View {
             settings.ground.ignoresSafeArea()
             switch state {
             case .loading:
-                ProgressView().tint(Leaf.ochre)
+                if let openingCover {
+                    GeometryReader { screen in
+                        renderSinglePage(image: openingCover, panX: 0, panY: 0, zoom: 1, container: screen.size)
+                    }
+                    .ignoresSafeArea()
+                } else {
+                    ProgressView().tint(Leaf.ochre)
+                }
             case .failed(let message):
                 VStack(spacing: 10) {
                     Image(systemName: "exclamationmark.triangle").foregroundColor(Leaf.ochre)
-                    Text(message).font(.archivo(14)).foregroundColor(Leaf.cream)
+                    Text(message).font(.archivo(14)).foregroundColor(Leaf.text)
                         .multilineTextAlignment(.center)
                 }
                 .padding()
@@ -142,10 +153,17 @@ struct ReaderView: View {
                 bottomBar.transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .allowsHitTesting(!dismissal.committed)
+        .leafAppearance(settings.theme)
         .navigationBarHidden(true)
         .statusBarHidden(!showChrome)
         .task { load() }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active { dismissal.reset() }
+        }
         .onDisappear {
+            loadToken &+= 1
+            dismissal.reset()
             persist()
             ReadingProgress.flushSync()
         }
@@ -236,13 +254,20 @@ struct ReaderView: View {
         resetZoom()
         persist()
 
+        loadToken &+= 1
+        let token = loadToken
+
         // Reuse preloaded next or prev if matching
         if let next = nextSpread, next.firstPage == currFirst, next.isReady {
             currentSpread = next
         } else if let prev = prevSpread, prev.firstPage == currFirst, prev.isReady {
             currentSpread = prev
         } else {
-            currentSpread = syncLoadSpread(loader: loader, spread: currS)
+            currentSpread = nil
+            loadSpreadImages(loader: loader, spread: currS) { spread in
+                guard token == self.loadToken else { return }
+                self.currentSpread = spread
+            }
         }
         PageCurlRenderer.shared.prewarmTextures(for: [currentSpread?.firstImage, currentSpread?.secondImage])
 
@@ -251,9 +276,6 @@ struct ReaderView: View {
 
         let prevTarget = currFirst - 1
         let prevS = (prevTarget >= 0) ? resolveSpread(for: prevTarget, in: loader, spreadActive: spreadActive) : nil
-
-        loadToken &+= 1
-        let token = loadToken
 
         loadSpreadImages(loader: loader, spread: nextS) { ds in
             guard token == self.loadToken else { return }
@@ -390,6 +412,9 @@ struct ReaderView: View {
     }
 
     private var groundClearColor: MTLClearColor {
+        if colorScheme == .light {
+            return MTLClearColor(red: 250.0 / 255, green: 250.0 / 255, blue: 247.0 / 255, alpha: 1)
+        }
         if settings.amoled {
             return MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1.0)
         }
@@ -434,9 +459,17 @@ struct ReaderView: View {
         .clipped()
         .overlay {
             if currentSpread == nil {
-                ProgressView().tint(Leaf.ochre)
+                if let openingCover, page == 0 {
+                    renderSinglePage(image: openingCover, panX: 0, panY: 0, zoom: 1, container: size)
+                } else {
+                    ProgressView().tint(Leaf.ochre)
+                }
             }
         }
+        .scaleEffect(1 - CGFloat(ReaderDismissGesture.shared.progress(deltaY: Float(dismissal.offset.height), viewportHeight: Float(size.height))) * 0.08)
+        .rotationEffect(.degrees(Double(min(max(dismissal.offset.width / max(size.width, 1) * 14, -10), 10))))
+        .offset(dismissal.offset)
+        .onChange(of: size) { _ in dismissal.reset() }
         // Unified gesture layer: pinch-to-zoom, pan when zoomed, tap zones, and drag-to-flip
         .overlay {
             ReaderGestures(
@@ -451,6 +484,7 @@ struct ReaderView: View {
                     }
                 },
                 onPinchChanged: { scale in
+                    dismissal.cancelGesture()
                     if curlAnimator.direction == nil {
                         zoom = min(max(steadyZoom * scale, 1), 5)
                     }
@@ -463,6 +497,14 @@ struct ReaderView: View {
                     }
                 },
                 onPanChanged: { t in
+                    guard !dismissal.committed else { return }
+                    dismissal.change(t)
+                    if dismissal.intent == .dismiss { return }
+                    if dismissal.intent != .horizontal {
+                        let raw = CGSize(width: steadyPan.width + t.width, height: steadyPan.height + t.height)
+                        pan = clampPan(raw, viewSize: size)
+                        return
+                    }
                     if ReaderTurnLogic.isCurlGestureEnabled(zoom: zoom) {
                         guard !curlAnimator.isAnimating else { return }
                         let spreadActive = isSpreadActive(for: size)
@@ -514,13 +556,50 @@ struct ReaderView: View {
                     }
                 },
                 onPanEnded: { translation, velocity, maxTouches in
-                    handlePanEnd(translation: translation, velocity: velocity, maxTouches: maxTouches, in: loader, size: size)
+                    if dismissal.intent == .dismiss {
+                        dismissal.release(velocity: velocity, height: size.height) { dismiss() }
+                    } else if dismissal.intent == .horizontal && maxTouches == 1 {
+                        handlePanEnd(translation: translation, velocity: velocity, maxTouches: maxTouches, in: loader, size: size)
+                    } else {
+                        steadyPan = pan
+                    }
+                },
+                onPanBegan: { touches in
+                    dismissal.begin(eligible: canDismiss(in: size) && curlAnimator.direction == nil, touches: touches)
+                },
+                onPanCancelled: {
+                    dismissal.cancelGesture()
+                    curlAnimator.reset()
+                    steadyPan = pan
+                },
+                onMultipleTouches: {
+                    dismissal.cancelGesture()
+                    if !curlAnimator.isAnimating { curlAnimator.reset() }
                 }
             )
             .frame(width: size.width, height: size.height)
             .contentShape(Rectangle())
             .accessibilityIdentifier("ReaderCanvas")
+            .allowsHitTesting(currentSpread?.isReady == true)
         }
+    }
+
+    private func canDismiss(in size: CGSize) -> Bool {
+        guard zoom <= 1.05, let current = currentSpread, let first = current.firstImage else { return false }
+        let height: CGFloat
+        if current.isSpread, let second = current.secondImage {
+            let draw = CameraTransformKt.computeSpreadDraw(
+                page1W: Int32(first.cgImage?.width ?? Int(first.size.width)),
+                page1H: Int32(first.cgImage?.height ?? Int(first.size.height)),
+                page2W: Int32(second.cgImage?.width ?? Int(second.size.width)),
+                page2H: Int32(second.cgImage?.height ?? Int(second.size.height)),
+                containerW: Float(size.width), containerH: Float(size.height),
+                fill: 0.98, fitMode: settings.pageFitMode)
+            height = CGFloat(draw.totalHeight)
+        } else {
+            height = CGFloat(computeSinglePageDraw(for: first, in: size).scaledHeight)
+        }
+        return height * zoom <= size.height + 1 / UIScreen.main.scale
     }
 
     private var pageStatus: String {
@@ -632,7 +711,7 @@ struct ReaderView: View {
         .frame(maxWidth: .infinity)
         .background(
             LinearGradient(
-                colors: [.clear, Leaf.inkSoft.opacity(0.98)],
+                colors: [.clear, settings.groundSoft.opacity(0.98)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -794,6 +873,7 @@ struct ReaderView: View {
     // Tap zones: left third turns back (or next if RTL), right third turns forward (or back if RTL),
     // center third toggles chrome. If zoomed in, tap toggles chrome anywhere.
     private func tapZone(x: CGFloat, width: CGFloat, in loader: PageLoader) {
+        guard !dismissal.committed else { return }
         if !ReaderTurnLogic.isCurlGestureEnabled(zoom: zoom) {
             withAnimation(.easeInOut(duration: 0.2)) { showChrome.toggle() }
             return
