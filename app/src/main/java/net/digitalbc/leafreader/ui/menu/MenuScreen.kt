@@ -89,7 +89,7 @@ import kotlinx.coroutines.withContext
 
 private const val SOURCE_URL = "https://github.com/bclark/leaf-reader"
 private const val UPSTREAM_URL = "https://github.com/batunii/chika"
-private const val PRIVACY_URL = "https://github.com/bclark/leaf-reader/blob/main/PRIVACY.md"
+private const val PRIVACY_URL = "https://digitalbc.net/leaf/privacy/"
 private const val LICENSES_URL = "https://github.com/bclark/leaf-reader/blob/main/THIRD_PARTY_NOTICES.md"
 private const val SUPPORT_KOFI_URL = "https://ko-fi.com/bryanclark"
 
