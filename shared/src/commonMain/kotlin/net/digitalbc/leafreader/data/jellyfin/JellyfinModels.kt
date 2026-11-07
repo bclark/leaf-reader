@@ -133,6 +133,8 @@ data class JellyfinItem(
     val parentId: String? = null,
     val seriesName: String? = null,
     val productionYear: Int? = null,
+    val playbackPositionTicks: Long = 0L,
+    val played: Boolean = false,
 ) {
     /**
      * Supported formats for Leaf reading: CBZ, CBR, PDF, ZIP, RAR.
@@ -185,6 +187,19 @@ enum class JellyfinFailureKind {
     UNKNOWN,
 }
 
+/** Tick conversions and calculations for Jellyfin comic/book playback. */
+object JellyfinProgress {
+    const val TICKS_PER_PAGE: Long = 10_000L
+
+    fun pageToTicks(pageIndex: Int): Long =
+        (pageIndex.coerceAtLeast(0).toLong()) * TICKS_PER_PAGE
+
+    fun ticksToPage(ticks: Long, maxPages: Int? = null): Int {
+        val page = (ticks / TICKS_PER_PAGE).toInt()
+        return if (maxPages != null && maxPages > 0) page.coerceIn(0, maxPages - 1) else page.coerceAtLeast(0)
+    }
+}
+
 object JellyfinEndpoints {
     fun authenticateByName(baseUrl: String): String =
         "${baseUrl.trimEnd('/')}/Users/AuthenticateByName"
@@ -217,6 +232,18 @@ object JellyfinEndpoints {
 
     fun itemDownload(baseUrl: String, itemId: String): String =
         "${baseUrl.trimEnd('/')}/Items/$itemId/Download"
+
+    fun sessionProgress(baseUrl: String): String =
+        "${baseUrl.trimEnd('/')}/Sessions/Playing/Progress"
+
+    fun sessionStopped(baseUrl: String): String =
+        "${baseUrl.trimEnd('/')}/Sessions/Playing/Stopped"
+
+    fun markPlayed(baseUrl: String, userId: String, itemId: String): String =
+        "${baseUrl.trimEnd('/')}/Users/$userId/PlayedItems/$itemId"
+
+    fun markUnplayed(baseUrl: String, userId: String, itemId: String): String =
+        "${baseUrl.trimEnd('/')}/Users/$userId/PlayedItems/$itemId"
 
     fun primaryImage(
         baseUrl: String,

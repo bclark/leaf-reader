@@ -48,12 +48,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.digitalbc.leafreader.data.jellyfin.JellyfinItem
+import net.digitalbc.leafreader.data.jellyfin.JellyfinProgress
 import net.digitalbc.leafreader.data.jellyfin.JellyfinView
 import net.digitalbc.leafreader.ui.brand.OchreBadge
 import net.digitalbc.leafreader.ui.brand.halftone
 import net.digitalbc.leafreader.ui.theme.Anton
 import net.digitalbc.leafreader.ui.theme.Archivo
-import net.digitalbc.leafreader.ui.theme.Crimson
 import net.digitalbc.leafreader.ui.theme.DeepInk
 import net.digitalbc.leafreader.ui.theme.Ink
 import net.digitalbc.leafreader.ui.theme.LeafAccent
@@ -237,7 +237,7 @@ fun JellyfinBrowserScreen(
                                 "Failed to load: ${browser.failure}",
                                 fontFamily = Archivo,
                                 fontWeight = FontWeight.Bold,
-                                color = Crimson,
+                                color = MaterialTheme.colorScheme.error,
                             )
                             Box(
                                 modifier = Modifier
@@ -381,7 +381,7 @@ fun JellyfinBrowserScreen(
                                 "CANCEL",
                                 fontFamily = Anton,
                                 fontSize = 12.sp,
-                                color = Crimson,
+                                color = MaterialTheme.colorScheme.error,
                                 modifier = Modifier
                                     .clickable { viewModel.cancelImport() }
                                     .padding(4.dp),
@@ -501,6 +501,22 @@ private fun JellyfinItemRow(
                             fontFamily = Archivo,
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (item.played) {
+                        Text(
+                            "•  READ",
+                            fontFamily = Archivo,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 10.sp,
+                            color = LeafAccent,
+                        )
+                    } else if (item.playbackPositionTicks > 0L) {
+                        Text(
+                            "•  PAGE ${JellyfinProgress.ticksToPage(item.playbackPositionTicks) + 1}",
+                            fontFamily = Archivo,
+                            fontSize = 10.sp,
+                            color = Ochre,
                         )
                     }
                 }

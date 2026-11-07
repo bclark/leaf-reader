@@ -44,7 +44,9 @@ class JellyfinClient(
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
-        .addInterceptor(CrossOriginAuthStripInterceptor())
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .addInterceptor(SafeRedirectInterceptor())
         .build()
 
     suspend fun authenticate(
@@ -164,6 +166,10 @@ class JellyfinClient(
                     val parentVal = if (obj.has("ParentId")) obj.getString("ParentId").ifBlank { null } else parentId
                     val seriesVal = if (obj.has("SeriesName")) obj.getString("SeriesName").ifBlank { null } else null
 
+                    val userData = obj.optJSONObject("UserData")
+                    val playbackTicks = userData?.optLong("PlaybackPositionTicks", 0L) ?: 0L
+                    val played = userData?.optBoolean("Played", false) ?: false
+
                     items.add(
                         JellyfinItem(
                             id = obj.getString("Id"),
@@ -176,6 +182,8 @@ class JellyfinClient(
                             parentId = parentVal,
                             seriesName = seriesVal,
                             productionYear = if (obj.has("ProductionYear")) obj.getInt("ProductionYear") else null,
+                            playbackPositionTicks = playbackTicks,
+                            played = played,
                         )
                     )
                 }
@@ -299,6 +307,58 @@ class JellyfinClient(
         }
     }
 
+    suspend fun reportProgress(
+        config: JellyfinServerConfig,
+        auth: JellyfinAuth,
+        itemId: String,
+        pageIndex: Int,
+    ): Unit = withContext(Dispatchers.IO) {
+        val url = JellyfinEndpoints.sessionProgress(config.baseUrl)
+        val jsonPayload = JSONObject().apply {
+            put("ItemId", itemId)
+            put("PositionTicks", JellyfinProgress.pageToTicks(pageIndex))
+            put("CanSeek", true)
+            put("IsPaused", false)
+            put("PlayMethod", "DirectPlay")
+        }.toString()
+
+        val request = authorizedRequestBuilder(url, auth)
+            .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
+
+        executeRequest(request) { response ->
+            if (!response.isSuccessful) {
+                mapHttpError(response.code, "Failed to report progress to Jellyfin")
+            }
+        }
+    }
+
+    suspend fun markPlayedStatus(
+        config: JellyfinServerConfig,
+        auth: JellyfinAuth,
+        itemId: String,
+        played: Boolean,
+    ): Unit = withContext(Dispatchers.IO) {
+        val url = if (played) {
+            JellyfinEndpoints.markPlayed(config.baseUrl, auth.userId, itemId)
+        } else {
+            JellyfinEndpoints.markUnplayed(config.baseUrl, auth.userId, itemId)
+        }
+
+        val requestBuilder = authorizedRequestBuilder(url, auth)
+        val request = if (played) {
+            requestBuilder.post(ByteArray(0).toRequestBody(null)).build()
+        } else {
+            requestBuilder.delete().build()
+        }
+
+        executeRequest(request) { response ->
+            if (!response.isSuccessful) {
+                mapHttpError(response.code, "Failed to update played status on Jellyfin")
+            }
+        }
+    }
+
     private fun authorizedRequestBuilder(url: String, auth: JellyfinAuth): Request.Builder {
         val header = JellyfinEndpoints.authHeader(
             deviceId = deviceId,
@@ -341,28 +401,81 @@ class JellyfinClient(
         return JellyfinException(kind, t.message ?: "Network operation failed", t)
     }
 
-    private class CrossOriginAuthStripInterceptor : Interceptor {
+    private class SafeRedirectInterceptor : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
-            val request = chain.request()
-            val initialHost = request.url.host
-            val response = chain.proceed(request)
+            var request = chain.request()
+            var response = chain.proceed(request)
+            var redirectCount = 0
 
-            // If response is a redirect to a different host, strip Authorization
-            if (response.isRedirect) {
-                val location = response.header("Location")
-                if (location != null) {
-                    val redirectUrl = request.url.resolve(location)
-                    if (redirectUrl != null && !redirectUrl.host.equals(initialHost, ignoreCase = true)) {
-                        val strippedRequest = response.request.newBuilder()
-                            .removeHeader("Authorization")
-                            .removeHeader("X-Emby-Authorization")
-                            .url(redirectUrl)
-                            .build()
-                        return chain.proceed(strippedRequest)
-                    }
+            while (response.isRedirect) {
+                if (redirectCount >= MAX_REDIRECTS) {
+                    response.close()
+                    throw JellyfinException(JellyfinFailureKind.INVALID_CONFIGURATION, "Too many redirects")
                 }
+                redirectCount++
+
+                // Never follow redirects on POST requests (prevent credential or payload leaking)
+                if (request.method.equals("POST", ignoreCase = true)) {
+                    response.close()
+                    throw JellyfinException(
+                        JellyfinFailureKind.AUTHENTICATION,
+                        "Redirect on POST request rejected for credential security (HTTP ${response.code})"
+                    )
+                }
+
+                val location = response.header("Location")
+                if (location.isNullOrBlank()) {
+                    return response
+                }
+
+                val targetUrl = request.url.resolve(location)
+                if (targetUrl == null) {
+                    response.close()
+                    throw JellyfinException(JellyfinFailureKind.INVALID_CONFIGURATION, "Invalid redirect Location: $location")
+                }
+
+                // Block HTTPS -> HTTP downgrade
+                if (request.url.isHttps && !targetUrl.isHttps) {
+                    response.close()
+                    throw JellyfinException(
+                        JellyfinFailureKind.INVALID_CONFIGURATION,
+                        "Insecure HTTPS-to-HTTP redirect downgrade rejected"
+                    )
+                }
+
+                val isSameOrigin = request.url.scheme.equals(targetUrl.scheme, ignoreCase = true) &&
+                        request.url.host.equals(targetUrl.host, ignoreCase = true) &&
+                        request.url.port == targetUrl.port
+
+                val nextRequestBuilder = request.newBuilder().url(targetUrl)
+
+                // If cross-origin, strip sensitive headers
+                if (!isSameOrigin) {
+                    nextRequestBuilder
+                        .removeHeader("Authorization")
+                        .removeHeader("X-Emby-Authorization")
+                        .removeHeader("X-MediaBrowser-Token")
+                }
+
+                // If the redirect target is unencrypted HTTP, ensure it is restricted to local network
+                if (!targetUrl.isHttps && !JellyfinServerConfig.isLocalNetworkHost(targetUrl.host)) {
+                    response.close()
+                    throw JellyfinException(
+                        JellyfinFailureKind.INVALID_CONFIGURATION,
+                        "Redirect to unencrypted HTTP on remote host rejected: ${targetUrl.host}"
+                    )
+                }
+
+                response.close()
+                request = nextRequestBuilder.build()
+                response = chain.proceed(request)
             }
+
             return response
+        }
+
+        companion object {
+            private const val MAX_REDIRECTS = 3
         }
     }
 

@@ -21,7 +21,10 @@ import javax.crypto.spec.SecretKeySpec
  * - Credentials reside in an app-private file excluded from backups and device transfer.
  * - Calling [clear] securely deletes the encrypted token file and cache.
  */
-class JellyfinCredentialStore(private val context: Context) {
+class JellyfinCredentialStore(
+    private val context: Context,
+    private val keyProvider: (() -> SecretKey)? = null,
+) {
 
     private val authFile: File
         get() = File(context.filesDir, "jellyfin_auth.enc")
@@ -90,27 +93,26 @@ class JellyfinCredentialStore(private val context: Context) {
     }
 
     private fun getSecretKey(): SecretKey {
-        return try {
-            val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-            if (!keyStore.containsAlias(KEY_ALIAS)) {
-                val keyGen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
-                val spec = KeyGenParameterSpec.Builder(
-                    KEY_ALIAS,
-                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-                )
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .setKeySize(256)
-                    .build()
-                keyGen.init(spec)
-                keyGen.generateKey()
-            }
-            (keyStore.getEntry(KEY_ALIAS, null) as KeyStore.SecretKeyEntry).secretKey
-        } catch (e: Exception) {
-            // Fallback for Robolectric or test environments where AndroidKeyStore provider is absent
-            val fallbackKeyBytes = "LeafJellyfinKeyFallback20261107!".toByteArray(Charsets.UTF_8)
-            SecretKeySpec(fallbackKeyBytes, "AES")
+        if (keyProvider != null) {
+            return keyProvider.invoke()
         }
+        val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+        if (!keyStore.containsAlias(KEY_ALIAS)) {
+            val keyGen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
+            val spec = KeyGenParameterSpec.Builder(
+                KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+            keyGen.init(spec)
+            keyGen.generateKey()
+        }
+        val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry
+            ?: throw IllegalStateException("Keystore entry for $KEY_ALIAS is not a SecretKeyEntry")
+        return entry.secretKey
     }
 
     private fun getEncryptCipher(): Cipher {

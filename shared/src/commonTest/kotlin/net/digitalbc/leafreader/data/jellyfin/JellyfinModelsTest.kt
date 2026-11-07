@@ -138,4 +138,20 @@ class JellyfinModelsTest {
             loginHeader,
         )
     }
+
+    @Test
+    fun progressTickConversions() {
+        assertEquals(0L, JellyfinProgress.pageToTicks(0))
+        assertEquals(10_000L, JellyfinProgress.pageToTicks(1))
+        assertEquals(50_000L, JellyfinProgress.pageToTicks(5))
+
+        assertEquals(0, JellyfinProgress.ticksToPage(0L))
+        assertEquals(1, JellyfinProgress.ticksToPage(10_000L))
+        assertEquals(5, JellyfinProgress.ticksToPage(50_000L))
+        assertEquals(5, JellyfinProgress.ticksToPage(59_999L))
+
+        // Clamping to maxPages
+        assertEquals(23, JellyfinProgress.ticksToPage(300_000L, maxPages = 24))
+        assertEquals(0, JellyfinProgress.ticksToPage(-10_000L, maxPages = 24))
+    }
 }

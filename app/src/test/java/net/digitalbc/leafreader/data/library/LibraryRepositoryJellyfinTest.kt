@@ -53,7 +53,8 @@ class LibraryRepositoryJellyfinTest {
         comicDao = db.comicDao()
         linkDao = db.remoteComicLinkDao()
         settings = AppSettings(context)
-        credStore = JellyfinCredentialStore(context)
+        val testKey = javax.crypto.spec.SecretKeySpec("LeafTestKey12345678901234567890!".toByteArray(), "AES")
+        credStore = JellyfinCredentialStore(context, keyProvider = { testKey })
         credStore.clear()
 
         val client = JellyfinClient(deviceId = "test-device", clientVersion = "0.3.7")
@@ -79,7 +80,7 @@ class LibraryRepositoryJellyfinTest {
 
     private fun baseUrl(): String = server.url("/").toString().trimEnd('/')
 
-    private fun createValidCbzBytes(): ByteArray {
+    private fun createValidCbzBytes(pageCount: Int = 1): ByteArray {
         val png1x1 = byteArrayOf(
             0x89.toByte(), 0x50.toByte(), 0x4e.toByte(), 0x47.toByte(), 0x0d.toByte(), 0x0a.toByte(), 0x1a.toByte(), 0x0a.toByte(),
             0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x0d.toByte(), 0x49.toByte(), 0x48.toByte(), 0x44.toByte(), 0x52.toByte(),
@@ -93,9 +94,11 @@ class LibraryRepositoryJellyfinTest {
         )
         val baos = ByteArrayOutputStream()
         ZipOutputStream(baos).use { zos ->
-            zos.putNextEntry(ZipEntry("001.png"))
-            zos.write(png1x1)
-            zos.closeEntry()
+            for (i in 1..pageCount) {
+                zos.putNextEntry(ZipEntry(String.format("page_%03d.png", i)))
+                zos.write(png1x1)
+                zos.closeEntry()
+            }
         }
         return baos.toByteArray()
     }
@@ -235,5 +238,207 @@ class LibraryRepositoryJellyfinTest {
         // Ensure no link or comic was inserted
         assertNull(linkDao.findLink("jellyfin", "srv", "u", "corrupt-1"))
         assertEquals(0, comicDao.getAll().size)
+    }
+
+    @Test
+    fun importRejectsTruncatedZipArchiveAndCleansUp() = runBlocking {
+        // ZIP magic bytes "PK\x03\x04" followed by incomplete bytes
+        val truncatedZip = byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0x0A, 0x00, 0x00, 0x00)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/octet-stream")
+                .setHeader("Content-Length", truncatedZip.size)
+                .setBody(okio.Buffer().write(truncatedZip))
+        )
+
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val item = JellyfinItem(
+            id = "truncated-1",
+            name = "Truncated.cbz",
+            isFolder = false,
+            container = "cbz",
+        )
+
+        val result = repository.importJellyfinComic(item)
+        assertFalse("Import of truncated archive must fail", result.isSuccess)
+        assertNull(linkDao.findLink("jellyfin", "srv", "u", "truncated-1"))
+        assertEquals(0, comicDao.getAll().size)
+    }
+
+    @Test
+    fun importJellyfinComicSeedsInitialProgressFromRemote() = runBlocking {
+        val cbzBytes = createValidCbzBytes(pageCount = 5)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/octet-stream")
+                .setHeader("Content-Length", cbzBytes.size)
+                .setBody(okio.Buffer().write(cbzBytes))
+        )
+
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val item = JellyfinItem(
+            id = "seed-item-1",
+            name = "SeedComic.cbz",
+            isFolder = false,
+            container = "cbz",
+            playbackPositionTicks = 30_000L, // page 3
+            played = false,
+        )
+
+        val result = repository.importJellyfinComic(item)
+        assertTrue(result.isSuccess)
+        val comicId = result.getOrThrow()
+        val comic = comicDao.getById(comicId)
+        assertNotNull(comic)
+        assertEquals(3, comic?.lastPage)
+    }
+
+    @Test
+    fun saveProgressSyncsJellyfinProgressForLinkedComic() = runBlocking {
+        val cbzBytes = createValidCbzBytes(pageCount = 10)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/octet-stream")
+                .setHeader("Content-Length", cbzBytes.size)
+                .setBody(okio.Buffer().write(cbzBytes))
+        )
+
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val item = JellyfinItem(
+            id = "sync-item-1",
+            name = "SyncComic.cbz",
+            isFolder = false,
+            container = "cbz",
+        )
+
+        val result = repository.importJellyfinComic(item)
+        assertTrue(result.isSuccess)
+        val comicId = result.getOrThrow()
+
+        // Enqueue progress response
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        // Save progress with debounceMs = 0L to execute immediately
+        repository.syncJellyfinProgressDirect(comicId, page = 4)
+
+        // Consume the download request first
+        server.takeRequest()
+
+        // Now take the progress sync request
+        val recorded = server.takeRequest()
+        assertEquals("/Sessions/Playing/Progress", recorded.path)
+        assertEquals("POST", recorded.method)
+        val bodyStr = recorded.body.readUtf8()
+        val json = org.json.JSONObject(bodyStr)
+        assertEquals("sync-item-1", json.getString("ItemId"))
+        assertEquals(40000L, json.getLong("PositionTicks"))
+    }
+
+    @Test
+    fun saveProgressMarksPlayedWhenReachingLastPage() = runBlocking {
+        val cbzBytes = createValidCbzBytes(pageCount = 5)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/octet-stream")
+                .setHeader("Content-Length", cbzBytes.size)
+                .setBody(okio.Buffer().write(cbzBytes))
+        )
+
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val item = JellyfinItem(
+            id = "last-page-item",
+            name = "LastPage.cbz",
+            isFolder = false,
+            container = "cbz",
+        )
+
+        val result = repository.importJellyfinComic(item)
+        assertTrue(result.isSuccess)
+        val comicId = result.getOrThrow()
+
+        // Enqueue progress response and mark played response
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+
+        // Page 4 is the last page (5 pages total, 0-indexed)
+        repository.syncJellyfinProgressDirect(comicId, page = 4)
+
+        // Download request
+        server.takeRequest()
+
+        // 1. Progress request
+        val progressReq = server.takeRequest()
+        assertEquals("/Sessions/Playing/Progress", progressReq.path)
+
+        // 2. Mark played request
+        val playedReq = server.takeRequest()
+        assertEquals("/Users/u/PlayedItems/last-page-item", playedReq.path)
+        assertEquals("POST", playedReq.method)
+    }
+
+    @Test
+    fun saveProgressNeverFailsEvenIfJellyfinOffline() = runBlocking {
+        val cbzBytes = createValidCbzBytes(pageCount = 5)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/octet-stream")
+                .setHeader("Content-Length", cbzBytes.size)
+                .setBody(okio.Buffer().write(cbzBytes))
+        )
+
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val item = JellyfinItem(
+            id = "offline-item",
+            name = "Offline.cbz",
+            isFolder = false,
+            container = "cbz",
+        )
+
+        val result = repository.importJellyfinComic(item)
+        assertTrue(result.isSuccess)
+        val comicId = result.getOrThrow()
+
+        // Consume the download request
+        server.takeRequest()
+
+        // Server fails with 500 Server Error
+        server.enqueue(MockResponse().setResponseCode(500).setBody("Server down"))
+
+        // Calling saveProgress must update local DB and never throw
+        val rowsUpdated = repository.saveProgress(comicId, page = 2, slot = 0)
+        assertEquals(1, rowsUpdated)
+
+        val comic = comicDao.getById(comicId)
+        assertEquals(2, comic?.lastPage)
     }
 }

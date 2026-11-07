@@ -235,9 +235,62 @@ class JellyfinClientTest {
     }
 
     @Test
+    fun postAuthenticationRedirectIsRejected() = runBlocking {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(302)
+                .setHeader("Location", "http://127.0.0.1:8096/other/endpoint")
+        )
+        val config = JellyfinServerConfig(baseUrl = baseUrl(), allowInsecureHttp = true)
+        try {
+            client.authenticate(config, "bclark", "mypassword")
+            fail("Expected JellyfinException for POST redirect")
+        } catch (e: JellyfinException) {
+            assertEquals(JellyfinFailureKind.AUTHENTICATION, e.kind)
+            assertTrue(e.message?.contains("POST") == true)
+        }
+    }
+
+    @Test
+    fun crossOriginRedirectStripsAuthorizationHeaders() = runBlocking {
+        val redirectServer = MockWebServer()
+        redirectServer.start()
+        try {
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(302)
+                    .setHeader("Location", "${redirectServer.url("/target/cover.jpg")}")
+            )
+            redirectServer.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "image/jpeg")
+                    .setBody(okio.Buffer().write(ByteArray(16) { 1 }))
+            )
+
+            val config = JellyfinServerConfig(baseUrl = baseUrl(), allowInsecureHttp = true)
+            val auth = JellyfinAuth("secret_access_token", "user1", "srv1", "Bryan")
+
+            client.loadCoverBitmap(config, auth, "item123")
+
+            val initialReq = server.takeRequest()
+            assertNotNull(initialReq.getHeader("Authorization"))
+            assertNotNull(initialReq.getHeader("X-Emby-Authorization"))
+
+            val redirectedReq = redirectServer.takeRequest()
+            // Headers must be stripped across differing origin ports
+            assertNull("Authorization must be stripped on cross-origin redirect", redirectedReq.getHeader("Authorization"))
+            assertNull("X-Emby-Authorization must be stripped on cross-origin redirect", redirectedReq.getHeader("X-Emby-Authorization"))
+        } finally {
+            redirectServer.shutdown()
+        }
+    }
+
+    @Test
     fun credentialStoreEncryptAndDecryptRoundTrip() {
         val context = RuntimeEnvironment.getApplication()
-        val store = JellyfinCredentialStore(context)
+        val testKey = javax.crypto.spec.SecretKeySpec("LeafTestKey12345678901234567890!".toByteArray(), "AES")
+        val store = JellyfinCredentialStore(context, keyProvider = { testKey })
         store.clear()
 
         assertNull(store.loadAuth())
@@ -261,5 +314,118 @@ class JellyfinClientTest {
 
         store.clear()
         assertNull(store.loadAuth())
+    }
+
+    @Test
+    fun credentialStoreFailsClosedWhenKeystoreUnavailable() {
+        val context = RuntimeEnvironment.getApplication()
+        // No keyProvider supplied: AndroidKeyStore provider is absent in standard JVM/Robolectric
+        val store = JellyfinCredentialStore(context)
+        store.clear()
+
+        val auth = JellyfinAuth(
+            accessToken = "super-secret-token",
+            userId = "user-1",
+            serverId = "server-99",
+            username = "leaf_reader",
+        )
+        try {
+            store.saveAuth(auth)
+            fail("Expected exception when Keystore is unavailable")
+        } catch (e: Exception) {
+            // Must fail closed without writing unencrypted or fallback-encrypted data
+            assertNull("Auth file must not be loadable after failure", store.loadAuth())
+        }
+    }
+
+    @Test
+    fun getItemsParsesUserDataPlaybackTicksAndPlayed() = runBlocking {
+        val mockJson = """
+            {
+                "TotalRecordCount": 2,
+                "Items": [
+                    {
+                        "Id": "item-read",
+                        "Name": "Read Comic.cbz",
+                        "IsFolder": false,
+                        "Type": "Book",
+                        "Container": "cbz",
+                        "UserData": {
+                            "PlaybackPositionTicks": 500000,
+                            "Played": true
+                        }
+                    },
+                    {
+                        "Id": "item-in-progress",
+                        "Name": "Reading Comic.cbz",
+                        "IsFolder": false,
+                        "Type": "Book",
+                        "Container": "cbz",
+                        "UserData": {
+                            "PlaybackPositionTicks": 120000,
+                            "Played": false
+                        }
+                    }
+                ]
+            }
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(mockJson))
+
+        val config = JellyfinServerConfig(baseUrl = baseUrl(), allowInsecureHttp = true)
+        val auth = JellyfinAuth("tok", "usr", "srv", "Bryan")
+        val result = client.getItems(config, auth, parentId = "v1")
+
+        assertEquals(2, result.items.size)
+        assertTrue(result.items[0].played)
+        assertEquals(500000L, result.items[0].playbackPositionTicks)
+
+        assertFalse(result.items[1].played)
+        assertEquals(120000L, result.items[1].playbackPositionTicks)
+    }
+
+    @Test
+    fun reportProgressSendsCorrectTicksPayload() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        val config = JellyfinServerConfig(baseUrl = baseUrl(), allowInsecureHttp = true)
+        val auth = JellyfinAuth("tok", "usr", "srv", "Bryan")
+        client.reportProgress(config, auth, itemId = "item-xyz", pageIndex = 14)
+
+        val recorded = server.takeRequest()
+        assertEquals("/Sessions/Playing/Progress", recorded.path)
+        assertEquals("POST", recorded.method)
+        val bodyStr = recorded.body.readUtf8()
+        val json = org.json.JSONObject(bodyStr)
+        assertEquals("item-xyz", json.getString("ItemId"))
+        assertEquals(140000L, json.getLong("PositionTicks"))
+        assertEquals(true, json.getBoolean("CanSeek"))
+        assertEquals(false, json.getBoolean("IsPaused"))
+        assertEquals("DirectPlay", json.getString("PlayMethod"))
+    }
+
+    @Test
+    fun markPlayedSendsPostToPlayedItems() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+
+        val config = JellyfinServerConfig(baseUrl = baseUrl(), allowInsecureHttp = true)
+        val auth = JellyfinAuth("tok", "usr-1", "srv", "Bryan")
+        client.markPlayedStatus(config, auth, itemId = "item-xyz", played = true)
+
+        val recorded = server.takeRequest()
+        assertEquals("/Users/usr-1/PlayedItems/item-xyz", recorded.path)
+        assertEquals("POST", recorded.method)
+    }
+
+    @Test
+    fun markUnplayedSendsDeleteToPlayedItems() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        val config = JellyfinServerConfig(baseUrl = baseUrl(), allowInsecureHttp = true)
+        val auth = JellyfinAuth("tok", "usr-1", "srv", "Bryan")
+        client.markPlayedStatus(config, auth, itemId = "item-xyz", played = false)
+
+        val recorded = server.takeRequest()
+        assertEquals("/Users/usr-1/PlayedItems/item-xyz", recorded.path)
+        assertEquals("DELETE", recorded.method)
     }
 }

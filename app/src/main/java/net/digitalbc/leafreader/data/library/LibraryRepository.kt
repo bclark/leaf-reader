@@ -31,6 +31,7 @@ import net.digitalbc.leafreader.data.jellyfin.JellyfinClient
 import net.digitalbc.leafreader.data.jellyfin.JellyfinCredentialStore
 import net.digitalbc.leafreader.data.jellyfin.JellyfinItem
 import net.digitalbc.leafreader.data.jellyfin.JellyfinItemsResult
+import net.digitalbc.leafreader.data.jellyfin.JellyfinProgress
 import net.digitalbc.leafreader.data.jellyfin.JellyfinServerConfig
 import net.digitalbc.leafreader.data.jellyfin.JellyfinTransferProgress
 import net.digitalbc.leafreader.data.jellyfin.JellyfinView
@@ -42,11 +43,16 @@ import kotlinx.coroutines.isActive
 import net.digitalbc.leafreader.data.smb.SmbEntry
 import net.digitalbc.leafreader.data.smb.SmbTransferProgress
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
@@ -69,7 +75,10 @@ class LibraryRepository(
     val remoteComicLinkDao: RemoteComicLinkDao? = db?.remoteComicLinkDao(),
     val jellyfinClient: JellyfinClient = JellyfinClient(settings.jellyfinDeviceId),
     val jellyfinCredentialStore: JellyfinCredentialStore = JellyfinCredentialStore(context),
+    val jellyfinSyncScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
+    private val progressSyncJobs = ConcurrentHashMap<Long, Job>()
+
     val comics: Flow<List<ComicEntity>> = dao.observeAll()
 
     val readingLists: Flow<List<ReadingListEntity>> =
@@ -159,8 +168,69 @@ class LibraryRepository(
 
     suspend fun saveProgress(id: Long, page: Int, slot: Int): Int =
         withContext(NonCancellable + Dispatchers.IO) {
-            dao.updateProgress(id, page, slot, System.currentTimeMillis())
+            val updated = dao.updateProgress(id, page, slot, System.currentTimeMillis())
+            triggerJellyfinProgressSync(id, page)
+            updated
         }
+
+    fun triggerJellyfinProgressSync(comicId: Long, page: Int, debounceMs: Long = 1500L): Job? {
+        val linkDao = remoteComicLinkDao ?: return null
+        val auth = jellyfinCredentialStore.loadAuth() ?: return null
+        val serverUrl = settings.jellyfinServerUrl
+        if (serverUrl.isBlank()) return null
+        val config = runCatching { JellyfinServerConfig(serverUrl, settings.jellyfinAllowInsecureHttp) }.getOrNull() ?: return null
+
+        progressSyncJobs[comicId]?.cancel()
+
+        val job = jellyfinSyncScope.launch {
+            try {
+                if (debounceMs > 0L) {
+                    delay(debounceMs)
+                }
+                val link = linkDao.findByComicId(comicId) ?: return@launch
+                if (link.provider != "jellyfin" || link.serverId != auth.serverId || link.userId != auth.userId) {
+                    return@launch
+                }
+                val comic = dao.getById(comicId) ?: return@launch
+                val isCompleted = comic.pageCount > 0 && page >= comic.pageCount - 1
+
+                jellyfinClient.reportProgress(
+                    config = config,
+                    auth = auth,
+                    itemId = link.itemId,
+                    pageIndex = page,
+                )
+
+                if (isCompleted) {
+                    jellyfinClient.markPlayedStatus(
+                        config = config,
+                        auth = auth,
+                        itemId = link.itemId,
+                        played = true,
+                    )
+                } else if (page == 0) {
+                    jellyfinClient.markPlayedStatus(
+                        config = config,
+                        auth = auth,
+                        itemId = link.itemId,
+                        played = false,
+                    )
+                }
+            } catch (c: CancellationException) {
+                // Debounced or cancelled
+            } catch (e: Exception) {
+                Log.d(TAG, "Background Jellyfin progress sync skipped/failed for comic $comicId: ${e.message}")
+            } finally {
+                progressSyncJobs.remove(comicId, coroutineContext[Job])
+            }
+        }
+        progressSyncJobs[comicId] = job
+        return job
+    }
+
+    suspend fun syncJellyfinProgressDirect(comicId: Long, page: Int) {
+        triggerJellyfinProgressSync(comicId, page, debounceMs = 0L)?.join()
+    }
 
     suspend fun updateComicPageCount(id: Long, pageCount: Int): Int =
         withContext(NonCancellable + Dispatchers.IO) {
@@ -522,11 +592,23 @@ class LibraryRepository(
                 throw CancellationException("Jellyfin import cancelled")
             }
 
-            // Verify downloaded archive before promoting
+            // Verify downloaded archive integrity before promoting
             val detectedFormat = ComicArchiveFactory.detectFormat(partFile)
             if (detectedFormat == ComicFormat.UNKNOWN) {
                 partFile.delete()
                 throw UnsupportedComicException("Downloaded file is not a supported comic or PDF archive")
+            }
+            try {
+                ComicArchiveFactory.open(partFile).use { archive ->
+                    if (archive.pageCount <= 0) {
+                        throw UnsupportedComicException("Downloaded archive contains no readable pages")
+                    }
+                    // Test reading the first page to ensure archive is not truncated
+                    archive.readPage(0)
+                }
+            } catch (e: Exception) {
+                partFile.delete()
+                throw UnsupportedComicException("Downloaded comic archive is corrupt or truncated: ${e.message}")
             }
 
             // Atomically rename .part file to final destination
@@ -536,27 +618,51 @@ class LibraryRepository(
             }
 
             val result = indexCopiedFile(dest, coversDir, token, title, source = "jellyfin")
-            result.onSuccess { comicId ->
-                remoteComicLinkDao?.insert(
-                    RemoteComicLinkEntity(
-                        comicId = comicId,
-                        provider = "jellyfin",
-                        serverId = auth.serverId,
-                        userId = auth.userId,
-                        itemId = item.id,
-                        parentId = item.parentId,
-                        downloadedAt = System.currentTimeMillis(),
-                        remoteVersionTag = item.imageTag,
-                        remoteName = item.name,
+            if (result.isSuccess) {
+                val comicId = result.getOrThrow()
+                try {
+                    remoteComicLinkDao?.insert(
+                        RemoteComicLinkEntity(
+                            comicId = comicId,
+                            provider = "jellyfin",
+                            serverId = auth.serverId,
+                            userId = auth.userId,
+                            itemId = item.id,
+                            parentId = item.parentId,
+                            downloadedAt = System.currentTimeMillis(),
+                            remoteVersionTag = item.imageTag,
+                            remoteName = item.name,
+                        )
                     )
-                )
-            }.onFailure {
+
+                    // Seed initial progress from Jellyfin if remote position or played status exists
+                    val importedComic = dao.getById(comicId)
+                    if (importedComic != null && (item.playbackPositionTicks > 0L || item.played)) {
+                        val initialPage = if (item.played) {
+                            (importedComic.pageCount - 1).coerceAtLeast(0)
+                        } else {
+                            JellyfinProgress.ticksToPage(item.playbackPositionTicks, importedComic.pageCount)
+                        }
+                        if (initialPage > 0) {
+                            dao.updateProgress(comicId, initialPage, 0, System.currentTimeMillis())
+                        }
+                    }
+                } catch (linkEx: Throwable) {
+                    // Complete rollback: remove comic from DB, remove cover, remove downloaded file
+                    dao.delete(comicId)
+                    dest.delete()
+                    File(coversDir, "$token.jpg").delete()
+                    throw linkEx
+                }
+            } else {
                 dest.delete()
+                File(coversDir, "$token.jpg").delete()
             }
             result
         } catch (t: Throwable) {
             partFile.delete()
             dest.delete()
+            File(coversDir, "$token.jpg").delete()
             if (t is CancellationException) throw t
             Log.e(TAG, "Jellyfin download/import failed: ${t.message}")
             Result.failure(t)
@@ -580,22 +686,29 @@ class LibraryRepository(
             )
         }
 
-        val (pageCount, coverPath, parsedMeta) = ComicArchiveFactory.open(dest).use { archive ->
-            val count = archive.pageCount
-            if (count == 0) return@use Triple(0, null, null)
-            val coverFile = File(coversDir, "$token.jpg")
-            val saved = runCatching { saveCover(archive.readPage(0), coverFile) }
-                .getOrDefault(false)
-            val xml = archive.readComicInfoXml()
-            val meta = if (xml != null) {
-                ComicMetadataParser.parseComicInfoXml(xml)
-            } else {
-                ComicMetadataParser.parseFilename(title)
+        val coverFile = File(coversDir, "$token.jpg")
+        val (pageCount, coverPath, parsedMeta) = try {
+            ComicArchiveFactory.open(dest).use { archive ->
+                val count = archive.pageCount
+                if (count == 0) return@use Triple(0, null, null)
+                val saved = runCatching { saveCover(archive.readPage(0), coverFile) }
+                    .getOrDefault(false)
+                val xml = archive.readComicInfoXml()
+                val meta = if (xml != null) {
+                    ComicMetadataParser.parseComicInfoXml(xml)
+                } else {
+                    ComicMetadataParser.parseFilename(title)
+                }
+                Triple(count, coverFile.absolutePath.takeIf { saved }, meta)
             }
-            Triple(count, coverFile.absolutePath.takeIf { saved }, meta)
+        } catch (e: Exception) {
+            coverFile.delete()
+            dest.delete()
+            return Result.failure(e)
         }
 
         if (pageCount == 0) {
+            coverFile.delete()
             dest.delete()
             return Result.failure(
                 UnsupportedComicException("This archive has no readable pages."),
