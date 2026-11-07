@@ -14,13 +14,14 @@ This document details all third-party software libraries, native binaries, fonts
 | **Kotlin Standard Library & Coroutines** | Apache-2.0 | Android / iOS / Shared | Yes | Retain license notice. © JetBrains / Kotlin Foundation |
 | **Apache Commons Compress** (`org.apache.commons:commons-compress:1.27.1`) | Apache-2.0 | Android | Yes (bytecode) | Retain Apache 2.0 license & NOTICE. © The Apache Software Foundation |
 | **SMBJ** (`com.hierynomus:smbj:0.13.0`) | Apache-2.0 | Android | Yes (bytecode) | Retain Apache 2.0 license. © Jeroen van Erp (Hierynomus) |
-| **LiteRT / TensorFlow Lite** (`litert:1.4.2` / `TensorFlowLiteSwift:2.17.0`) | Apache-2.0 | Android / iOS | Yes (native `.so` / `.framework`) | Retain Apache 2.0 license. © The TensorFlow / LiteRT Authors |
+| **OkHttp** (`com.squareup.okhttp3:okhttp:4.12.0`) | Apache-2.0 | Android | Yes (bytecode) | Retain Apache 2.0 license & NOTICE. © Square, Inc. |
+| **LiteRT / TensorFlow Lite** (`litert:1.4.2` / `TensorFlowLiteSwift:2.17.0`) | Apache-2.0 | Android / iOS (optional) | Excluded in whole-page release builds | Retain Apache 2.0 license when bundled. © The TensorFlow / LiteRT Authors |
 | **7-Zip-JBinding-4Android** (`Release-16.02-2.03`) | **GNU LGPL-2.1** (+ unRAR, BSD) | Android ONLY | Yes (native `.so`) | Retain LGPL-2.1 notice & unRAR restriction; allow library replacement (§6). See LGPL section below. |
 | **ZIPFoundation** (`0.9.19`) | MIT | iOS ONLY | Yes (compiled) | Retain MIT copyright notice. © Thomas Weichselbaumer |
 | **libarchive** (`libarchive-for-swift:1.0.0`) | BSD 2-Clause / 3-Clause / Public Domain | iOS ONLY | Yes (compiled) | Retain BSD license notice. © Tim Kientzle et al. |
 | **Anton Font** (`Anton-Regular.ttf`) | OFL-1.1 | Android / iOS | Yes (asset) | Retain SIL OFL text; do not sell font standalone. © Vernon Adams |
 | **Archivo Font** (`Archivo-Variable.ttf`) | OFL-1.1 | Android / iOS | Yes (asset) | Retain SIL OFL text; do not sell font standalone. © Omnibus-Type |
-| **Panel Detection Model** (`manga_panel_detector_int8.tflite`) | **AGPL-3.0** (Derived from Ultralytics YOLO) | Android / iOS | Yes (asset) | Trained on Manga109-s + COMICS. Subject to AGPL-3.0 copyleft & Manga109 disclosure. See Model section below. |
+| **Panel Detection Model** (`manga_panel_detector_int8.tflite`) | **AGPL-3.0** (Derived from Ultralytics YOLO) | Repository / training only | No (excluded from Android & iOS release builds) | Trained on Manga109-s + COMICS. Excluded from packaged app binaries. See Model section below. |
 
 MPL-2.0 (Leaf) is compatible with combining larger works governed by the above licenses (MPL-2.0 §3.3).
 
@@ -35,6 +36,7 @@ Full text: [`THIRD_PARTY_LICENSES/Apache-2.0.txt`](https://github.com/bclark/lea
 - **AndroidX & Jetpack Libraries**: `core-ktx:1.15.0`, `lifecycle-*:2.8.7`, `activity-compose:1.9.3`, `compose-bom:2024.12.01`, `navigation-compose:2.8.5`, `documentfile:1.0.1`, `room-*:2.7.0-alpha13` — © The Android Open Source Project.
 - **Apache Commons Compress** (`1.27.1`) — © The Apache Software Foundation. Used for CBZ/ZIP archive reading on Android.
 - **SMBJ** (`0.13.0`) — © Jeroen van Erp (Hierynomus). Used for SMB network drive connectivity on Android.
+- **OkHttp** (`4.12.0`) — © Square, Inc. Used for Jellyfin client network connectivity and authenticated downloads on Android.
 - **Google LiteRT / TensorFlow Lite**:
   - Android: `com.google.ai.edge.litert:litert:1.4.2` — © Google LLC / The TensorFlow Authors.
   - iOS: `TensorFlowLiteSwift` / `TensorFlowLiteC` (`2.17.0`) via CocoaPods — © Google LLC / The TensorFlow Authors.

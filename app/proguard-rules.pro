@@ -1,4 +1,4 @@
-# Keep all JNI native method signatures (TFLite, 7-Zip-JBinding).
+# Keep all JNI native method signatures (7-Zip-JBinding).
 -keepclasseswithmembernames class * {
     native <methods>;
 }
@@ -17,11 +17,9 @@
 -dontwarn javax.el.**
 -dontwarn net.engio.mbassy.**
 
-# TensorFlow Lite / LiteRT (same org.tensorflow.lite package)
--keep class org.tensorflow.lite.** { *; }
--dontwarn org.tensorflow.lite.**
--keep class com.google.ai.edge.litert.** { *; }
--dontwarn com.google.ai.edge.litert.**
+# okhttp
+-dontwarn okhttp3.**
+-dontwarn okio.**
 
 # Keep annotation/signature metadata that Room and reflection-based code rely on.
 -keepattributes Signature,InnerClasses,EnclosingMethod,RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations

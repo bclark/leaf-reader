@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- External tip/donation links are enabled in F-Droid distribution. -->
+    <bool name="enable_external_tips">true</bool>
+</resources>

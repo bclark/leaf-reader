@@ -80,6 +80,54 @@ class AppSettings internal constructor(private val prefs: android.content.Shared
     val hasSmbConfig: Boolean
         get() = smbHost.isNotBlank() && smbShare.isNotBlank()
 
+    var jellyfinServerUrl: String
+        get() = prefs.getString(KEY_JELLYFIN_URL, "") ?: ""
+        set(value) { prefs.edit().putString(KEY_JELLYFIN_URL, value.trim()).apply() }
+
+    var jellyfinAllowInsecureHttp: Boolean
+        get() = prefs.getBoolean(KEY_JELLYFIN_ALLOW_HTTP, false)
+        set(value) { prefs.edit().putBoolean(KEY_JELLYFIN_ALLOW_HTTP, value).apply() }
+
+    var jellyfinUsername: String
+        get() = prefs.getString(KEY_JELLYFIN_USER, "") ?: ""
+        set(value) { prefs.edit().putString(KEY_JELLYFIN_USER, value.trim()).apply() }
+
+    var jellyfinUserId: String
+        get() = prefs.getString(KEY_JELLYFIN_USER_ID, "") ?: ""
+        set(value) { prefs.edit().putString(KEY_JELLYFIN_USER_ID, value.trim()).apply() }
+
+    var jellyfinServerId: String
+        get() = prefs.getString(KEY_JELLYFIN_SERVER_ID, "") ?: ""
+        set(value) { prefs.edit().putString(KEY_JELLYFIN_SERVER_ID, value.trim()).apply() }
+
+    var jellyfinServerName: String
+        get() = prefs.getString(KEY_JELLYFIN_SERVER_NAME, "") ?: ""
+        set(value) { prefs.edit().putString(KEY_JELLYFIN_SERVER_NAME, value.trim()).apply() }
+
+    val jellyfinDeviceId: String
+        get() {
+            var id = prefs.getString(KEY_JELLYFIN_DEVICE_ID, null)
+            if (id.isNullOrBlank()) {
+                id = java.util.UUID.randomUUID().toString()
+                prefs.edit().putString(KEY_JELLYFIN_DEVICE_ID, id).apply()
+            }
+            return id
+        }
+
+    val hasJellyfinConfig: Boolean
+        get() = jellyfinServerUrl.isNotBlank() && jellyfinUserId.isNotBlank()
+
+    fun clearJellyfinConfig() {
+        prefs.edit()
+            .remove(KEY_JELLYFIN_URL)
+            .remove(KEY_JELLYFIN_ALLOW_HTTP)
+            .remove(KEY_JELLYFIN_USER)
+            .remove(KEY_JELLYFIN_USER_ID)
+            .remove(KEY_JELLYFIN_SERVER_ID)
+            .remove(KEY_JELLYFIN_SERVER_NAME)
+            .apply()
+    }
+
     private companion object {
         fun loadPreferences(context: Context): android.content.SharedPreferences {
             val leafPrefs = context.getSharedPreferences("leaf.settings", Context.MODE_PRIVATE)
@@ -111,5 +159,12 @@ class AppSettings internal constructor(private val prefs: android.content.Shared
         const val KEY_SMB_SHARE = "smb_share"
         const val KEY_SMB_USER = "smb_user"
         const val KEY_SMB_PASS = "smb_pass"
+        const val KEY_JELLYFIN_URL = "jellyfin_url"
+        const val KEY_JELLYFIN_ALLOW_HTTP = "jellyfin_allow_http"
+        const val KEY_JELLYFIN_USER = "jellyfin_user"
+        const val KEY_JELLYFIN_USER_ID = "jellyfin_user_id"
+        const val KEY_JELLYFIN_SERVER_ID = "jellyfin_server_id"
+        const val KEY_JELLYFIN_SERVER_NAME = "jellyfin_server_name"
+        const val KEY_JELLYFIN_DEVICE_ID = "jellyfin_device_id"
     }
 }

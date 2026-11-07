@@ -49,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.booleanResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import net.digitalbc.leafreader.R
@@ -61,6 +62,7 @@ import net.digitalbc.leafreader.data.settings.ThemeMode
 import net.digitalbc.leafreader.data.settings.LauncherIcon
 import net.digitalbc.leafreader.data.smb.SmbClient
 import net.digitalbc.leafreader.data.smb.SmbErrors
+import net.digitalbc.leafreader.data.jellyfin.JellyfinServerConfig
 import kotlinx.coroutines.CancellationException
 import androidx.compose.material3.Surface
 import net.digitalbc.leafreader.ui.brand.LeafWordmark
@@ -122,6 +124,39 @@ fun MenuScreen(
     var smbTesting by remember { mutableStateOf(false) }
     var smbValid by remember { mutableStateOf<Boolean?>(null) }
     var smbStatusMessage by remember { mutableStateOf<String?>(null) }
+
+    var jellyfinUrl by remember { mutableStateOf(settings.jellyfinServerUrl) }
+    var jellyfinAllowHttp by remember { mutableStateOf(settings.jellyfinAllowInsecureHttp) }
+    var jellyfinUsername by remember { mutableStateOf(settings.jellyfinUsername) }
+    var jellyfinPassword by remember { mutableStateOf("") }
+    var jellyfinConnecting by remember { mutableStateOf(false) }
+    var jellyfinConnected by remember { mutableStateOf(settings.hasJellyfinConfig && repository?.getJellyfinAuth() != null) }
+    var jellyfinStatusMessage by remember { mutableStateOf<String?>(null) }
+    var showJellyfinHttpConfirmDialog by remember { mutableStateOf(false) }
+
+    fun connectToJellyfin(allowHttp: Boolean) {
+        jellyfinConnecting = true
+        jellyfinStatusMessage = "Connecting to Jellyfin…"
+        scope.launch {
+            val result = repository?.connectJellyfin(
+                serverUrl = jellyfinUrl,
+                allowInsecureHttp = allowHttp,
+                username = jellyfinUsername,
+                password = jellyfinPassword,
+            )
+            jellyfinConnecting = false
+            if (result?.isSuccess == true) {
+                jellyfinPassword = ""
+                jellyfinConnected = true
+                val auth = result.getOrNull()
+                jellyfinStatusMessage = "✓ Connected to ${auth?.serverName ?: "Jellyfin"}"
+            } else {
+                val err = result?.exceptionOrNull()
+                jellyfinStatusMessage = "✕ ${err?.message ?: "Connection failed"}"
+            }
+        }
+    }
+
     var showLicensesDialog by remember { mutableStateOf(false) }
 
     var isExporting by remember { mutableStateOf(false) }
@@ -600,6 +635,192 @@ fun MenuScreen(
 
             Spacer(Modifier.size(32.dp))
 
+            // ---- Jellyfin Server -----------------------------------------------------
+            SectionLabel("JELLYFIN SERVER")
+            Spacer(Modifier.size(10.dp))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (jellyfinConnected) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column {
+                            val serverDisplay = settings.jellyfinServerName.ifBlank { settings.jellyfinServerUrl }
+                            Text(
+                                serverDisplay,
+                                fontFamily = Archivo,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                "Connected as ${settings.jellyfinUsername}",
+                                fontFamily = Archivo,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        OchreBadge("CONNECTED")
+                    }
+
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Crimson.copy(alpha = 0.15f))
+                            .border(1.dp, Crimson, RoundedCornerShape(4.dp))
+                            .clickable {
+                                scope.launch {
+                                    repository?.disconnectJellyfin()
+                                    jellyfinConnected = false
+                                    jellyfinStatusMessage = "Disconnected from Jellyfin"
+                                }
+                            }
+                            .padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "DISCONNECT SERVER",
+                            fontFamily = Anton,
+                            fontSize = 13.sp,
+                            letterSpacing = 0.5.sp,
+                            color = Crimson,
+                        )
+                    }
+                } else {
+                    SmbField(
+                        label = "Server URL (e.g. https://jellyfin.example.com)",
+                        value = jellyfinUrl,
+                        onValueChange = {
+                            jellyfinUrl = it
+                            jellyfinStatusMessage = null
+                        },
+                    )
+
+                    val isHttp = remember(jellyfinUrl) {
+                        val trimmed = jellyfinUrl.trim()
+                        if (trimmed.isEmpty()) {
+                            false
+                        } else {
+                            runCatching {
+                                JellyfinServerConfig.normalizeUrl(trimmed).startsWith("http://", ignoreCase = true)
+                            }.getOrDefault(trimmed.startsWith("http://", ignoreCase = true))
+                        }
+                    }
+                    if (isHttp) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Crimson.copy(alpha = 0.08f))
+                                .border(1.dp, Crimson.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    "Allow unencrypted local HTTP",
+                                    fontFamily = Archivo,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    "Credentials and tokens will be sent unencrypted over LAN.",
+                                    fontFamily = Archivo,
+                                    fontSize = 10.5.sp,
+                                    color = Crimson,
+                                    lineHeight = 14.sp,
+                                )
+                            }
+                            Switch(
+                                checked = jellyfinAllowHttp,
+                                onCheckedChange = { jellyfinAllowHttp = it },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Ochre,
+                                    checkedTrackColor = LeafPrimary,
+                                ),
+                            )
+                        }
+                    }
+
+                    SmbField(
+                        label = "Username",
+                        value = jellyfinUsername,
+                        onValueChange = {
+                            jellyfinUsername = it
+                            jellyfinStatusMessage = null
+                        },
+                    )
+
+                    SmbField(
+                        label = "Password",
+                        value = jellyfinPassword,
+                        password = true,
+                        onValueChange = {
+                            jellyfinPassword = it
+                            jellyfinStatusMessage = null
+                        },
+                    )
+
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Ochre)
+                            .clickable(enabled = !jellyfinConnecting && jellyfinUrl.isNotBlank() && jellyfinUsername.isNotBlank()) {
+                                if (isHttp && !jellyfinAllowHttp) {
+                                    showJellyfinHttpConfirmDialog = true
+                                } else {
+                                    connectToJellyfin(jellyfinAllowHttp)
+                                }
+                            }
+                            .padding(vertical = 12.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (jellyfinConnecting) {
+                            CircularProgressIndicator(
+                                color = Ink,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.size(8.dp))
+                        }
+                        Text(
+                            if (jellyfinConnecting) "CONNECTING…" else "CONNECT TO JELLYFIN",
+                            fontFamily = Anton,
+                            fontSize = 14.sp,
+                            letterSpacing = 0.5.sp,
+                            color = Ink,
+                        )
+                    }
+                }
+
+                jellyfinStatusMessage?.let { status ->
+                    Text(
+                        status,
+                        fontFamily = Archivo,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        color = if (status.startsWith("✓")) Ochre else Crimson,
+                    )
+                }
+            }
+
+            Spacer(Modifier.size(32.dp))
+
             if (repository != null) {
                 // ---- Backup & Restore ----------------------------------------------------
                 SectionLabel("BACKUP & RESTORE")
@@ -729,58 +950,59 @@ fun MenuScreen(
 
             Spacer(Modifier.size(24.dp))
 
-            // ---- Support Leaf --------------------------------------------------------
-            SectionLabel(stringResource(R.string.support_leaf_title))
-            Spacer(Modifier.size(10.dp))
-            Text(
-                stringResource(R.string.support_leaf_description),
-                fontFamily = Archivo,
-                fontWeight = FontWeight.Medium,
-                fontSize = 12.sp,
-                lineHeight = 18.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.size(12.dp))
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .comicShadow(offset = 4.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Crimson)
-                    .clickable(
-                        onClickLabel = stringResource(R.string.support_leaf_kofi_cd),
-                        onClick = { openKofi() },
-                    )
-                    .padding(vertical = 14.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Default.Favorite, contentDescription = null, tint = Cream, modifier = Modifier.size(18.dp))
+            if (booleanResource(R.bool.enable_external_tips)) {
+                // ---- Support Leaf --------------------------------------------------------
+                SectionLabel(stringResource(R.string.support_leaf_title))
                 Spacer(Modifier.size(10.dp))
                 Text(
-                    stringResource(R.string.support_leaf_kofi_button).uppercase(),
-                    fontFamily = Anton,
-                    fontSize = 15.sp,
-                    letterSpacing = 0.5.sp,
-                    color = Cream,
+                    stringResource(R.string.support_leaf_description),
+                    fontFamily = Archivo,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
-            }
-            Spacer(Modifier.size(6.dp))
-            Text(
-                "ko-fi.com/bryanclark",
-                fontFamily = Archivo,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.tertiary,
-                modifier = Modifier
-                    .clickable(
-                        onClickLabel = stringResource(R.string.support_leaf_kofi_cd),
-                        onClick = { openKofi() },
+                Spacer(Modifier.size(12.dp))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .comicShadow(offset = 4.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Crimson)
+                        .clickable(
+                            onClickLabel = stringResource(R.string.support_leaf_kofi_cd),
+                            onClick = { openKofi() },
+                        )
+                        .padding(vertical = 14.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Cream, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.size(10.dp))
+                    Text(
+                        stringResource(R.string.support_leaf_kofi_button).uppercase(),
+                        fontFamily = Anton,
+                        fontSize = 15.sp,
+                        letterSpacing = 0.5.sp,
+                        color = Cream,
                     )
-                    .padding(top = 2.dp),
-            )
-
-            Spacer(Modifier.size(24.dp))
+                }
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    "ko-fi.com/bryanclark",
+                    fontFamily = Archivo,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier
+                        .clickable(
+                            onClickLabel = stringResource(R.string.support_leaf_kofi_cd),
+                            onClick = { openKofi() },
+                        )
+                        .padding(top = 2.dp),
+                )
+                Spacer(Modifier.size(24.dp))
+            }
 
             // ---- Support Upstream ----------------------------------------------------
             Text(
@@ -874,6 +1096,56 @@ fun MenuScreen(
             dismissButton = {
                 TextButton(onClick = { showLicensesDialog = false }) {
                     Text("CLOSE", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        )
+    }
+
+    if (showJellyfinHttpConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showJellyfinHttpConfirmDialog = false },
+            title = {
+                Text(
+                    text = "ALLOW UNENCRYPTED HTTP?",
+                    fontFamily = Anton,
+                    fontSize = 18.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            },
+            text = {
+                Text(
+                    text = "Connecting to this Jellyfin server over plain HTTP transmits your credentials and session tokens unencrypted across your local network.\n\nDo you want to enable unencrypted HTTP and connect?",
+                    fontFamily = Archivo,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    lineHeight = 18.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showJellyfinHttpConfirmDialog = false
+                        jellyfinAllowHttp = true
+                        connectToJellyfin(allowHttp = true)
+                    }
+                ) {
+                    Text(
+                        "ALLOW & CONNECT",
+                        fontFamily = Anton,
+                        color = Ochre,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showJellyfinHttpConfirmDialog = false }
+                ) {
+                    Text(
+                        "CANCEL",
+                        fontFamily = Anton,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             },
             containerColor = MaterialTheme.colorScheme.surfaceVariant,

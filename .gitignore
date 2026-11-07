@@ -56,3 +56,7 @@ docs/IOS_SERIES_AND_LISTS_HANDOFF.md
 *Local.xcconfig
 Local.xcconfig
 iosApp/Local.xcconfig
+
+# Local engineer/aux coordination notes (preserve locally; never commit)
+/docs/ANDROID_ENG_NOTES.md
+/docs/IOS_ENG_NOTES.md

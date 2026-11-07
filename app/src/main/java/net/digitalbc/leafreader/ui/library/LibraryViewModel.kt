@@ -16,6 +16,12 @@ import net.digitalbc.leafreader.data.smb.SmbClient
 import net.digitalbc.leafreader.data.smb.SmbErrors
 import net.digitalbc.leafreader.data.smb.SmbImportPhase
 import net.digitalbc.leafreader.data.smb.SmbImportProgress
+import net.digitalbc.leafreader.data.jellyfin.JellyfinBreadcrumb
+import net.digitalbc.leafreader.data.jellyfin.JellyfinBrowserLogic
+import net.digitalbc.leafreader.data.jellyfin.JellyfinBrowserState
+import net.digitalbc.leafreader.data.jellyfin.JellyfinException
+import net.digitalbc.leafreader.data.jellyfin.JellyfinFailureKind
+import net.digitalbc.leafreader.data.jellyfin.JellyfinItem
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -67,6 +73,11 @@ class LibraryViewModel(
     init {
         viewModelScope.launch {
             repository.backfillMetadataIfNeeded()
+        }
+        viewModelScope.launch {
+            repository.observeDownloadedJellyfinItemIds().collect { downloaded ->
+                _jellyfinBrowser.update { JellyfinBrowserLogic.updateDownloadedIds(it, downloaded) }
+            }
         }
     }
 
@@ -253,6 +264,146 @@ class LibraryViewModel(
     val selectedComicIds: StateFlow<Set<Long>> = _selectedComicIds.asStateFlow()
 
     val hasSmbConfig: Boolean get() = settings.hasSmbConfig
+
+    private val _jellyfinBrowser = MutableStateFlow(JellyfinBrowserState.empty())
+    val jellyfinBrowser: StateFlow<JellyfinBrowserState> = _jellyfinBrowser.asStateFlow()
+    private var jellyfinListingJob: Job? = null
+
+    val hasJellyfinConfig: Boolean get() = settings.hasJellyfinConfig
+
+    fun toggleJellyfinSelection(itemId: String) {
+        _jellyfinBrowser.update { JellyfinBrowserLogic.toggleSelection(it, itemId) }
+    }
+
+    fun selectAllJellyfin() {
+        _jellyfinBrowser.update(JellyfinBrowserLogic::selectAllImportable)
+    }
+
+    fun clearJellyfinSelection() {
+        _jellyfinBrowser.update(JellyfinBrowserLogic::clearSelection)
+    }
+
+    fun cancelJellyfinBrowse() {
+        jellyfinListingJob?.cancel()
+        _jellyfinBrowser.update { it.copy(loading = false) }
+    }
+
+    fun loadJellyfinRoot() {
+        jellyfinListingJob?.cancel()
+        val request = JellyfinBrowserLogic.begin(_jellyfinBrowser.value)
+        _jellyfinBrowser.value = request
+        jellyfinListingJob = viewModelScope.launch {
+            val result = repository.listJellyfinViews()
+            result.onSuccess { views ->
+                _jellyfinBrowser.update { JellyfinBrowserLogic.completeViews(it, request.generation, views) }
+            }.onFailure { error ->
+                if (_jellyfinBrowser.value.generation == request.generation) {
+                    val kind = (error as? JellyfinException)?.kind ?: JellyfinFailureKind.UNKNOWN
+                    _jellyfinBrowser.update { JellyfinBrowserLogic.fail(it, request.generation, kind) }
+                    _message.value = error.message ?: "Failed to load Jellyfin libraries"
+                }
+            }
+        }
+    }
+
+    fun loadJellyfinFolder(parentId: String, title: String) {
+        jellyfinListingJob?.cancel()
+        val request = JellyfinBrowserLogic.begin(_jellyfinBrowser.value)
+        _jellyfinBrowser.value = request
+
+        val currentBreadcrumbs = _jellyfinBrowser.value.breadcrumbs
+        val existingIndex = currentBreadcrumbs.indexOfFirst { it.id == parentId }
+        val updatedBreadcrumbs = if (existingIndex >= 0) {
+            currentBreadcrumbs.take(existingIndex + 1)
+        } else {
+            currentBreadcrumbs + JellyfinBreadcrumb(parentId, title)
+        }
+
+        jellyfinListingJob = viewModelScope.launch {
+            val result = repository.listJellyfinItems(parentId)
+            result.onSuccess { res ->
+                _jellyfinBrowser.update {
+                    JellyfinBrowserLogic.completeItems(
+                        state = it,
+                        generation = request.generation,
+                        parentId = parentId,
+                        title = title,
+                        items = res.items,
+                        breadcrumbs = updatedBreadcrumbs,
+                    )
+                }
+            }.onFailure { error ->
+                if (_jellyfinBrowser.value.generation == request.generation) {
+                    val kind = (error as? JellyfinException)?.kind ?: JellyfinFailureKind.UNKNOWN
+                    _jellyfinBrowser.update { JellyfinBrowserLogic.fail(it, request.generation, kind) }
+                    _message.value = error.message ?: "Failed to load folder"
+                }
+            }
+        }
+    }
+
+    fun navigateJellyfinUp() {
+        val breadcrumbs = _jellyfinBrowser.value.breadcrumbs
+        if (breadcrumbs.size <= 1) {
+            loadJellyfinRoot()
+        } else {
+            val parent = breadcrumbs[breadcrumbs.size - 2]
+            val parentId = parent.id
+            if (parentId != null) {
+                loadJellyfinFolder(parentId, parent.name)
+            } else {
+                loadJellyfinRoot()
+            }
+        }
+    }
+
+    fun importJellyfinItems(items: List<JellyfinItem>, onFinished: () -> Unit = {}) {
+        if (items.isEmpty()) return
+        val selectedItems = items.toList()
+        val previousImport = importJob
+        previousImport?.cancel()
+        importJob = viewModelScope.launch(Dispatchers.IO) {
+            previousImport?.join()
+            _importing.value = true
+            _importProgress.value = 0f
+            _importDetail.value = "Connecting to Jellyfin…"
+            var importedCount = 0
+            val total = selectedItems.size
+            try {
+                for ((index, item) in selectedItems.withIndex()) {
+                    if (!isActive) break
+                    _importProgress.value = (index.toFloat() / total).coerceIn(0f, 1f)
+                    _importDetail.value = "Downloading ${item.name} (${index + 1}/$total)"
+
+                    val result = repository.importJellyfinComic(
+                        item = item,
+                        onProgress = { progress ->
+                            val fileProgress = progress.fraction
+                            val overall = ((index + fileProgress) / total).coerceIn(0f, 1f)
+                            _importProgress.value = overall
+                        },
+                        isCancelled = { !isActive },
+                    )
+                    if (result.isSuccess) {
+                        importedCount++
+                    } else {
+                        val err = result.exceptionOrNull()
+                        if (err !is CancellationException) {
+                            _message.value = err?.message ?: "Failed to import ${item.name}"
+                        }
+                    }
+                }
+            } finally {
+                _importing.value = false
+                _importProgress.value = null
+                _importDetail.value = null
+                if (importedCount > 0) {
+                    _message.value = "Imported $importedCount ${if (importedCount == 1) "comic" else "comics"} from Jellyfin"
+                }
+                onFinished()
+            }
+        }
+    }
 
     fun cancelImport() {
         importJob?.cancel()

@@ -176,6 +176,7 @@ fun LibraryScreen(
     onOpenReadingList: (Long) -> Unit = {},
     onOpenMenu: () -> Unit,
     onOpenDrive: () -> Unit,
+    onOpenJellyfin: () -> Unit = {},
 ) {
     val comics by viewModel.comics.collectAsStateWithLifecycle()
     val libraryItems by viewModel.libraryItems.collectAsStateWithLifecycle()
@@ -914,6 +915,26 @@ fun LibraryScreen(
                         horizontalArrangement = Arrangement.Center,
                     ) {
                         Text("FROM SMB DRIVE", fontFamily = Anton, fontSize = 14.sp, color = DeepInk)
+                    }
+
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(LeafAccent)
+                            .clickable {
+                                showSourceDialog = false
+                                if (viewModel.hasJellyfinConfig) {
+                                    onOpenJellyfin()
+                                } else {
+                                    viewModel.showMessage("Configure your Jellyfin server in Menu first.")
+                                    onOpenMenu()
+                                }
+                            }
+                            .padding(vertical = 12.dp, horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Text("FROM JELLYFIN", fontFamily = Anton, fontSize = 14.sp, color = DeepInk)
                     }
                 }
             },

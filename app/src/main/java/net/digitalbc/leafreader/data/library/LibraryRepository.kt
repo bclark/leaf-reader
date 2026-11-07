@@ -24,6 +24,16 @@ import net.digitalbc.leafreader.data.db.ComicEntity
 import net.digitalbc.leafreader.data.db.ReadingListDao
 import net.digitalbc.leafreader.data.db.ReadingListEntity
 import net.digitalbc.leafreader.data.db.ReadingListItemEntity
+import net.digitalbc.leafreader.data.db.RemoteComicLinkDao
+import net.digitalbc.leafreader.data.db.RemoteComicLinkEntity
+import net.digitalbc.leafreader.data.jellyfin.JellyfinAuth
+import net.digitalbc.leafreader.data.jellyfin.JellyfinClient
+import net.digitalbc.leafreader.data.jellyfin.JellyfinCredentialStore
+import net.digitalbc.leafreader.data.jellyfin.JellyfinItem
+import net.digitalbc.leafreader.data.jellyfin.JellyfinItemsResult
+import net.digitalbc.leafreader.data.jellyfin.JellyfinServerConfig
+import net.digitalbc.leafreader.data.jellyfin.JellyfinTransferProgress
+import net.digitalbc.leafreader.data.jellyfin.JellyfinView
 import net.digitalbc.leafreader.data.settings.AppSettings
 import net.digitalbc.leafreader.data.smb.SmbClient
 import net.digitalbc.leafreader.data.smb.SmbConnectionConfig
@@ -36,9 +46,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Owns the comic library: importing files, listing them, tracking progress, and deleting them.
@@ -54,6 +66,9 @@ class LibraryRepository(
     private val settings: AppSettings,
     private val readingListDao: ReadingListDao? = null,
     private val db: AppDatabase? = null,
+    val remoteComicLinkDao: RemoteComicLinkDao? = db?.remoteComicLinkDao(),
+    val jellyfinClient: JellyfinClient = JellyfinClient(settings.jellyfinDeviceId),
+    val jellyfinCredentialStore: JellyfinCredentialStore = JellyfinCredentialStore(context),
 ) {
     val comics: Flow<List<ComicEntity>> = dao.observeAll()
 
@@ -357,6 +372,196 @@ class LibraryRepository(
             if (t is CancellationException) throw t
             Log.e(TAG, "SMB import failed")
             Result.failure(t)
+        }
+    }
+
+    private val activeJellyfinDownloads = ConcurrentHashMap.newKeySet<String>()
+
+    fun getJellyfinAuth(): JellyfinAuth? = jellyfinCredentialStore.loadAuth()
+
+    suspend fun connectJellyfin(
+        serverUrl: String,
+        allowInsecureHttp: Boolean,
+        username: String,
+        password: String,
+    ): Result<JellyfinAuth> = withContext(Dispatchers.IO) {
+        try {
+            val config = JellyfinServerConfig(serverUrl, allowInsecureHttp)
+            val auth = jellyfinClient.authenticate(config, username, password)
+            jellyfinCredentialStore.saveAuth(auth)
+            settings.jellyfinServerUrl = config.baseUrl
+            settings.jellyfinAllowInsecureHttp = config.allowInsecureHttp
+            settings.jellyfinUsername = auth.username
+            settings.jellyfinUserId = auth.userId
+            settings.jellyfinServerId = auth.serverId
+            settings.jellyfinServerName = auth.serverName.orEmpty()
+            Result.success(auth)
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            Log.e(TAG, "Failed to connect to Jellyfin: ${t.message}")
+            Result.failure(t)
+        }
+    }
+
+    suspend fun disconnectJellyfin(): Unit = withContext(Dispatchers.IO) {
+        jellyfinCredentialStore.clear()
+        settings.clearJellyfinConfig()
+    }
+
+    suspend fun listJellyfinViews(): Result<List<JellyfinView>> = withContext(Dispatchers.IO) {
+        val auth = jellyfinCredentialStore.loadAuth()
+            ?: return@withContext Result.failure(IllegalStateException("Not logged in to Jellyfin"))
+        val serverUrl = settings.jellyfinServerUrl
+        if (serverUrl.isBlank()) return@withContext Result.failure(IllegalStateException("No server configured"))
+
+        try {
+            val config = JellyfinServerConfig(serverUrl, settings.jellyfinAllowInsecureHttp)
+            Result.success(jellyfinClient.getViews(config, auth))
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            Result.failure(t)
+        }
+    }
+
+    suspend fun listJellyfinItems(
+        parentId: String?,
+        startIndex: Int = 0,
+        limit: Int = 100,
+    ): Result<JellyfinItemsResult> = withContext(Dispatchers.IO) {
+        val auth = jellyfinCredentialStore.loadAuth()
+            ?: return@withContext Result.failure(IllegalStateException("Not logged in to Jellyfin"))
+        val serverUrl = settings.jellyfinServerUrl
+        if (serverUrl.isBlank()) return@withContext Result.failure(IllegalStateException("No server configured"))
+
+        try {
+            val config = JellyfinServerConfig(serverUrl, settings.jellyfinAllowInsecureHttp)
+            Result.success(jellyfinClient.getItems(config, auth, parentId, startIndex, limit))
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            Result.failure(t)
+        }
+    }
+
+    fun observeDownloadedJellyfinItemIds(): Flow<Set<String>> {
+        val auth = jellyfinCredentialStore.loadAuth() ?: return emptyFlow()
+        val dao = remoteComicLinkDao ?: return emptyFlow()
+        return dao.observeLinksForUser("jellyfin", auth.serverId, auth.userId)
+            .map { links -> links.map { it.itemId }.toSet() }
+    }
+
+    suspend fun loadJellyfinCoverBitmap(itemId: String, imageTag: String?, maxWidth: Int = 400): Bitmap? =
+        withContext(Dispatchers.IO) {
+            val auth = jellyfinCredentialStore.loadAuth() ?: return@withContext null
+            val serverUrl = settings.jellyfinServerUrl
+            if (serverUrl.isBlank()) return@withContext null
+            val config = runCatching { JellyfinServerConfig(serverUrl, settings.jellyfinAllowInsecureHttp) }.getOrNull()
+                ?: return@withContext null
+            jellyfinClient.loadCoverBitmap(config, auth, itemId, imageTag, maxWidth)
+        }
+
+    suspend fun importJellyfinComic(
+        item: JellyfinItem,
+        onProgress: (JellyfinTransferProgress) -> Unit = {},
+        isCancelled: () -> Boolean = { false },
+    ): Result<Long> = withContext(Dispatchers.IO) {
+        val auth = jellyfinCredentialStore.loadAuth()
+            ?: return@withContext Result.failure(IllegalStateException("Not logged in to Jellyfin"))
+        val serverUrl = settings.jellyfinServerUrl
+        if (serverUrl.isBlank()) {
+            return@withContext Result.failure(IllegalStateException("No Jellyfin server configured"))
+        }
+
+        if (!item.isImportable) {
+            return@withContext Result.failure(
+                UnsupportedComicException("Format not supported for Leaf reading (e.g. EPUB or video)."),
+            )
+        }
+
+        // Concurrency guard: prevent duplicate concurrent downloads of the same item
+        if (!activeJellyfinDownloads.add(item.id)) {
+            return@withContext Result.failure(IllegalStateException("Item is already being downloaded"))
+        }
+
+        val config = try {
+            JellyfinServerConfig(serverUrl, settings.jellyfinAllowInsecureHttp)
+        } catch (e: Exception) {
+            activeJellyfinDownloads.remove(item.id)
+            return@withContext Result.failure(e)
+        }
+
+        // Check if already downloaded and file exists
+        val existingLink = remoteComicLinkDao?.findLink("jellyfin", auth.serverId, auth.userId, item.id)
+        if (existingLink != null) {
+            val existingComic = dao.getById(existingLink.comicId)
+            if (existingComic != null && File(existingComic.filePath).exists()) {
+                activeJellyfinDownloads.remove(item.id)
+                return@withContext Result.success(existingComic.id)
+            }
+        }
+
+        val token = UUID.randomUUID().toString()
+        val comicsDir = File(context.filesDir, "comics").apply { mkdirs() }
+        val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
+        val ext = item.fileExtension
+        val title = item.name.substringBeforeLast('.', item.name)
+        val partFile = File(comicsDir, "$token.part")
+        val dest = File(comicsDir, "$token.$ext")
+
+        try {
+            jellyfinClient.downloadToFile(
+                config = config,
+                auth = auth,
+                itemId = item.id,
+                partFile = partFile,
+                onProgress = onProgress,
+                isCancelled = isCancelled,
+            )
+
+            if (isCancelled()) {
+                partFile.delete()
+                throw CancellationException("Jellyfin import cancelled")
+            }
+
+            // Verify downloaded archive before promoting
+            val detectedFormat = ComicArchiveFactory.detectFormat(partFile)
+            if (detectedFormat == ComicFormat.UNKNOWN) {
+                partFile.delete()
+                throw UnsupportedComicException("Downloaded file is not a supported comic or PDF archive")
+            }
+
+            // Atomically rename .part file to final destination
+            if (!partFile.renameTo(dest)) {
+                partFile.copyTo(dest, overwrite = true)
+                partFile.delete()
+            }
+
+            val result = indexCopiedFile(dest, coversDir, token, title, source = "jellyfin")
+            result.onSuccess { comicId ->
+                remoteComicLinkDao?.insert(
+                    RemoteComicLinkEntity(
+                        comicId = comicId,
+                        provider = "jellyfin",
+                        serverId = auth.serverId,
+                        userId = auth.userId,
+                        itemId = item.id,
+                        parentId = item.parentId,
+                        downloadedAt = System.currentTimeMillis(),
+                        remoteVersionTag = item.imageTag,
+                        remoteName = item.name,
+                    )
+                )
+            }.onFailure {
+                dest.delete()
+            }
+            result
+        } catch (t: Throwable) {
+            partFile.delete()
+            dest.delete()
+            if (t is CancellationException) throw t
+            Log.e(TAG, "Jellyfin download/import failed: ${t.message}")
+            Result.failure(t)
+        } finally {
+            activeJellyfinDownloads.remove(item.id)
         }
     }
 

@@ -12,6 +12,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import net.digitalbc.leafreader.ComicReaderApp
+import net.digitalbc.leafreader.ui.library.JellyfinBrowserScreen
 import net.digitalbc.leafreader.ui.library.LibraryScreen
 import net.digitalbc.leafreader.ui.library.LibraryViewModel
 import net.digitalbc.leafreader.ui.library.ReadingListDetailScreen
@@ -24,6 +25,7 @@ import net.digitalbc.leafreader.ui.reader.ReaderViewModel
 private object Routes {
     const val LIBRARY = "library"
     const val DRIVE = "drive"
+    const val JELLYFIN = "jellyfin"
     const val READER = "reader/{comicId}"
     const val MENU = "menu"
     const val SERIES = "series/{seriesName}?volume={volume}"
@@ -50,6 +52,10 @@ fun AppNavHost() {
                 onOpenDrive = {
                     libraryVm.loadSmbDirectory("")
                     navController.navigate(Routes.DRIVE)
+                },
+                onOpenJellyfin = {
+                    libraryVm.loadJellyfinRoot()
+                    navController.navigate(Routes.JELLYFIN)
                 },
             )
         }
@@ -86,6 +92,12 @@ fun AppNavHost() {
         }
         composable(Routes.DRIVE) {
             SmbDriveScreen(
+                viewModel = libraryVm,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.JELLYFIN) {
+            JellyfinBrowserScreen(
                 viewModel = libraryVm,
                 onBack = { navController.popBackStack() },
             )

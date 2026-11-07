@@ -14,8 +14,8 @@ android {
         applicationId = "net.digitalbc.leafreader"
         minSdk = 26
         targetSdk = 36
-        versionName = "0.3.6"
-        versionCode = 30600
+        versionName = "0.3.7"
+        versionCode = 30700
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
@@ -79,15 +79,16 @@ android {
         compose = true
     }
 
-    // Keep the TFLite model uncompressed so it can be memory-mapped by the interpreter.
+    // Exclude .tflite model assets from Android packaging while panel detection is disabled.
     androidResources {
-        noCompress += "tflite"
+        ignoreAssetsPatterns += listOf("*.tflite")
     }
 
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "/META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+            excludes += "**/*.tflite"
         }
         // Compress the native libraries inside the APK (they ship uncompressed by default). This
         // keeps every ABI but shrinks the download — the libs are extracted at install time.
@@ -128,6 +129,6 @@ dependencies {
     implementation(libs.commons.compress)
     "fullImplementation"(libs.sevenzip)
     implementation(libs.smbj)
-
-    implementation(libs.tensorflow.lite)
+    implementation(libs.okhttp)
+    testImplementation(libs.okhttp.mockwebserver)
 }
