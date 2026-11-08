@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -38,6 +39,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import net.digitalbc.leafreader.R
 import net.digitalbc.leafreader.data.jellyfin.JellyfinItem
 import net.digitalbc.leafreader.data.jellyfin.JellyfinProgress
 import net.digitalbc.leafreader.data.jellyfin.JellyfinView
@@ -113,15 +117,16 @@ fun JellyfinBrowserScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
                     Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(PaperWhite.copy(alpha = 0.14f))
-                        .clickable {
+                        .size(48.dp)
+                        .clickable(
+                            role = Role.Button,
+                            onClickLabel = "Back"
+                        ) {
                             if (selectedCount > 0) {
                                 viewModel.clearJellyfinSelection()
                             } else if (!browser.isRoot) {
@@ -132,14 +137,22 @@ fun JellyfinBrowserScreen(
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = PaperWhite,
-                        modifier = Modifier.size(18.dp),
-                    )
+                    Box(
+                        Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(PaperWhite.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = PaperWhite,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
-                Spacer(Modifier.size(14.dp))
+                Spacer(Modifier.size(10.dp))
                 Column {
                     OchreBadge("JELLYFIN")
                     Text(
@@ -188,15 +201,16 @@ fun JellyfinBrowserScreen(
                             if (selectedCount > 0 && !allSelected) {
                                 Box(
                                     modifier = Modifier
+                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                                         .clip(RoundedCornerShape(4.dp))
                                         .background(MaterialTheme.colorScheme.surfaceVariant)
                                         .border(1.dp, DeepInk, RoundedCornerShape(4.dp))
-                                        .clickable { viewModel.clearJellyfinSelection() }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                        .clickable(role = Role.Button) { viewModel.clearJellyfinSelection() }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
-                                        "DESELECT ALL",
+                                        stringResource(R.string.jellyfin_deselect_all),
                                         fontFamily = Anton,
                                         fontSize = 10.5.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -205,17 +219,18 @@ fun JellyfinBrowserScreen(
                             }
                             Box(
                                 modifier = Modifier
+                                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                                     .clip(RoundedCornerShape(4.dp))
                                     .background(if (allSelected) Ochre else MaterialTheme.colorScheme.surfaceVariant)
                                     .border(1.dp, if (allSelected) Ochre else DeepInk, RoundedCornerShape(4.dp))
-                                    .clickable {
+                                    .clickable(role = Role.Button) {
                                         if (allSelected) viewModel.clearJellyfinSelection() else viewModel.selectAllJellyfin()
                                     }
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                                    contentAlignment = Alignment.Center,
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.Center,
                             ) {
                                 Text(
-                                    if (allSelected) "CLEAR" else "SELECT ALL",
+                                    if (allSelected) stringResource(R.string.jellyfin_clear) else stringResource(R.string.jellyfin_select_all),
                                     fontFamily = Anton,
                                     fontSize = 10.5.sp,
                                     color = if (allSelected) Ink else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -241,15 +256,17 @@ fun JellyfinBrowserScreen(
                             )
                             Box(
                                 modifier = Modifier
+                                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                                     .clip(RoundedCornerShape(4.dp))
                                     .background(Ochre)
-                                    .clickable {
+                                    .clickable(role = Role.Button) {
                                         if (browser.isRoot) viewModel.loadJellyfinRoot()
                                         else browser.currentParentId?.let { viewModel.loadJellyfinFolder(it, browser.currentTitle) }
                                     }
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                                contentAlignment = Alignment.Center,
                             ) {
-                                Text("RETRY", fontFamily = Anton, fontSize = 12.sp, color = Ink)
+                                Text(stringResource(R.string.jellyfin_retry), fontFamily = Anton, fontSize = 12.sp, color = Ink)
                             }
                         }
                     }
@@ -258,7 +275,7 @@ fun JellyfinBrowserScreen(
                     if (browser.views.isEmpty()) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
-                                "No libraries found on this Jellyfin server.",
+                                stringResource(R.string.jellyfin_no_libraries),
                                 fontFamily = Archivo,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -281,7 +298,7 @@ fun JellyfinBrowserScreen(
                     if (browser.items.isEmpty()) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
-                                "No items in this folder.",
+                                stringResource(R.string.jellyfin_no_items),
                                 fontFamily = Archivo,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -317,10 +334,11 @@ fun JellyfinBrowserScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
                             .padding(top = 12.dp)
                             .clip(RoundedCornerShape(6.dp))
                             .background(Ochre)
-                            .clickable {
+                            .clickable(role = Role.Button) {
                                 val selectedItems = browser.items.filter { it.id in browser.selectedItemIds }
                                 viewModel.importJellyfinItems(selectedItems) {
                                     viewModel.clearJellyfinSelection()
@@ -377,15 +395,20 @@ fun JellyfinBrowserScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.End,
                         ) {
-                            Text(
-                                "CANCEL",
-                                fontFamily = Anton,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.error,
+                            Box(
                                 modifier = Modifier
-                                    .clickable { viewModel.cancelImport() }
-                                    .padding(4.dp),
-                            )
+                                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                    .clickable(role = Role.Button) { viewModel.cancelImport() }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    stringResource(R.string.cancel).uppercase(),
+                                    fontFamily = Anton,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
                         }
                     }
                 }
@@ -407,9 +430,10 @@ private fun JellyfinViewRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp)
             .clip(RoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -455,13 +479,28 @@ private fun JellyfinItemRow(
     }
     val borderColor = if (isSelected) Ochre else Color.Transparent
 
+    val role = if (item.isFolder) {
+        Role.Button
+    } else if (item.isImportable && !isDownloaded) {
+        Role.Checkbox
+    } else {
+        null
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp)
             .clip(shape)
             .background(bgColor)
             .border(1.dp, borderColor, shape)
-            .clickable(onClick = onClick)
+            .then(
+                if (role != null) {
+                    Modifier.clickable(role = role, onClick = onClick)
+                } else {
+                    Modifier
+                }
+            )
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -505,7 +544,7 @@ private fun JellyfinItemRow(
                     }
                     if (item.played) {
                         Text(
-                            "•  READ",
+                            "•  ${stringResource(R.string.jellyfin_badge_read)}",
                             fontFamily = Archivo,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 10.sp,
@@ -536,12 +575,12 @@ private fun JellyfinItemRow(
                 ) {
                     Icon(
                         Icons.Default.Check,
-                        contentDescription = "Downloaded",
+                        contentDescription = stringResource(R.string.jellyfin_badge_downloaded),
                         tint = LeafAccent,
                         modifier = Modifier.size(12.dp),
                     )
                     Text(
-                        "DOWNLOADED",
+                        stringResource(R.string.jellyfin_badge_downloaded),
                         fontFamily = Archivo,
                         fontWeight = FontWeight.Bold,
                         fontSize = 9.sp,

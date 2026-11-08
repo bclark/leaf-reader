@@ -15,4 +15,25 @@
     <string name="support_leaf_description">Enjoying Leaf? You can leave an optional tip to support development. All features remain free.</string>
     <string name="support_leaf_kofi_button">Tip on Ko-fi</string>
     <string name="support_leaf_kofi_cd">Open Ko-fi tipping page in external browser</string>
+
+    <!-- Jellyfin Strings -->
+    <string name="jellyfin_server_section">JELLYFIN SERVER</string>
+    <string name="jellyfin_connected_as">Connected as %1$s</string>
+    <string name="jellyfin_disconnect">DISCONNECT SERVER</string>
+    <string name="jellyfin_server_url_label">Server URL (e.g. https://jellyfin.example.com)</string>
+    <string name="jellyfin_allow_insecure_title">Allow unencrypted local HTTP</string>
+    <string name="jellyfin_allow_insecure_summary">Credentials and tokens will be sent unencrypted over LAN.</string>
+    <string name="jellyfin_username_label">Username</string>
+    <string name="jellyfin_password_label">Password</string>
+    <string name="jellyfin_connecting">CONNECTING…</string>
+    <string name="jellyfin_connect">CONNECT TO JELLYFIN</string>
+    <string name="jellyfin_browser_title">Jellyfin Libraries</string>
+    <string name="jellyfin_no_libraries">No libraries found on this Jellyfin server.</string>
+    <string name="jellyfin_no_items">No items in this folder.</string>
+    <string name="jellyfin_select_all">SELECT ALL</string>
+    <string name="jellyfin_deselect_all">DESELECT ALL</string>
+    <string name="jellyfin_clear">CLEAR</string>
+    <string name="jellyfin_retry">RETRY</string>
+    <string name="jellyfin_badge_downloaded">DOWNLOADED</string>
+    <string name="jellyfin_badge_read">READ</string>
 </resources>

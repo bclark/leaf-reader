@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -51,6 +52,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.booleanResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import net.digitalbc.leafreader.R
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -636,7 +638,7 @@ fun MenuScreen(
             Spacer(Modifier.size(32.dp))
 
             // ---- Jellyfin Server -----------------------------------------------------
-            SectionLabel("JELLYFIN SERVER")
+            SectionLabel(stringResource(R.string.jellyfin_server_section))
             Spacer(Modifier.size(10.dp))
             Column(
                 Modifier
@@ -662,7 +664,7 @@ fun MenuScreen(
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
                             Text(
-                                "Connected as ${settings.jellyfinUsername}",
+                                stringResource(R.string.jellyfin_connected_as, settings.jellyfinUsername),
                                 fontFamily = Archivo,
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -674,32 +676,33 @@ fun MenuScreen(
                     Row(
                         Modifier
                             .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
                             .padding(top = 8.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .background(Crimson.copy(alpha = 0.15f))
-                            .border(1.dp, Crimson, RoundedCornerShape(4.dp))
-                            .clickable {
+                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.15f))
+                            .border(1.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(4.dp))
+                            .clickable(role = Role.Button) {
                                 scope.launch {
                                     repository?.disconnectJellyfin()
                                     jellyfinConnected = false
                                     jellyfinStatusMessage = "Disconnected from Jellyfin"
                                 }
                             }
-                            .padding(vertical = 10.dp),
+                            .padding(vertical = 12.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "DISCONNECT SERVER",
+                            stringResource(R.string.jellyfin_disconnect),
                             fontFamily = Anton,
                             fontSize = 13.sp,
                             letterSpacing = 0.5.sp,
-                            color = Crimson,
+                            color = MaterialTheme.colorScheme.error,
                         )
                     }
                 } else {
                     SmbField(
-                        label = "Server URL (e.g. https://jellyfin.example.com)",
+                        label = stringResource(R.string.jellyfin_server_url_label),
                         value = jellyfinUrl,
                         onValueChange = {
                             jellyfinUrl = it
@@ -722,24 +725,24 @@ fun MenuScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(Crimson.copy(alpha = 0.08f))
-                                .border(1.dp, Crimson.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                                .background(MaterialTheme.colorScheme.error.copy(alpha = 0.08f))
+                                .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
                                 .padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    "Allow unencrypted local HTTP",
+                                    stringResource(R.string.jellyfin_allow_insecure_title),
                                     fontFamily = Archivo,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.5.sp,
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )
                                 Text(
-                                    "Credentials and tokens will be sent unencrypted over LAN.",
+                                    stringResource(R.string.jellyfin_allow_insecure_summary),
                                     fontFamily = Archivo,
                                     fontSize = 10.5.sp,
-                                    color = Crimson,
+                                    color = MaterialTheme.colorScheme.error,
                                     lineHeight = 14.sp,
                                 )
                             }
@@ -755,7 +758,7 @@ fun MenuScreen(
                     }
 
                     SmbField(
-                        label = "Username",
+                        label = stringResource(R.string.jellyfin_username_label),
                         value = jellyfinUsername,
                         onValueChange = {
                             jellyfinUsername = it
@@ -764,7 +767,7 @@ fun MenuScreen(
                     )
 
                     SmbField(
-                        label = "Password",
+                        label = stringResource(R.string.jellyfin_password_label),
                         value = jellyfinPassword,
                         password = true,
                         onValueChange = {
@@ -776,10 +779,14 @@ fun MenuScreen(
                     Row(
                         Modifier
                             .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
                             .padding(top = 4.dp)
                             .clip(RoundedCornerShape(4.dp))
                             .background(Ochre)
-                            .clickable(enabled = !jellyfinConnecting && jellyfinUrl.isNotBlank() && jellyfinUsername.isNotBlank()) {
+                            .clickable(
+                                role = Role.Button,
+                                enabled = !jellyfinConnecting && jellyfinUrl.isNotBlank() && jellyfinUsername.isNotBlank(),
+                            ) {
                                 if (isHttp && !jellyfinAllowHttp) {
                                     showJellyfinHttpConfirmDialog = true
                                 } else {
@@ -799,7 +806,7 @@ fun MenuScreen(
                             Spacer(Modifier.size(8.dp))
                         }
                         Text(
-                            if (jellyfinConnecting) "CONNECTING…" else "CONNECT TO JELLYFIN",
+                            if (jellyfinConnecting) stringResource(R.string.jellyfin_connecting) else stringResource(R.string.jellyfin_connect),
                             fontFamily = Anton,
                             fontSize = 14.sp,
                             letterSpacing = 0.5.sp,
@@ -814,7 +821,7 @@ fun MenuScreen(
                         fontFamily = Archivo,
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp,
-                        color = if (status.startsWith("✓")) Ochre else Crimson,
+                        color = if (status.startsWith("✓")) Ochre else MaterialTheme.colorScheme.error,
                     )
                 }
             }
