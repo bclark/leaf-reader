@@ -36,4 +36,24 @@
     <string name="jellyfin_retry">RETRY</string>
     <string name="jellyfin_badge_downloaded">DOWNLOADED</string>
     <string name="jellyfin_badge_read">READ</string>
+
+    <!-- Jellyfin Error & Empty States -->
+    <string name="jellyfin_loading_libraries">Loading libraries…</string>
+    <string name="jellyfin_loading_items">Loading comics…</string>
+    <string name="jellyfin_no_libraries_detail">Make sure your Jellyfin libraries are categorized as Books or Collections.</string>
+    <string name="jellyfin_no_items_detail">No supported comic archives (.cbz, .cbr, .zip) found in this folder.</string>
+    <string name="jellyfin_error_server_unreachable_title">Server Unreachable</string>
+    <string name="jellyfin_error_server_unreachable_desc">Cannot connect to Jellyfin. Check your Wi-Fi, server IP, or local network.</string>
+    <string name="jellyfin_error_timeout_title">Connection Timed Out</string>
+    <string name="jellyfin_error_timeout_desc">The Jellyfin server took too long to respond. Please try again.</string>
+    <string name="jellyfin_error_auth_expired_title">Session Expired</string>
+    <string name="jellyfin_error_auth_expired_desc">Your login session has expired. Please reconnect in Settings.</string>
+    <string name="jellyfin_error_access_denied_title">Access Denied</string>
+    <string name="jellyfin_error_access_denied_desc">You do not have permission to access this Jellyfin library or folder.</string>
+    <string name="jellyfin_error_not_found_title">Not Found</string>
+    <string name="jellyfin_error_not_found_desc">The requested library or folder was not found on the server.</string>
+    <string name="jellyfin_error_server_title">Server Error</string>
+    <string name="jellyfin_error_server_desc">The Jellyfin server encountered an internal error. Please try again.</string>
+    <string name="jellyfin_error_generic_title">Connection Error</string>
+    <string name="jellyfin_error_generic_desc">Unable to load Jellyfin items. Please try again.</string>
 </resources>

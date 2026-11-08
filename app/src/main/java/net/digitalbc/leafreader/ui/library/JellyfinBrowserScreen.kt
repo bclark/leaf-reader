@@ -23,9 +23,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -39,25 +43,32 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.digitalbc.leafreader.R
+import net.digitalbc.leafreader.data.jellyfin.JellyfinBrowserState
+import net.digitalbc.leafreader.data.jellyfin.JellyfinFailureKind
 import net.digitalbc.leafreader.data.jellyfin.JellyfinItem
 import net.digitalbc.leafreader.data.jellyfin.JellyfinProgress
 import net.digitalbc.leafreader.data.jellyfin.JellyfinView
+import net.digitalbc.leafreader.data.settings.ThemeMode
 import net.digitalbc.leafreader.ui.brand.OchreBadge
 import net.digitalbc.leafreader.ui.brand.halftone
 import net.digitalbc.leafreader.ui.theme.Anton
 import net.digitalbc.leafreader.ui.theme.Archivo
+import net.digitalbc.leafreader.ui.theme.ComicReaderTheme
 import net.digitalbc.leafreader.ui.theme.DeepInk
 import net.digitalbc.leafreader.ui.theme.Ink
 import net.digitalbc.leafreader.ui.theme.LeafAccent
@@ -84,10 +95,6 @@ fun JellyfinBrowserScreen(
     }
 
     val selectedCount = browser.selectedItemIds.size
-    val importableItems = remember(browser.items, browser.downloadedItemIds) {
-        browser.items.filter { it.isImportable && it.id !in browser.downloadedItemIds }
-    }
-    val allSelected = importableItems.isNotEmpty() && selectedCount == importableItems.size
 
     BackHandler(enabled = !importing) {
         if (selectedCount > 0) {
@@ -106,7 +113,68 @@ fun JellyfinBrowserScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    JellyfinBrowserScreenContent(
+        browser = browser,
+        importing = importing,
+        importProgress = importProgress,
+        importDetail = importDetail,
+        snackbarHostState = snackbarHostState,
+        onBack = onBack,
+        onClearSelection = { viewModel.clearJellyfinSelection() },
+        onSelectAll = { viewModel.selectAllJellyfin() },
+        onToggleSelection = { viewModel.toggleJellyfinSelection(it) },
+        onItemClick = { item ->
+            if (item.isFolder) {
+                viewModel.loadJellyfinFolder(item.id, item.name)
+            } else if (item.isImportable && item.id !in browser.downloadedItemIds) {
+                viewModel.toggleJellyfinSelection(item.id)
+            }
+        },
+        onViewClick = { view ->
+            viewModel.loadJellyfinFolder(view.id, view.name)
+        },
+        onImportSelected = {
+            val selectedItems = browser.items.filter { it.id in browser.selectedItemIds }
+            viewModel.importJellyfinItems(selectedItems) {
+                viewModel.clearJellyfinSelection()
+            }
+        },
+        onCancelImport = { viewModel.cancelImport() },
+        onRetry = {
+            if (browser.isRoot) {
+                viewModel.loadJellyfinRoot()
+            } else {
+                browser.currentParentId?.let { viewModel.loadJellyfinFolder(it, browser.currentTitle) }
+            }
+        },
+    )
+}
+
+@Composable
+fun JellyfinBrowserScreenContent(
+    browser: JellyfinBrowserState,
+    importing: Boolean,
+    importProgress: Float?,
+    importDetail: String?,
+    snackbarHostState: SnackbarHostState,
+    onBack: () -> Unit,
+    onClearSelection: () -> Unit,
+    onSelectAll: () -> Unit,
+    onToggleSelection: (String) -> Unit,
+    onItemClick: (JellyfinItem) -> Unit,
+    onViewClick: (JellyfinView) -> Unit,
+    onImportSelected: () -> Unit,
+    onCancelImport: () -> Unit,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val selectedCount = browser.selectedItemIds.size
+    val importableItems = remember(browser.items, browser.downloadedItemIds) {
+        browser.items.filter { it.isImportable && it.id !in browser.downloadedItemIds }
+    }
+    val allSelected = importableItems.isNotEmpty() && selectedCount == importableItems.size
+
+    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Top Bar
         Surface(
             color = LeafPrimary,
@@ -128,9 +196,7 @@ fun JellyfinBrowserScreen(
                             onClickLabel = "Back"
                         ) {
                             if (selectedCount > 0) {
-                                viewModel.clearJellyfinSelection()
-                            } else if (!browser.isRoot) {
-                                viewModel.navigateJellyfinUp()
+                                onClearSelection()
                             } else {
                                 onBack()
                             }
@@ -178,7 +244,7 @@ fun JellyfinBrowserScreen(
                     .padding(horizontal = 20.dp)
                     .padding(top = 8.dp, bottom = 16.dp),
             ) {
-                // Header / selection controls (when not at root)
+                // Header / selection controls (when inside a folder with importable items)
                 if (!browser.isRoot && importableItems.isNotEmpty()) {
                     Row(
                         modifier = Modifier
@@ -205,7 +271,7 @@ fun JellyfinBrowserScreen(
                                         .clip(RoundedCornerShape(4.dp))
                                         .background(MaterialTheme.colorScheme.surfaceVariant)
                                         .border(1.dp, DeepInk, RoundedCornerShape(4.dp))
-                                        .clickable(role = Role.Button) { viewModel.clearJellyfinSelection() }
+                                        .clickable(role = Role.Button) { onClearSelection() }
                                         .padding(horizontal = 10.dp, vertical = 6.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
@@ -224,7 +290,7 @@ fun JellyfinBrowserScreen(
                                     .background(if (allSelected) Ochre else MaterialTheme.colorScheme.surfaceVariant)
                                     .border(1.dp, if (allSelected) Ochre else DeepInk, RoundedCornerShape(4.dp))
                                     .clickable(role = Role.Button) {
-                                        if (allSelected) viewModel.clearJellyfinSelection() else viewModel.selectAllJellyfin()
+                                        if (allSelected) onClearSelection() else onSelectAll()
                                     }
                                     .padding(horizontal = 10.dp, vertical = 6.dp),
                                 contentAlignment = Alignment.Center,
@@ -240,46 +306,18 @@ fun JellyfinBrowserScreen(
                     }
                 }
 
-                // Main content
+                // Main content state dispatcher
+                val failure = browser.failure
                 if (browser.loading) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = Ochre, strokeWidth = 3.dp)
-                    }
-                } else if (browser.failure != null) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text(
-                                "Failed to load: ${browser.failure}",
-                                fontFamily = Archivo,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Ochre)
-                                    .clickable(role = Role.Button) {
-                                        if (browser.isRoot) viewModel.loadJellyfinRoot()
-                                        else browser.currentParentId?.let { viewModel.loadJellyfinFolder(it, browser.currentTitle) }
-                                    }
-                                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(stringResource(R.string.jellyfin_retry), fontFamily = Anton, fontSize = 12.sp, color = Ink)
-                            }
-                        }
-                    }
+                    JellyfinLoadingStateView(isRoot = browser.isRoot)
+                } else if (failure != null) {
+                    JellyfinErrorStateView(
+                        failure = failure,
+                        onRetry = onRetry,
+                    )
                 } else if (browser.isRoot) {
-                    // Root: show library views
                     if (browser.views.isEmpty()) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(
-                                stringResource(R.string.jellyfin_no_libraries),
-                                fontFamily = Archivo,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        JellyfinEmptyStateView(isRoot = true)
                     } else {
                         LazyColumn(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -288,21 +326,14 @@ fun JellyfinBrowserScreen(
                             items(browser.views, key = { it.id }) { view ->
                                 JellyfinViewRow(
                                     view = view,
-                                    onClick = { viewModel.loadJellyfinFolder(view.id, view.name) },
+                                    onClick = { onViewClick(view) },
                                 )
                             }
                         }
                     }
                 } else {
-                    // Inside library/folder: show folders and items
                     if (browser.items.isEmpty()) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(
-                                stringResource(R.string.jellyfin_no_items),
-                                fontFamily = Archivo,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        JellyfinEmptyStateView(isRoot = false)
                     } else {
                         LazyColumn(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -316,13 +347,7 @@ fun JellyfinBrowserScreen(
                                     item = item,
                                     isDownloaded = isDownloaded,
                                     isSelected = isSelected,
-                                    onClick = {
-                                        if (item.isFolder) {
-                                            viewModel.loadJellyfinFolder(item.id, item.name)
-                                        } else if (item.isImportable && !isDownloaded) {
-                                            viewModel.toggleJellyfinSelection(item.id)
-                                        }
-                                    },
+                                    onClick = { onItemClick(item) },
                                 )
                             }
                         }
@@ -338,12 +363,7 @@ fun JellyfinBrowserScreen(
                             .padding(top = 12.dp)
                             .clip(RoundedCornerShape(6.dp))
                             .background(Ochre)
-                            .clickable(role = Role.Button) {
-                                val selectedItems = browser.items.filter { it.id in browser.selectedItemIds }
-                                viewModel.importJellyfinItems(selectedItems) {
-                                    viewModel.clearJellyfinSelection()
-                                }
-                            }
+                            .clickable(role = Role.Button, onClick = onImportSelected)
                             .padding(vertical = 14.dp),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -357,7 +377,7 @@ fun JellyfinBrowserScreen(
                     }
                 }
 
-                // In-progress import banner
+                // In-progress import banner (DS08)
                 AnimatedVisibility(visible = importing) {
                     Column(
                         modifier = Modifier
@@ -369,7 +389,7 @@ fun JellyfinBrowserScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(
-                            importDetail ?: "Downloading from Jellyfin…",
+                            importDetail ?: stringResource(R.string.importing),
                             fontFamily = Archivo,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp,
@@ -379,7 +399,7 @@ fun JellyfinBrowserScreen(
                         )
                         if (importProgress != null) {
                             LinearProgressIndicator(
-                                progress = { importProgress ?: 0f },
+                                progress = { importProgress },
                                 modifier = Modifier.fillMaxWidth(),
                                 color = Ochre,
                                 trackColor = DeepInk.copy(alpha = 0.2f),
@@ -398,7 +418,7 @@ fun JellyfinBrowserScreen(
                             Box(
                                 modifier = Modifier
                                     .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                                    .clickable(role = Role.Button) { viewModel.cancelImport() }
+                                    .clickable(role = Role.Button, onClick = onCancelImport)
                                     .padding(horizontal = 8.dp, vertical = 4.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
@@ -417,6 +437,189 @@ fun JellyfinBrowserScreen(
             SnackbarHost(
                 hostState = snackbarHostState,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
+            )
+        }
+    }
+}
+
+/** Loading state view (DS08). */
+@Composable
+fun JellyfinLoadingStateView(
+    isRoot: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            CircularProgressIndicator(
+                color = Ochre,
+                strokeWidth = 3.dp,
+                modifier = Modifier.size(36.dp),
+            )
+            Text(
+                text = stringResource(if (isRoot) R.string.jellyfin_loading_libraries else R.string.jellyfin_loading_items),
+                fontFamily = Archivo,
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Accessible, recoverable failure state view with non-color cues and high contrast (DS01, DS08). */
+@Composable
+fun JellyfinErrorStateView(
+    failure: JellyfinFailureKind,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val (icon: ImageVector, titleRes: Int, descRes: Int) = when (failure) {
+        JellyfinFailureKind.UNAVAILABLE -> Triple(
+            Icons.Default.CloudOff,
+            R.string.jellyfin_error_server_unreachable_title,
+            R.string.jellyfin_error_server_unreachable_desc,
+        )
+        JellyfinFailureKind.TIMEOUT -> Triple(
+            Icons.Default.Schedule,
+            R.string.jellyfin_error_timeout_title,
+            R.string.jellyfin_error_timeout_desc,
+        )
+        JellyfinFailureKind.AUTHENTICATION -> Triple(
+            Icons.Default.Lock,
+            R.string.jellyfin_error_auth_expired_title,
+            R.string.jellyfin_error_auth_expired_desc,
+        )
+        JellyfinFailureKind.ACCESS_DENIED -> Triple(
+            Icons.Default.Lock,
+            R.string.jellyfin_error_access_denied_title,
+            R.string.jellyfin_error_access_denied_desc,
+        )
+        JellyfinFailureKind.NOT_FOUND -> Triple(
+            Icons.Default.Folder,
+            R.string.jellyfin_error_not_found_title,
+            R.string.jellyfin_error_not_found_desc,
+        )
+        JellyfinFailureKind.SERVER_ERROR -> Triple(
+            Icons.Default.Warning,
+            R.string.jellyfin_error_server_title,
+            R.string.jellyfin_error_server_desc,
+        )
+        else -> Triple(
+            Icons.Default.Warning,
+            R.string.jellyfin_error_generic_title,
+            R.string.jellyfin_error_generic_desc,
+        )
+    }
+
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .padding(horizontal = 24.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(horizontal = 20.dp, vertical = 24.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.error.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+
+            Text(
+                text = stringResource(titleRes),
+                fontFamily = Archivo,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.error,
+                textAlign = TextAlign.Center,
+            )
+
+            Text(
+                text = stringResource(descRes),
+                fontFamily = Archivo,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+
+            Spacer(Modifier.size(4.dp))
+
+            Box(
+                modifier = Modifier
+                    .defaultMinSize(minWidth = 120.dp, minHeight = 48.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Ochre)
+                    .clickable(role = Role.Button, onClick = onRetry)
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = stringResource(R.string.jellyfin_retry),
+                    fontFamily = Anton,
+                    fontSize = 13.sp,
+                    letterSpacing = 0.5.sp,
+                    color = Ink,
+                )
+            }
+        }
+    }
+}
+
+/** Accessible empty state view (DS08). */
+@Composable
+fun JellyfinEmptyStateView(
+    isRoot: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(horizontal = 28.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (isRoot) Icons.Default.Folder else Icons.AutoMirrored.Filled.MenuBook,
+                    contentDescription = null,
+                    tint = LeafSecondary,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+            Text(
+                text = stringResource(if (isRoot) R.string.jellyfin_no_libraries else R.string.jellyfin_no_items),
+                fontFamily = Archivo,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = stringResource(if (isRoot) R.string.jellyfin_no_libraries_detail else R.string.jellyfin_no_items_detail),
+                fontFamily = Archivo,
+                fontSize = 11.5.sp,
+                lineHeight = 16.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
             )
         }
     }
@@ -624,5 +827,219 @@ private fun formatFileSize(bytes: Long): String {
         mb >= 1.0 -> String.format(java.util.Locale.US, "%.1f MB", mb)
         kb >= 1.0 -> String.format(java.util.Locale.US, "%.0f KB", kb)
         else -> "$bytes B"
+    }
+}
+
+// =============================================================================
+// PREVIEWS & ACCESSIBILITY REFERENCE GALLERY (DS01, DS08, DS12)
+// =============================================================================
+
+private fun previewMockViewsState(): JellyfinBrowserState = JellyfinBrowserState(
+    currentParentId = null,
+    currentTitle = "Jellyfin Libraries",
+    breadcrumbs = emptyList(),
+    views = listOf(
+        JellyfinView("v1", "Comics", "books"),
+        JellyfinView("v2", "Manga", "books"),
+        JellyfinView("v3", "Graphic Novels", "books"),
+    ),
+    items = emptyList(),
+    downloadedItemIds = emptySet(),
+    selectedItemIds = emptySet(),
+    loading = false,
+    failure = null,
+    generation = 1L,
+)
+
+private fun previewMockItemsState(): JellyfinBrowserState = JellyfinBrowserState(
+    currentParentId = "v1",
+    currentTitle = "Comics / Spider-Man",
+    breadcrumbs = emptyList(),
+    views = emptyList(),
+    items = listOf(
+        JellyfinItem(id = "c1", name = "Spider-Man #01.cbz", isFolder = false, container = "cbz", sizeBytes = 32_500_000L, played = true),
+        JellyfinItem(id = "c2", name = "Spider-Man #02.cbz", isFolder = false, container = "cbz", sizeBytes = 28_400_000L, playbackPositionTicks = 40_000L),
+        JellyfinItem(id = "c3", name = "Spider-Man #03.cbz", isFolder = false, container = "cbz", sizeBytes = 35_100_000L),
+        JellyfinItem(id = "f1", name = "Spider-Gwen Series", isFolder = true),
+    ),
+    downloadedItemIds = setOf("c1"),
+    selectedItemIds = setOf("c2"),
+    loading = false,
+    failure = null,
+    generation = 2L,
+)
+
+@Preview(name = "Light Theme - Libraries", showBackground = true)
+@Composable
+fun JellyfinBrowserPreviewLight() {
+    ComicReaderTheme(mode = ThemeMode.LIGHT) {
+        Surface {
+            JellyfinBrowserScreenContent(
+                browser = previewMockViewsState(),
+                importing = false,
+                importProgress = null,
+                importDetail = null,
+                snackbarHostState = remember { SnackbarHostState() },
+                onBack = {},
+                onClearSelection = {},
+                onSelectAll = {},
+                onToggleSelection = {},
+                onItemClick = {},
+                onViewClick = {},
+                onImportSelected = {},
+                onCancelImport = {},
+                onRetry = {},
+            )
+        }
+    }
+}
+
+@Preview(name = "Dark Theme - Libraries", showBackground = true)
+@Composable
+fun JellyfinBrowserPreviewDark() {
+    ComicReaderTheme(mode = ThemeMode.DARK) {
+        Surface {
+            JellyfinBrowserScreenContent(
+                browser = previewMockViewsState(),
+                importing = false,
+                importProgress = null,
+                importDetail = null,
+                snackbarHostState = remember { SnackbarHostState() },
+                onBack = {},
+                onClearSelection = {},
+                onSelectAll = {},
+                onToggleSelection = {},
+                onItemClick = {},
+                onViewClick = {},
+                onImportSelected = {},
+                onCancelImport = {},
+                onRetry = {},
+            )
+        }
+    }
+}
+
+@Preview(name = "AMOLED Theme - Libraries", showBackground = true)
+@Composable
+fun JellyfinBrowserPreviewAmoled() {
+    ComicReaderTheme(mode = ThemeMode.DARK, amoled = true) {
+        Surface {
+            JellyfinBrowserScreenContent(
+                browser = previewMockViewsState(),
+                importing = false,
+                importProgress = null,
+                importDetail = null,
+                snackbarHostState = remember { SnackbarHostState() },
+                onBack = {},
+                onClearSelection = {},
+                onSelectAll = {},
+                onToggleSelection = {},
+                onItemClick = {},
+                onViewClick = {},
+                onImportSelected = {},
+                onCancelImport = {},
+                onRetry = {},
+            )
+        }
+    }
+}
+
+@Preview(name = "Dark Theme - Items & Selection", showBackground = true)
+@Composable
+fun JellyfinBrowserPreviewItems() {
+    ComicReaderTheme(mode = ThemeMode.DARK) {
+        Surface {
+            JellyfinBrowserScreenContent(
+                browser = previewMockItemsState(),
+                importing = false,
+                importProgress = null,
+                importDetail = null,
+                snackbarHostState = remember { SnackbarHostState() },
+                onBack = {},
+                onClearSelection = {},
+                onSelectAll = {},
+                onToggleSelection = {},
+                onItemClick = {},
+                onViewClick = {},
+                onImportSelected = {},
+                onCancelImport = {},
+                onRetry = {},
+            )
+        }
+    }
+}
+
+@Preview(name = "Dark Theme - Offline Error State", showBackground = true)
+@Composable
+fun JellyfinBrowserPreviewOfflineError() {
+    ComicReaderTheme(mode = ThemeMode.DARK) {
+        Surface {
+            JellyfinBrowserScreenContent(
+                browser = previewMockViewsState().copy(failure = JellyfinFailureKind.UNAVAILABLE),
+                importing = false,
+                importProgress = null,
+                importDetail = null,
+                snackbarHostState = remember { SnackbarHostState() },
+                onBack = {},
+                onClearSelection = {},
+                onSelectAll = {},
+                onToggleSelection = {},
+                onItemClick = {},
+                onViewClick = {},
+                onImportSelected = {},
+                onCancelImport = {},
+                onRetry = {},
+            )
+        }
+    }
+}
+
+@Preview(name = "Dark Theme - In-Progress Download", showBackground = true)
+@Composable
+fun JellyfinBrowserPreviewDownloading() {
+    ComicReaderTheme(mode = ThemeMode.DARK) {
+        Surface {
+            JellyfinBrowserScreenContent(
+                browser = previewMockItemsState(),
+                importing = true,
+                importProgress = 0.54f,
+                importDetail = "Downloading Spider-Man #02.cbz (15.3 MB / 28.4 MB)",
+                snackbarHostState = remember { SnackbarHostState() },
+                onBack = {},
+                onClearSelection = {},
+                onSelectAll = {},
+                onToggleSelection = {},
+                onItemClick = {},
+                onViewClick = {},
+                onImportSelected = {},
+                onCancelImport = {},
+                onRetry = {},
+            )
+        }
+    }
+}
+
+@Preview(name = "Large Font Scale 1.5x", fontScale = 1.5f, showBackground = true)
+@Composable
+fun JellyfinBrowserPreviewLargeFont() {
+    ComicReaderTheme(mode = ThemeMode.DARK) {
+        Surface {
+            JellyfinBrowserScreenContent(
+                browser = previewMockItemsState(),
+                importing = false,
+                importProgress = null,
+                importDetail = null,
+                snackbarHostState = remember { SnackbarHostState() },
+                onBack = {},
+                onClearSelection = {},
+                onSelectAll = {},
+                onToggleSelection = {},
+                onItemClick = {},
+                onViewClick = {},
+                onImportSelected = {},
+                onCancelImport = {},
+                onRetry = {},
+            )
+        }
     }
 }
