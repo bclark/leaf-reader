@@ -18,7 +18,14 @@ struct SmbSettingsView: View {
                 Section("Connection") {
                     TextField("Server (optional :port)", text: $profile.host)
                         .keyboardType(.URL)
-                    TextField("Share / optional base folder", text: $profile.share)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Share / optional base folder")
+                            .font(.subheadline)
+                            .fixedSize(horizontal: false, vertical: true)
+                        TextField("", text: $profile.share)
+                            .textFieldStyle(.roundedBorder)
+                            .accessibilityLabel(Text("Share / optional base folder"))
+                    }
                     TextField("Username (optional DOMAIN\\user)", text: $profile.username)
                     SecureField("Password", text: $password)
                 }
@@ -52,7 +59,7 @@ struct SmbSettingsView: View {
                 // Keychain can outlive an uninstall; do not reuse an orphaned secret for a new server.
                 guard SmbProfile.load() != nil else { return }
                 do { password = try SmbKeychainCredentials().password(profileID: SmbProfile.credentialID) ?? "" }
-                catch { message = "Could not read the saved password. Unlock your device and retry." }
+                catch { message = String(localized: "Could not read the saved password. Unlock your device and retry.") }
             }
             .onDisappear { task?.cancel(); password = "" }
             .onChange(of: scenePhase) { phase in if phase == .background { task?.cancel() } }
@@ -65,7 +72,7 @@ struct SmbSettingsView: View {
             try profile.save(password: password)
             onSaved()
             dismiss()
-        } catch { message = "Could not save. Check the server, port, share and account fields, and unlock your device." }
+        } catch { message = String(localized: "Could not save. Check the server, port, share and account fields, and unlock your device.") }
     }
 
     private func forget() {
@@ -74,8 +81,8 @@ struct SmbSettingsView: View {
             profile = SmbProfile()
             password = ""
             onSaved()
-            message = "Connection and saved password removed."
-        } catch { message = "Could not remove the saved password. Unlock your device and retry." }
+            message = String(localized: "Connection and saved password removed.")
+        } catch { message = String(localized: "Could not remove the saved password. Unlock your device and retry.") }
     }
 
     private func test() {
@@ -93,8 +100,8 @@ struct SmbSettingsView: View {
                 let transport = SmbTransport(credentials: credentials,
                     factory: { try NativeSmbSession(connection: $0, password: $1) })
                 _ = try await transport.list(connection, path: config.basePath)
-                message = "Connected. The configured folder is accessible."
-            } catch is CancellationError { message = "Connection test cancelled." }
+                message = String(localized: "Connected. The configured folder is accessible.")
+            } catch is CancellationError { message = String(localized: "Connection test cancelled.") }
             catch { message = SmbTransportError.map(error).localizedDescription }
         }
     }

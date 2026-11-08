@@ -17,7 +17,7 @@ struct SmbKeychainCredentials: SmbCredentialStore {
 
     struct KeychainError: Error, LocalizedError {
         let status: OSStatus
-        var errorDescription: String? { "Could not access the saved SMB password (\(status))." }
+        var errorDescription: String? { String(localized: "Could not access the saved SMB password (\(status)).") }
     }
 
     private func query(_ profileID: String) -> [String: Any] {

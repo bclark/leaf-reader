@@ -10,7 +10,7 @@ enum CbrConverter {
         case noImages
         var errorDescription: String? {
             switch self {
-            case .noImages: return "No image pages found in this archive"
+            case .noImages: return String(localized: "No image pages found in this archive")
             }
         }
     }

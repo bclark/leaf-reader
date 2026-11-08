@@ -1,0 +1,79 @@
+{
+  "identifier": "A1F5F35B-29C4-4D59-92D7-138B4AAC1234",
+  "nonRenewingSubscriptions": [],
+  "products": [
+    {
+      "displayPrice": "1.99",
+      "familyShareable": false,
+      "internalID": "100000",
+      "localizations": [
+        {
+          "description": "Optional one-time support for Leaf development. No features or content are unlocked.",
+          "displayName": "Small tip",
+          "locale": "en_US"
+        },
+        {
+          "description": "Apoya el desarrollo de Leaf. No desbloquea nada.",
+          "displayName": "Propina pequeña",
+          "locale": "es_MX"
+        }
+      ],
+      "productID": "net.digitalbc.leafreader.tip.small",
+      "referenceName": "Small tip",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "4.99",
+      "familyShareable": false,
+      "internalID": "100001",
+      "localizations": [
+        {
+          "description": "Optional one-time support for Leaf development. No features or content are unlocked.",
+          "displayName": "Medium tip",
+          "locale": "en_US"
+        },
+        {
+          "description": "Apoya el desarrollo de Leaf. No desbloquea nada.",
+          "displayName": "Propina mediana",
+          "locale": "es_MX"
+        }
+      ],
+      "productID": "net.digitalbc.leafreader.tip.medium",
+      "referenceName": "Medium tip",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "9.99",
+      "familyShareable": false,
+      "internalID": "100002",
+      "localizations": [
+        {
+          "description": "Optional one-time support for Leaf development. No features or content are unlocked.",
+          "displayName": "Large tip",
+          "locale": "en_US"
+        },
+        {
+          "description": "Apoya el desarrollo de Leaf. No desbloquea nada.",
+          "displayName": "Propina grande",
+          "locale": "es_MX"
+        }
+      ],
+      "productID": "net.digitalbc.leafreader.tip.large",
+      "referenceName": "Large tip",
+      "type": "Consumable"
+    }
+  ],
+  "settings": {
+    "_applicationInternalID": "",
+    "_developerTeamID": "",
+    "_failTransactionsEnabled": false,
+    "_locale": "en_US",
+    "_storefront": "USA",
+    "_storeKitErrors": []
+  },
+  "subscriptionGroups": [],
+  "version": {
+    "major": 3,
+    "minor": 0
+  }
+}

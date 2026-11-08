@@ -142,9 +142,9 @@ struct LeafWordmark: View {
 
 /// The rotated ochre "kicker" banner (e.g. YOUR LIBRARY) with ink frame + hard shadow.
 struct OchreBadge: View {
-    let text: String
+    let text: LocalizedStringKey
     var body: some View {
-        Text(text.uppercased())
+        Text(text)
             .font(.anton(15))
             .tracking(0.6)
             .foregroundColor(Leaf.ink)
@@ -185,7 +185,8 @@ struct BookStatusBadgeIcon: View {
                 )
         }
         .frame(width: 24, height: 24)
-        .accessibilityLabel(isAllCompleted ? "Mark all as unread" : "Mark all as read")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(isAllCompleted ? String(localized: "Mark all as unread") : String(localized: "Mark all as read"))
     }
 }
 

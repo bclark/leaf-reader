@@ -16,6 +16,7 @@ struct MenuView: View {
     @State private var pendingPreview: BackupPreview?
     @State private var showingRestoreSheet = false
     @State private var selectedStrategy: BackupConflictStrategy = .mostRecent
+    @State private var showingTips = false
     @State private var toastMessage: String?
     @State private var errorMessage: String?
     @State private var showingErrorAlert = false
@@ -24,7 +25,6 @@ struct MenuView: View {
     private static let upstreamURL = URL(string: "https://github.com/batunii/chika")!
     private static let privacyURL = URL(string: "https://github.com/bclark/leaf-reader/blob/main/PRIVACY.md")!
     private static let licensesURL = URL(string: "https://github.com/bclark/leaf-reader/blob/main/THIRD_PARTY_NOTICES.md")!
-    private static let kofiURL = URL(string: "https://ko-fi.com/bryanclark")!
 
     private var version: String {
         let info = Bundle.main.infoDictionary
@@ -102,8 +102,8 @@ struct MenuView: View {
                                     .font(.archivo(14, weight: 700))
                                     .foregroundColor(Leaf.text)
                                 Text(settings.pageFitMode == .fitWidth
-                                     ? "Fit page to screen width for easier reading of small text and speech bubbles."
-                                     : "Fit the entire page on screen.")
+                                     ? String(localized: "Fit page to screen width for easier reading of small text and speech bubbles.")
+                                     : String(localized: "Fit the entire page on screen."))
                                     .font(.archivo(12, weight: 400))
                                     .foregroundColor(Leaf.secondaryText)
 
@@ -267,11 +267,11 @@ struct MenuView: View {
                         Text("A comic reader for iOS")
                             .font(.archivo(14, weight: 600)).foregroundColor(Leaf.text)
                         Spacer().frame(height: 14)
-                        Text("Leaf is an offline comic reader with on-device ML panel detection, interactive page flip, and multi-format archives.")
+                        Text("Leaf is an offline comic reader with interactive page turns, reading lists, and support for CBZ, CBR, and PDF files.")
                             .font(.archivo(13)).lineSpacing(4).foregroundColor(Leaf.text)
                         Spacer().frame(height: 14)
                         Link(destination: Self.repoURL) {
-                            Text("Source: github.com/bclark/leaf-reader")
+                            Text("Source and support (English): github.com/bclark/leaf-reader")
                                 .font(.archivo(11, weight: 600)).foregroundColor(Leaf.goldText)
                                 .padding(.top, 2)
                         }
@@ -288,7 +288,7 @@ struct MenuView: View {
                         Spacer().frame(height: 18)
                         Link(destination: Self.privacyURL) {
                             HStack {
-                                Text("Privacy policy — Leaf collects no data.")
+                                Text("Privacy policy (English) — Leaf collects no data.")
                                     .font(.archivo(12)).foregroundColor(Leaf.text)
                                 Spacer()
                                 Image(systemName: "arrow.up.right")
@@ -301,7 +301,7 @@ struct MenuView: View {
                         Spacer().frame(height: 8)
                         Link(destination: Self.licensesURL) {
                             HStack {
-                                Text("Open-source licenses & notices.")
+                                Text("Open-source licenses & notices (English).")
                                     .font(.archivo(12)).foregroundColor(Leaf.text)
                                 Spacer()
                                 Image(systemName: "arrow.up.right")
@@ -323,13 +323,13 @@ struct MenuView: View {
                             .foregroundColor(Leaf.text)
                         Spacer().frame(height: 12)
                         Button {
-                            UIApplication.shared.open(Self.kofiURL)
+                            showingTips = true
                         } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: "heart.fill")
                                     .font(.system(size: 16))
                                     .foregroundColor(Leaf.cream)
-                                Text("TIP ON KO-FI")
+                                Text("LEAVE A TIP")
                                     .font(.anton(15))
                                     .tracking(0.5)
                                     .foregroundColor(Leaf.cream)
@@ -341,15 +341,8 @@ struct MenuView: View {
                             .comicShadow(offset: 4, color: .black.opacity(0.6), corner: 4)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Tip on Ko-fi")
-                        .accessibilityHint("Opens ko-fi.com/bryanclark in external web browser")
-
-                        Spacer().frame(height: 6)
-                        Link(destination: Self.kofiURL) {
-                            Text("ko-fi.com/bryanclark")
-                                .font(.archivo(11, weight: 600))
-                                .foregroundColor(Leaf.goldText)
-                        }
+                        .accessibilityLabel("Leave a tip")
+                        .accessibilityHint("Choose an optional one-time purchase. All features remain free.")
 
                         Spacer().frame(height: 24)
 
@@ -423,9 +416,9 @@ struct MenuView: View {
         ) { result in
             switch result {
             case .success:
-                showToast("✓ Backup exported successfully")
+                showToast(String(localized: "✓ Backup exported successfully"))
             case .failure(let error):
-                errorMessage = "Export failed: \(error.localizedDescription)"
+                errorMessage = String(localized: "Export failed: \(error.localizedDescription)")
                 showingErrorAlert = true
             }
         }
@@ -438,7 +431,7 @@ struct MenuView: View {
             case .success(let urls):
                 guard let url = urls.first else { return }
                 guard url.startAccessingSecurityScopedResource() else {
-                    errorMessage = "Could not access selected file."
+                    errorMessage = String(localized: "Could not access selected file.")
                     showingErrorAlert = true
                     return
                 }
@@ -460,10 +453,11 @@ struct MenuView: View {
                     showingErrorAlert = true
                 }
             case .failure(let error):
-                errorMessage = "Failed to open file: \(error.localizedDescription)"
+                errorMessage = String(localized: "Failed to open file: \(error.localizedDescription)")
                 showingErrorAlert = true
             }
         }
+        .sheet(isPresented: $showingTips) { TipJarView() }
         .sheet(isPresented: $showingRestoreSheet) {
             if let preview = pendingPreview, let payload = pendingBackupPayload {
                 RestorePreviewSheet(
@@ -481,7 +475,7 @@ struct MenuView: View {
                         )
                         library.refresh()
                         showingRestoreSheet = false
-                        showToast("✓ Restored \(result.restoredComics) comics · \(result.restoredLists) lists")
+                        showToast(String(localized: "✓ Restored \(result.restoredComics) comics · \(result.restoredLists) lists"))
                     },
                     onCancel: {
                         showingRestoreSheet = false
@@ -494,7 +488,7 @@ struct MenuView: View {
         .alert("Backup Error", isPresented: $showingErrorAlert) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(errorMessage ?? "An unknown error occurred.")
+            Text(errorMessage ?? String(localized: "An unknown error occurred."))
         }
     }
 
@@ -649,7 +643,7 @@ private struct RestorePreviewSheet: View {
                                         .font(.system(size: 13))
                                         .foregroundColor(Leaf.secondaryText)
                                         .frame(width: 20)
-                                    Text(preview.hasSettings ? "Includes app preferences" : "No preferences included")
+                                    Text(preview.hasSettings ? String(localized: "Includes app preferences") : String(localized: "No preferences included"))
                                         .font(.archivo(13, weight: 600))
                                         .foregroundColor(Leaf.text)
                                 }
@@ -738,10 +732,10 @@ private struct RestorePreviewSheet: View {
 
 /// Uppercase ochre section kicker (Archivo, wide tracking) — matches the Android SectionLabel.
 private struct SectionLabel: View {
-    let text: String
-    init(_ text: String) { self.text = text }
+    let text: LocalizedStringKey
+    init(_ text: LocalizedStringKey) { self.text = text }
     var body: some View {
-        Text(text.uppercased())
+        Text(text)
             .font(.archivo(9, weight: 800)).tracking(2.5).foregroundColor(Leaf.goldText)
     }
 }
@@ -750,8 +744,8 @@ private struct SectionLabel: View {
 /// surface follows the resolved appearance and AMOLED preference.
 private struct ToggleRow: View {
     @EnvironmentObject private var settings: LeafSettings
-    let title: String
-    let subtitle: String
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
     @Binding var isOn: Bool
 
     var body: some View {
@@ -769,6 +763,10 @@ private struct ToggleRow: View {
         .clipShape(RoundedCornerShape(cornerRadius: 6))
         .contentShape(Rectangle())
         .onTapGesture { withAnimation(.easeInOut(duration: 0.15)) { isOn.toggle() } }
+        .accessibilityRepresentation {
+            Toggle(title, isOn: $isOn)
+                .accessibilityHint(Text(subtitle))
+        }
     }
 }
 
@@ -794,7 +792,7 @@ private struct LeafSwitch: View {
 /// Two-option layout selector (Single page vs Two-page spread), matching Android's LayoutChoice.
 private struct LayoutChoiceView: View {
     @EnvironmentObject private var settings: LeafSettings
-    let title: String
+    let title: LocalizedStringKey
     @Binding var isSpread: Bool
 
     var body: some View {

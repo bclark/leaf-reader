@@ -11,22 +11,22 @@ enum BackupConflictStrategy: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .mostRecent:
-            return "Most Recent (Recommended)"
+            return String(localized: "Most Recent (Recommended)")
         case .overwrite:
-            return "Overwrite"
+            return String(localized: "Overwrite")
         case .keepLocal:
-            return "Keep Local"
+            return String(localized: "Keep Local")
         }
     }
 
     var subtitle: String {
         switch self {
         case .mostRecent:
-            return "Keeps the latest reading progress between backup and device."
+            return String(localized: "Keeps the latest reading progress between backup and device.")
         case .overwrite:
-            return "Always replaces local progress with backup data."
+            return String(localized: "Always replaces local progress with backup data.")
         case .keepLocal:
-            return "Retains local progress; only restores reading lists and preferences."
+            return String(localized: "Retains local progress; only restores reading lists and preferences.")
         }
     }
 }

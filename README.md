@@ -64,7 +64,7 @@ Leaf lets you read comics your way: choose between **guided panel-by-panel readi
 - **Instant Library Search:** Real-time title search and filtering across your entire comic library.
 - **Reading Progress Sync:** Automatically saves and resumes your exact page **and** panel position per comic.
 - **AMOLED True-Black Theme:** High-contrast true-black mode for OLED screens and battery savings.
-- **Privacy & 100% Offline Core:** Declares no external cloud dependencies, zero analytics, zero telemetry, and zero ads. The `INTERNET` permission is used strictly for connecting to your local LAN Samba (SMB) shares.
+- **Privacy & 100% Offline Core:** Reading has no external cloud dependencies. Leaf has zero analytics, zero telemetry, and zero ads. The Android `INTERNET` permission is used strictly for connecting to your local LAN Samba (SMB) shares. iOS also offers optional one-time tips processed by Apple; all features remain free and local reading does not require connectivity.
 
 ---
 

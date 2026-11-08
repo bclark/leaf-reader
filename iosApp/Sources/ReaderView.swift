@@ -173,7 +173,7 @@ struct ReaderView: View {
         do {
             let archive = try CbzArchive(url: comicURL)
             let loader = PageLoader(archive: archive)
-            guard loader.pageCount > 0 else { state = .failed("No image pages found in this archive"); return }
+            guard loader.pageCount > 0 else { state = .failed(String(localized: "No image pages found in this archive")); return }
             pageCount = loader.pageCount
             ReadingProgress.resyncTotalIfNeeded(comicURL, actualTotal: pageCount)
             rightToLeft = ReadingProgress.readingDirection(comicURL)
@@ -188,7 +188,7 @@ struct ReaderView: View {
             ReadingProgress.markOpened(comicURL)
             loadCurrentAndAdjacent(loader: loader, targetPage: page)
         } catch {
-            state = .failed("Could not open archive: \(error.localizedDescription)")
+            state = .failed(String(localized: "Could not open archive: \(error.localizedDescription)"))
         }
     }
 
@@ -618,56 +618,33 @@ struct ReaderView: View {
     }
 
     private var topBar: some View {
-        HStack(alignment: .center, spacing: 6) {
-            Button { dismiss() } label: {
-                Image(systemName: "arrow.left")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(Leaf.cream)
-                    .frame(width: 38, height: 38)
-                    .background(Leaf.cream.opacity(0.12))
-                    .clipShape(Circle())
-            }
-            .accessibilityIdentifier("BackButton")
-            .accessibilityLabel("Back")
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.archivo(14, weight: 800)).foregroundColor(Leaf.cream).lineLimit(1)
-                    .accessibilityIdentifier("TopBarTitle")
-                Text(pageStatus).font(.archivo(10)).tracking(1.4).foregroundColor(Leaf.creamMuted)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .accessibilityIdentifier("PageStatus")
-            }
-            Spacer(minLength: 0)
-
-            SpreadChip(spreadEnabled: isSpreadActive(for: UIScreen.main.bounds.size)) {
-                let screen = UIScreen.main.bounds.size
-                let isLandscape = screen.width > screen.height
-                if isLandscape {
-                    settings.landscapeSpread.toggle()
-                } else {
-                    settings.portraitSpread.toggle()
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button { dismiss() } label: {
+                    Image(systemName: "arrow.left")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(Leaf.cream)
+                        .frame(width: 44, height: 44)
+                        .background(Leaf.cream.opacity(0.12))
+                        .clipShape(Circle())
                 }
-                if case .ready(let l) = state {
-                    loadCurrentAndAdjacent(loader: l, targetPage: page)
-                }
-            }
-            .accessibilityIdentifier("SpreadChip")
+                .accessibilityIdentifier("BackButton")
+                .accessibilityLabel("Back")
 
-            FitModeChip(fitMode: settings.pageFitMode) {
-                settings.pageFitMode = (settings.pageFitMode == .fitPage ? .fitWidth : .fitPage)
-                resetZoom()
-            }
-            .accessibilityIdentifier("FitModeChip")
-
-            DirectionChip(rightToLeft: rightToLeft) {
-                rightToLeft.toggle()
-                persist()
-                if case .ready(let l) = state {
-                    loadCurrentAndAdjacent(loader: l, targetPage: page)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.archivo(14, weight: 800)).foregroundColor(Leaf.cream).lineLimit(1)
+                        .accessibilityIdentifier("TopBarTitle")
+                    Text(pageStatus).font(.archivo(10)).tracking(1.4).foregroundColor(Leaf.creamMuted)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("PageStatus")
                 }
+                Spacer(minLength: 0)
             }
-            .accessibilityIdentifier("DirectionChip")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) { readerControls }
+                    .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 6) { readerControls }
+            }
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 18)
         .frame(maxWidth: .infinity)
@@ -679,6 +656,38 @@ struct ReaderView: View {
             )
             .ignoresSafeArea(edges: [.top, .horizontal])
         )
+    }
+
+    @ViewBuilder
+    private var readerControls: some View {
+        SpreadChip(spreadEnabled: isSpreadActive(for: UIScreen.main.bounds.size)) {
+            let screen = UIScreen.main.bounds.size
+            let isLandscape = screen.width > screen.height
+            if isLandscape {
+                settings.landscapeSpread.toggle()
+            } else {
+                settings.portraitSpread.toggle()
+            }
+            if case .ready(let l) = state {
+                loadCurrentAndAdjacent(loader: l, targetPage: page)
+            }
+        }
+        .accessibilityIdentifier("SpreadChip")
+
+        FitModeChip(fitMode: settings.pageFitMode) {
+            settings.pageFitMode = (settings.pageFitMode == .fitPage ? .fitWidth : .fitPage)
+            resetZoom()
+        }
+        .accessibilityIdentifier("FitModeChip")
+
+        DirectionChip(rightToLeft: rightToLeft) {
+            rightToLeft.toggle()
+            persist()
+            if case .ready(let l) = state {
+                loadCurrentAndAdjacent(loader: l, targetPage: page)
+            }
+        }
+        .accessibilityIdentifier("DirectionChip")
     }
 
     private var bottomBar: some View {
@@ -1145,7 +1154,7 @@ struct DirectionChip: View {
             HStack(spacing: 5) {
                 Image(systemName: "arrow.left.arrow.right")
                     .font(.system(size: 15, weight: .semibold)).foregroundColor(Leaf.cream)
-                Text(rightToLeft ? "RTL" : "LTR")
+                Text(rightToLeft ? String(localized: "RTL") : String(localized: "LTR"))
                     .font(.archivo(11, weight: 700)).tracking(1).foregroundColor(Leaf.cream)
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
@@ -1154,6 +1163,9 @@ struct DirectionChip: View {
         }
         .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
+        .accessibilityLabel(rightToLeft
+            ? Text("Reading direction: right to left")
+            : Text("Reading direction: left to right"))
         .accessibilityIdentifier("DirectionChip")
         .buttonStyle(.plain)
     }
@@ -1169,7 +1181,7 @@ struct SpreadChip: View {
             HStack(spacing: 5) {
                 Image(systemName: "book.closed")
                     .font(.system(size: 14, weight: .semibold)).foregroundColor(Leaf.cream)
-                Text(spreadEnabled ? "SPREAD" : "SINGLE")
+                Text(spreadEnabled ? String(localized: "SPREAD") : String(localized: "SINGLE"))
                     .font(.archivo(11, weight: 700)).tracking(1).foregroundColor(Leaf.cream)
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
@@ -1193,7 +1205,7 @@ struct FitModeChip: View {
             HStack(spacing: 5) {
                 Image(systemName: fitMode == .fitWidth ? "arrow.left.and.right" : "aspectratio")
                     .font(.system(size: 14, weight: .semibold)).foregroundColor(Leaf.cream)
-                Text(fitMode == .fitWidth ? "WIDTH" : "PAGE")
+                Text(fitMode == .fitWidth ? String(localized: "WIDTH") : String(localized: "PAGE"))
                     .font(.archivo(11, weight: 700)).tracking(1).foregroundColor(Leaf.cream)
             }
             .padding(.horizontal, 10).padding(.vertical, 6)

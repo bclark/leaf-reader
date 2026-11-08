@@ -23,12 +23,12 @@ enum SmbTransportError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .busy: return "Another SMB operation is still finishing."
-        case .invalidEndpoint: return "The SMB server address is invalid."
-        case .authentication: return "The server rejected access. Check the account and share permissions."
-        case .unavailable: return "Could not reach the SMB server. Check Wi-Fi, the server address, and Leaf’s Local Network access in Settings, then retry."
-        case .timeout: return "The SMB server did not respond in time. Check the connection and Local Network access in Settings, then retry."
-        case .io: return "The SMB operation could not be completed."
+        case .busy: return String(localized: "Another SMB operation is still finishing.")
+        case .invalidEndpoint: return String(localized: "The SMB server address is invalid.")
+        case .authentication: return String(localized: "The server rejected access. Check the account and share permissions.")
+        case .unavailable: return String(localized: "Could not reach the SMB server. Check Wi-Fi, the server address, and Leaf’s Local Network access in Settings, then retry.")
+        case .timeout: return String(localized: "The SMB server did not respond in time. Check the connection and Local Network access in Settings, then retry.")
+        case .io: return String(localized: "The SMB operation could not be completed.")
         }
     }
 

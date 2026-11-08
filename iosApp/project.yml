@@ -8,17 +8,21 @@ configFiles:
   Release: Config.xcconfig
 options:
   bundleIdPrefix: com.chakra
+  schemePathPrefix: "../"
+  developmentLanguage: en
+  knownRegions: [en, es-MX]
   deploymentTarget:
     iOS: "16.0"
 
 settings:
   base:
     SWIFT_VERSION: "5.9"
+    SWIFT_EMIT_LOC_STRINGS: YES
     # App Store versioning: CI overrides these per release (see release-ios workflow); the
     # defaults keep local archives valid. CURRENT_PROJECT_VERSION must increase monotonically
     # per App Store Connect upload.
-    MARKETING_VERSION: "0.3.2"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "2026110601"
     # Automatic signing. Set your Apple Developer Team ID in Local.xcconfig (or override with
     # xcodebuild DEVELOPMENT_TEAM=XXXXXXXXXX for CI/App Store archives).
     CODE_SIGN_STYLE: Automatic
@@ -45,7 +49,10 @@ targets:
     platform: iOS
     sources:
       - path: Sources
+        excludes:
+          - "*.tflite"
     dependencies:
+      - sdk: StoreKit.framework
       - package: AMSMB2
         embed: true
         codeSign: true
@@ -141,6 +148,10 @@ targets:
     platform: iOS
     sources:
       - path: Tests
+        excludes:
+          - "*.storekit"
+      - path: Tests/LeafTips.storekit
+        buildPhase: resources
     dependencies:
       - target: Leaf
     settings:
@@ -168,5 +179,19 @@ schemes:
         - LeafTests
     run:
       config: Debug
+    archive:
+      config: Release
+
+  Leaf Tips Local:
+    build:
+      targets:
+        Leaf: all
+        LeafTests: [test]
+    test:
+      targets:
+        - LeafTests
+    run:
+      config: Debug
+      storeKitConfiguration: Tests/LeafTips.storekit
     archive:
       config: Release

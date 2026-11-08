@@ -35,22 +35,22 @@ struct SeriesDetailView: View {
     }
 
     var heroButtonText: String {
-        guard let target = nextUnread else { return "START" }
-        let title = (library.metadata[target.lastPathComponent]?.title ?? target.deletingPathExtension().lastPathComponent).uppercased()
+        guard let target = nextUnread else { return String(localized: "START") }
+        let title = (library.metadata[target.lastPathComponent]?.title ?? target.deletingPathExtension().lastPathComponent)
         if allRead {
-            let firstTitle = (seriesComics.first.flatMap { library.metadata[$0.lastPathComponent]?.title ?? $0.deletingPathExtension().lastPathComponent } ?? title).uppercased()
-            return "READ FROM START: \(firstTitle)"
+            let firstTitle = (seriesComics.first.flatMap { library.metadata[$0.lastPathComponent]?.title ?? $0.deletingPathExtension().lastPathComponent } ?? title)
+            return String(localized: "READ FROM START: \(firstTitle)")
         }
         let started = (ReadingProgress.get(target)?.page ?? 0) > 0
-        return "\(started ? "CONTINUE" : "START"): \(title)"
+        return started ? String(localized: "CONTINUE: \(title)") : String(localized: "START: \(title)")
     }
 
     /// Compact action pill label matching Android's redesigned hero card (`START`, `CONTINUE`, `RESTART`).
     var shortActionLabel: String {
-        guard let target = nextUnread else { return "START" }
-        if allRead { return "RESTART" }
+        guard let target = nextUnread else { return String(localized: "START") }
+        if allRead { return String(localized: "RESTART") }
         let started = (ReadingProgress.get(target)?.page ?? 0) > 0 || completedCount > 0
-        return started ? "CONTINUE" : "START"
+        return started ? String(localized: "CONTINUE") : String(localized: "START")
     }
 
     var body: some View {
@@ -133,12 +133,12 @@ struct SeriesDetailView: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(seriesName.uppercased())
+                Text(seriesName)
                     .font(.anton(18))
                     .foregroundColor(Leaf.cream)
                     .lineLimit(1)
                 if let vol = volume, !vol.isEmpty {
-                    Text(vol.uppercased())
+                    Text(vol)
                         .font(.archivo(11, weight: 600))
                         .foregroundColor(Leaf.creamMuted)
                 } else {
@@ -182,14 +182,14 @@ struct SeriesDetailView: View {
                                 openComic = OpenComic(url: url)
                             } label: {
                                 Label(
-                                    lastPage > 0 ? "Continue Reading (pg \(lastPage + 1))" : "Read Comic",
+                                    lastPage > 0 ? String(localized: "Continue Reading (pg \(lastPage + 1))") : String(localized: "Read Comic"),
                                     systemImage: "play.fill"
                                 )
                             }
                             Button {
                                 library.markComicsRead(urls: [url], read: !isRead)
                             } label: {
-                                Label(isRead ? "Mark as Unread" : "Mark as Read", systemImage: "checkmark.circle")
+                                Label(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: "checkmark.circle")
                             }
                             Button(role: .destructive) {
                                 comicToRemove = url
@@ -209,8 +209,8 @@ struct SeriesDetailView: View {
     private var heroCard: some View {
         let badgeColor = allRead ? BookStatusBadgeIcon.completedGreen : Leaf.ochre
         let statusText = seriesComics.isEmpty
-            ? "0 ISSUES"
-            : "\(completedCount) OF \(seriesComics.count) READ"
+            ? String(localized: "0 ISSUES")
+            : String(localized: "\(completedCount) OF \(seriesComics.count) READ")
         let progressFraction = seriesComics.isEmpty ? 0.0 : Double(completedCount) / Double(seriesComics.count)
 
         return HStack(spacing: 12) {
@@ -321,7 +321,7 @@ struct SeriesDetailView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(addSearchQuery.isEmpty ? Leaf.secondaryText : Leaf.ochre)
+                            .foregroundColor(addSearchQuery.isEmpty ? Leaf.secondaryText : Leaf.goldText)
                         TextField("SEARCH BY TITLE OR SERIES…", text: $addSearchQuery)
                             .font(.archivo(13, weight: 600))
                             .foregroundColor(Leaf.text)
@@ -348,7 +348,7 @@ struct SeriesDetailView: View {
 
                     if availableComics.isEmpty {
                         VStack(spacing: 8) {
-                            Text(q.isEmpty ? "No other comics available to add." : "No comics matching “\(addSearchQuery)”")
+                            Text(q.isEmpty ? String(localized: "No other comics available to add.") : String(localized: "No comics matching “\(addSearchQuery)”"))
                                 .font(.archivo(13))
                                 .foregroundColor(Leaf.secondaryText)
                         }
@@ -377,10 +377,10 @@ struct SeriesDetailView: View {
                                     Spacer()
                                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                                         .font(.system(size: 18))
-                                        .foregroundColor(isSelected ? Leaf.ochre : Leaf.secondaryText)
+                                        .foregroundColor(isSelected ? Leaf.goldText : Leaf.secondaryText)
                                 }
                             }
-                            .listRowBackground(Leaf.deepInkSurface)
+                            .listRowBackground(settings.groundSoft)
                         }
                         .listStyle(.plain)
                     }
@@ -398,7 +398,7 @@ struct SeriesDetailView: View {
                         library.addToSeries(urls: Array(selectedToAdd), name: seriesName)
                         showAddComicsSheet = false
                     }
-                    .foregroundColor(selectedToAdd.isEmpty ? Leaf.secondaryText : Leaf.ochre)
+                    .foregroundColor(selectedToAdd.isEmpty ? Leaf.secondaryText : Leaf.goldText)
                     .disabled(selectedToAdd.isEmpty)
                 }
             }
@@ -450,7 +450,7 @@ struct SeriesIssueCard: View {
 
     private var issueBadge: String? {
         if let num = metadata?.issueNumber {
-            return "ISSUE #\(num.cleanNumber)"
+            return String(localized: "ISSUE #\(num.cleanNumber)")
         }
         return nil
     }
@@ -478,7 +478,7 @@ struct SeriesIssueCard: View {
                             .scaledToFill()
                     } else {
                         GeneratedCover(
-                            title: url.deletingPathExtension().lastPathComponent.uppercased(),
+                            title: url.deletingPathExtension().lastPathComponent,
                             columns: columns
                         )
                     }
@@ -500,6 +500,7 @@ struct SeriesIssueCard: View {
                                     .clipShape(Circle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel(Text("Remove from Series"))
                         }
                         Spacer()
                     }
@@ -553,8 +554,8 @@ struct SeriesIssueCard: View {
                 .padding(.top, columns >= 4 ? 6 : 9)
 
             Text(started
-                 ? "\(Int((progressFraction * 100).rounded()))% · pg \(lastPage + 1)/\(pageCount)"
-                 : "\(pageCount) pages")
+                 ? String(localized: "\(progressFraction.formatted(.percent.precision(.fractionLength(0)))) · page \(lastPage + 1) of \(pageCount)")
+                 : String(localized: "\(pageCount) pages"))
                 .font(.archivo(columns >= 4 ? 8.5 : 9.5, weight: 500))
                 .foregroundColor(started ? Leaf.goldText : Leaf.secondaryText)
                 .lineLimit(1)

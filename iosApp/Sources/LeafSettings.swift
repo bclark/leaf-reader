@@ -5,7 +5,13 @@ import LeafShared
 enum AppTheme: String, CaseIterable, Identifiable {
     case system, light, dark
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+    var title: LocalizedStringKey {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
 
 }
 

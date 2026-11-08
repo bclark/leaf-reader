@@ -10,7 +10,7 @@ Instructions and architectural context for AI coding agents working in this repo
 When a user opens a `.cbz` (ZIP) or `.cbr` (RAR/RAR5) archive, an on-device YOLO TFLite/LiteRT model (`manga_panel_detector_int8.tflite`) detects panel and speech-balloon bounding boxes. A shared Kotlin Multiplatform pipeline fills coverage gaps, orders panels in reading direction (LTR for Western comics, RTL for manga), merges tiny adjacent panels, divides oversized/spread panels along speech-balloon gaps, and frames each region with smooth camera transitions.
 
 - **License:** Mozilla Public License 2.0 (`LICENSE`), with third-party notices in `THIRD_PARTY_NOTICES.md` (notably LGPL-2.1 for `7-Zip-JBinding-4Android` and Manga109-s dataset disclosure for the bundled model).
-- **Privacy & Offline Guarantee:** Reading remains offline. Android and iOS support optional user-initiated SMB imports using shared connection, path, listing and browser policy. Network access is limited to the user-configured SMB server during explicit connection/import actions. Never add telemetry, analytics, ads, automatic network requests, or cloud dependencies. Preserve local Files import regardless of network availability (`PRIVACY.md`).
+- **Privacy & Offline Guarantee:** Reading remains offline. Android and iOS support optional user-initiated SMB imports using shared connection, path, listing and browser policy. Network access is limited to the user-configured SMB server during explicit connection/import actions and Apple StoreKit for optional iOS tips (catalog requests only when the tip UI is opened/retried, plus app-lifetime transaction observation/recovery). Never add telemetry, analytics, ads, unrelated automatic network requests, or cloud dependencies for reading. Preserve local Files import regardless of network availability (`PRIVACY.md`).
 
 ---
 
@@ -171,3 +171,9 @@ See `.github/workflows/sim-check.yml` for how CI boots simulators, seeds `iosApp
      - **Palette:** `Ink` (`#17100E`), `InkSoft` (`#2A201C`), `Crimson` (`#D11F2D`), `CrimsonBright` (`#E62534`), `Maroon` (`#7C1620`), `Cream` (`#F3E9D6`), `Ochre` (`#E0A22B`).
      - **Typography:** `Anton` (display/headers, uppercase with wide tracking) and `Archivo` (UI/body).
 
+
+## 5. Persistent iOS coordination preference
+
+Bryan’s standing instruction, recorded November 7, 2026: use [docs/IOS_ENG_NOTES.md](docs/IOS_ENG_NOTES.md) for iOS document updates, reviews, questions, decisions, completed work and incomplete or blocked work. Read it before continuing iOS coordination work and follow its preservation rules. Whenever updating another iOS document, record the update and a link in these notes; put new questions there with stable IDs. Preserve existing answers and distinguish recommendations from approved decisions.
+
+The notes are intentionally local and Git-ignored; do not delete or replace them during cleanup. Supporting documents retain their established roles, including RELEASE_COMPLIANCE.md as the final-candidate/evidence record. This preference adds a recording obligation, not a permission gate or authorization for external actions.

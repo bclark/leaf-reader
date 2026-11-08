@@ -1,0 +1,119 @@
+[
+  {
+    "key": "ios_listing",
+    "source": "# Proposed English iOS listing\n\nStatus: DRAFT — awaiting owner approval. Not entered in App Store Connect. This is an iOS-specific baseline, not a copy of the Android listing. Do not change the App Store primary language without approval.\n\nName: Leaf: Comic Reader\n\nSubtitle: Your comics, offline\n\nPromotional text: Bring your CBZ, CBR, and PDF comics into Leaf. Organize series and reading lists, then settle in with page turns and layouts that suit your screen.\n\nDescription:\n\nRead your own comics with Leaf, a free comic reader for iPhone and iPad.\n\nImport CBZ, CBR, and PDF files from Files, or connect to your own SMB drive to choose comics to download. Imported comics stay on your device and can be read offline.\n\nKeep your library organized with series and custom reading lists. Pick up where you left off, mark comics as read or unread, and choose left-to-right or right-to-left reading. Use single pages or two-page spreads, with separate portrait and landscape settings. Fit the whole page or fit its width for smaller text.\n\nChoose a light, dark, or system appearance, with true black available in dark mode. Export and restore backups of reading progress, metadata, reading lists, and preferences. Backups do not contain comic files.\n\nAll features are free. Optional one-time tips support development and unlock nothing. No Leaf account is required. Leaf has no advertising, analytics, or developer-operated cloud library.\n\nYou supply your own comic files. No comic catalog is included.\n\nKeywords: comics,manga,cbz,cbr,pdf,offline,reader,reading,list,series\n\nSupport destination (English): https://github.com/bclark/leaf-reader/issues\nPrivacy destination (English): https://github.com/bclark/leaf-reader/blob/main/PRIVACY.md\n\n## Proposed tip product copy\n\n| Tier | Display name | Description | Approved US base price |\n| --- | --- | --- | --- |\n| Small | Small tip | Support Leaf’s development. Unlocks nothing. | USD 1.99 |\n| Medium | Medium tip | Support Leaf’s development. Unlocks nothing. | USD 4.99 |\n| Large | Large tip | Support Leaf’s development. Unlocks nothing. | USD 9.99 |\n\nProduct identifiers and existing App Store Connect products still require confirmation. Apple supplies runtime names and localized prices; these drafts do not set MXN prices.\n\n## Approval and release checks\n\nOwner approval: pending. English listing accuracy and metadata limits: pending final account entry validation. Spanish metadata must be drafted from this baseline and approved separately. Do not claim panel detection in the shipping iOS build: the model is excluded from packaging. Do not advertise Spanish support until language review and localization QA are complete. Screenshots must come from the actual tested build with user-owned or synthetic content.\n",
+    "translation": "# Propuesta de ficha de Leaf para iOS — español de México\n\nEstado: BORRADOR — pendiente de revisión por una persona que domine el español de México. No se ha publicado ni ingresado en App Store Connect.\nRevisor de idioma: sin asignar.\nAprobación del propietario: pendiente para esta ficha y sus metadatos.\nFecha del borrador: 6 de noviembre de 2026.\nFecha de revisión y aprobación: pendiente.\nFuente: IOS_LISTING_EN_DRAFT.md, propuesta específica para iOS. No procede de la ficha de Android.\n\nNombre: Leaf: Lector de cómics\n\nSubtítulo: Tus cómics, sin conexión\n\nTexto promocional: Importa tus cómics CBZ, CBR y PDF en Leaf. Organiza series y listas de lectura y disfruta de cambios de página y diseños que se adaptan a tu pantalla.\n\nDescripción:\n\nLee tus propios cómics con Leaf, un lector gratuito para iPhone y iPad.\n\nImporta archivos CBZ, CBR y PDF desde Archivos, o conecta tu propia unidad SMB para elegir qué cómics descargar. Los cómics importados permanecen en tu dispositivo y puedes leerlos sin conexión.\n\nOrganiza tu biblioteca con series y listas de lectura personalizadas. Retoma la lectura donde la dejaste, marca cómics como leídos o sin leer y elige leer de izquierda a derecha o de derecha a izquierda. Usa páginas individuales o vistas de dos páginas, con ajustes independientes para las orientaciones vertical y horizontal. Ajusta la página completa o su ancho para leer texto pequeño.\n\nElige una apariencia clara, oscura o del sistema, con negro puro disponible en modo oscuro. Exporta y restaura respaldos de tu avance de lectura, metadatos, listas de lectura y preferencias. Los respaldos no incluyen los archivos de los cómics.\n\nTodas las funciones son gratuitas. Las propinas opcionales son compras únicas que apoyan el desarrollo y no desbloquean nada. No necesitas una cuenta de Leaf. Leaf no tiene publicidad, analítica ni una biblioteca en la nube administrada por el desarrollador.\n\nTú proporcionas tus archivos de cómics. No se incluye un catálogo de cómics.\n\nPalabras clave: cómics,manga,cbz,cbr,pdf,sin conexión,lector,lectura,lista,series\n\nDestino de soporte vigente (en inglés): https://github.com/bclark/leaf-reader/issues\nDestino de privacidad vigente (en inglés): https://github.com/bclark/leaf-reader/blob/main/PRIVACY.md\n\n## Propuesta de metadatos de las propinas\n\n| Nivel | Nombre visible | Descripción | Precio base aprobado en Estados Unidos |\n| --- | --- | --- | --- |\n| Pequeña | Propina pequeña | Apoya el desarrollo de Leaf. No desbloquea nada. | USD 1.99 |\n| Mediana | Propina mediana | Apoya el desarrollo de Leaf. No desbloquea nada. | USD 4.99 |\n| Grande | Propina grande | Apoya el desarrollo de Leaf. No desbloquea nada. | USD 9.99 |\n\nLos identificadores y los productos existentes en App Store Connect aún requieren confirmación. Apple proporciona los nombres y precios localizados que se muestran en la app. Estos valores son precios base en USD; este borrador no establece precios en MXN.\n\n## Revisión y publicación pendientes\n\nLa ficha requiere aprobación del propietario y revisión de una persona que domine el español de México. Los límites de metadatos y la exactitud de la ficha deben validarse al ingresarla en la cuenta. No cambiar el idioma principal de App Store sin aprobación.\n\nNo anunciar detección de paneles en la versión de iOS que se distribuye: el modelo está excluido del paquete. No anunciar compatibilidad con español hasta completar la revisión de idioma y las pruebas de localización. Las capturas deben proceder de la versión realmente probada y usar contenido propio o sintético. Este documento no confirma que el español ya esté disponible públicamente.\n",
+    "context": "Unpublished prose draft from docs/localization/IOS_LISTING_EN_DRAFT.md; review complete document for meaning and Mexican Spanish fluency. Destination docs/localization/IOS_LISTING_ES_MX_DRAFT.md.",
+    "placeholders": [],
+    "status": "Draft — awaiting fluent Mexican Spanish review; owner approval pending; not published",
+    "reviewer": null,
+    "approval": null,
+    "date": "2026-11-06"
+  },
+  {
+    "key": "ios_support",
+    "source": "# Leaf iOS support baseline\n\nStatus: DRAFT for owner approval and translation. The live support destination remains English: https://github.com/bclark/leaf-reader/issues\n\nImport comics from Files using Load Comic, or choose From SMB Drive to connect to your own server. Leaf supports CBZ, CBR, and PDF. Imported copies remain on your device for offline reading. Leaf does not include comic books.\n\nIf SMB cannot connect, check Wi-Fi, the server address and share, your account permissions, and Leaf’s Local Network permission in iOS Settings. You can still import local files. Forget Connection removes the saved SMB password from the device Keychain.\n\nBackups include reading progress, metadata, reading lists, and preferences; they do not include comic files. Keep your original comic files separately. Deleting an imported comic removes Leaf’s copy, not your original file.\n\nLeaf follows iOS’s per-app language setting and standard language matching. There is no language selector inside Leaf. Mexican Spanish is currently an unreviewed draft; its availability in a development build is not a claim of release readiness.\n\nOptional tips support development and unlock nothing. Apple handles purchases. If a tip is pending, you may keep reading. Check Apple purchase history before trying again if its outcome is unclear. Choosing another tip is a separate purchase and does not cancel the pending one.\n\nFor help, open an issue at the English support destination. Do not post passwords, server credentials, private comics, receipts, or other personal information. Include your Leaf version, iOS version, device model, and steps to reproduce the problem. Screenshots are optional; remove personal information before sharing them.\n",
+    "translation": "# Soporte de Leaf para iOS — borrador en español de México\n\nEstado: BORRADOR — pendiente de revisión por una persona que domine el español de México. No publicado.\nRevisor de idioma: sin asignar.\nAprobación del propietario: pendiente.\nFecha del borrador: 6 de noviembre de 2026.\nFecha de revisión y aprobación: pendiente.\nFuente: IOS_SUPPORT_EN_DRAFT.md.\nDestino de soporte vigente (en inglés): https://github.com/bclark/leaf-reader/issues\nDestino de privacidad vigente (en inglés): https://github.com/bclark/leaf-reader/blob/main/PRIVACY.md\n\nImporta cómics desde Archivos con la opción para cargar un cómic («Load Comic» en inglés), o elige la opción de unidad SMB («From SMB Drive») para conectar tu propio servidor. Leaf admite CBZ, CBR y PDF. Las copias importadas permanecen en tu dispositivo para que puedas leer sin conexión. Leaf no incluye cómics.\n\nSi no puedes conectarte por SMB, revisa el Wi-Fi, la dirección del servidor, el recurso compartido, los permisos de tu cuenta y el permiso de Red local de Leaf en Configuración de iOS. Puedes seguir importando archivos locales. La opción para olvidar la conexión («Forget Connection») elimina la contraseña SMB guardada del llavero del dispositivo.\n\nLos respaldos incluyen el avance de lectura, los metadatos, las listas de lectura y las preferencias; no incluyen los archivos de los cómics. Conserva tus archivos originales por separado. Al eliminar un cómic importado, se borra la copia de Leaf, no tu archivo original.\n\nLeaf usa el ajuste de idioma por app de iOS y la selección de idioma estándar del sistema. No hay un selector de idioma dentro de Leaf. La traducción al español de México es actualmente un borrador sin revisar; que esté disponible en una versión de desarrollo no significa que esté lista para publicarse.\n\nLas propinas opcionales apoyan el desarrollo y no desbloquean nada. Apple gestiona las compras. Si una propina está pendiente, puedes seguir leyendo. Si no sabes si se completó, revisa el historial de compras de Apple antes de volver a intentarlo. Elegir otra propina es una compra independiente y no cancela la que está pendiente.\n\nPara pedir ayuda, abre un reporte en el destino de soporte en inglés. No publiques contraseñas, credenciales de servidores, cómics privados, recibos ni otros datos personales. Incluye tu versión de Leaf, la versión de iOS, el modelo de tu dispositivo y los pasos para reproducir el problema. Las capturas de pantalla son opcionales; elimina cualquier dato personal antes de compartirlas.\n",
+    "context": "Unpublished prose draft from docs/localization/IOS_SUPPORT_EN_DRAFT.md; review complete document for meaning and Mexican Spanish fluency. Destination docs/localization/IOS_SUPPORT_ES_MX_DRAFT.md.",
+    "placeholders": [],
+    "status": "Draft — awaiting fluent Mexican Spanish review; owner approval pending; not published",
+    "reviewer": null,
+    "approval": null,
+    "date": "2026-11-06"
+  },
+  {
+    "key": "privacy",
+    "source": "# Leaf Privacy Policy\n\n_Last updated: 6 November 2026_\n\nLeaf reads and stores your comics on your device. Reading and local Files imports work without an internet connection.\n\n## Data we collect\n\n**None is collected by us.** Leaf has no telemetry or service that collects your data.\n\n- Leaf has no telemetry, tracking, or cloud sync. Android and iOS support opt-in connections to your own SMB/Samba server. SMB connections send authentication and file requests only to the server explicitly configured for that operation. There is no automatic discovery or background sync.\n- iOS SMB passwords are stored in the device-only, non-synchronizing Keychain and are accessible while the device is unlocked. Completed downloads are imported locally and remain readable without a network connection.\n- Comics you import are copied into the app's private storage on your device and are readable only by Leaf.\n- Reading progress, library metadata, and settings are stored locally on your device only.\n- Where a build includes panel detection, it runs entirely on-device. The iOS App Store packaging excludes the model. No page images or derived data are ever uploaded anywhere.\n- Leaf contains no analytics, no crash reporting, no advertising, and no third-party tracking SDKs.\n\n## Data sharing\n\nLeaf does not upload your library, reading activity, or settings to us. Optional SMB imports communicate with your chosen server; optional iOS tips use Apple’s purchase services as described below.\n\n## Optional iOS tips\n\nLeaf offers optional, repeatable one-time tips through Apple’s in-app purchase system. All app features remain free, and a tip unlocks no content or privileges. Loading tip options and making a purchase require access to Apple’s services; reading, Files imports, settings, and backups do not depend on purchases or connectivity.\n\nApple processes payments and purchase information under its own privacy policy. Leaf uses StoreKit on your device to verify and finish tip transactions, including purchases completed after an interruption. Leaf does not send receipts or transaction details to a developer-operated server and does not add analytics. A pending tip’s product identifier may be stored locally to show its status; it is not a record of your library or payment details. Apple retains its purchase records independently of uninstalling Leaf.\n\n## Data deletion\n\nUninstalling the app deletes imported comic copies, covers, reading progress, and app settings. iOS Keychain items can survive uninstall; removing an SMB connection must explicitly delete its saved password. Use Forget Connection in SMB Drive settings to delete the saved password.\n\n## External links\n\nThe app's menu contains a link to the project's GitHub page. Opening it hands off to your browser; the standard privacy terms of GitHub then apply.\n\n## Children\n\nLeaf does not collect data from anyone, including children.\n\n## Changes\n\nAny change to this policy will be published at this URL alongside the app's source code.\n\n## Contact\n\nQuestions? Open an issue at <https://github.com/bclark/leaf-reader/issues>.\n",
+    "translation": "# Política de privacidad de Leaf — borrador en español de México\n\nEstado: BORRADOR — pendiente de revisión por una persona que domine el español de México. No publicado; no reemplaza la política vigente en inglés.\nRevisor de idioma: sin asignar.\nAprobación del propietario: pendiente.\nFecha del borrador: 6 de noviembre de 2026.\nFecha de revisión y aprobación: pendiente.\nFuente: PRIVACY.md, actualizado el 6 de noviembre de 2026.\nPolítica vigente (en inglés): https://github.com/bclark/leaf-reader/blob/main/PRIVACY.md\nContacto y soporte vigentes (en inglés): https://github.com/bclark/leaf-reader/issues\n\nLeaf lee y guarda tus cómics en tu dispositivo. La lectura y la importación local desde Archivos funcionan sin conexión a internet.\n\n## Datos que recopilamos\n\n**No recopilamos ninguno.** Leaf no tiene telemetría ni un servicio que recopile tus datos.\n\n- Leaf no tiene telemetría, rastreo ni sincronización en la nube. Android y iOS permiten conexiones opcionales a tu propio servidor SMB/Samba. Las conexiones SMB envían solicitudes de autenticación y de archivos únicamente al servidor que hayas configurado expresamente para esa operación. No hay detección automática de servidores ni sincronización en segundo plano.\n- En iOS, las contraseñas SMB se guardan en el llavero exclusivo del dispositivo, sin sincronización, y están disponibles mientras el dispositivo está desbloqueado. Las descargas completadas se importan de forma local y se pueden seguir leyendo sin conexión de red.\n- Los cómics que importas se copian en el almacenamiento privado de la app en tu dispositivo y solo Leaf puede leerlos.\n- El avance de lectura, los metadatos de la biblioteca y los ajustes se guardan únicamente de forma local en tu dispositivo.\n- Cuando una versión incluye detección de paneles, esta se ejecuta por completo en el dispositivo. El paquete de iOS para App Store excluye el modelo. Nunca se suben imágenes de páginas ni datos derivados a ningún destino.\n- Leaf no incluye analítica, reportes de fallos, publicidad ni SDK de rastreo de terceros.\n\n## Uso compartido de datos\n\nLeaf no nos envía tu biblioteca, tu actividad de lectura ni tus ajustes. Las importaciones opcionales por SMB se comunican con el servidor que elijas; las propinas opcionales de iOS usan los servicios de compra de Apple, como se describe a continuación.\n\n## Propinas opcionales en iOS\n\nLeaf ofrece propinas opcionales mediante el sistema de compras dentro de la app de Apple. Son compras únicas que puedes repetir. Todas las funciones de la app siguen siendo gratuitas, y una propina no desbloquea contenido ni privilegios. Cargar las opciones de propina y realizar una compra requiere acceso a los servicios de Apple; la lectura, las importaciones desde Archivos, los ajustes y los respaldos no dependen de compras ni de una conexión.\n\nApple procesa los pagos y la información de las compras conforme a su propia política de privacidad. Leaf usa StoreKit en tu dispositivo para verificar y finalizar las transacciones de propinas, incluidas las compras que se completan después de una interrupción. Leaf no envía recibos ni detalles de transacciones a un servidor administrado por el desarrollador y no agrega analítica. El identificador de producto de una propina pendiente puede guardarse de forma local para mostrar su estado; no es un registro de tu biblioteca ni de tus datos de pago. Apple conserva sus registros de compras independientemente de que desinstales Leaf.\n\n## Eliminación de datos\n\nAl desinstalar la app se eliminan las copias de cómics importados, las portadas, el avance de lectura y los ajustes de la app. Los elementos del llavero de iOS pueden permanecer después de desinstalarla; al quitar una conexión SMB, es necesario eliminar expresamente su contraseña guardada. Usa la opción para olvidar la conexión («Forget Connection») en los ajustes de la unidad SMB para borrar la contraseña guardada.\n\n## Enlaces externos\n\nEl menú de la app contiene un enlace a la página del proyecto en GitHub. Al abrirlo, se abre tu navegador; a partir de ese momento se aplican las condiciones de privacidad habituales de GitHub.\n\n## Menores de edad\n\nLeaf no recopila datos de ninguna persona, incluidos los menores de edad.\n\n## Cambios\n\nCualquier cambio en esta política se publicará en la dirección de la política vigente indicada arriba, junto con el código fuente de la app.\n\n## Contacto\n\nSi tienes preguntas, abre un reporte en https://github.com/bclark/leaf-reader/issues.\n",
+    "context": "Unpublished prose draft from PRIVACY.md; review complete document for meaning and Mexican Spanish fluency. Destination docs/localization/IOS_PRIVACY_ES_MX_DRAFT.md.",
+    "placeholders": [],
+    "status": "Draft — awaiting fluent Mexican Spanish review; owner approval pending; not published",
+    "reviewer": null,
+    "approval": null,
+    "date": "2026-11-06"
+  },
+  {
+    "key": "ios_listing.name",
+    "source": "Leaf: Comic Reader",
+    "translation": "Leaf: Lector de cómics",
+    "context": "Proposed iOS App Store metadata; owner approval pending. Product base prices USD 1.99/4.99/9.99; no MXN pricing set.",
+    "placeholders": [],
+    "status": "Draft — awaiting fluent Mexican Spanish review; not published",
+    "reviewer": null,
+    "approval": null,
+    "date": "2026-11-06",
+    "characterCount": 22
+  },
+  {
+    "key": "ios_listing.subtitle",
+    "source": "Your comics, offline",
+    "translation": "Tus cómics, sin conexión",
+    "context": "Proposed iOS App Store metadata; owner approval pending. Product base prices USD 1.99/4.99/9.99; no MXN pricing set.",
+    "placeholders": [],
+    "status": "Draft — awaiting fluent Mexican Spanish review; not published",
+    "reviewer": null,
+    "approval": null,
+    "date": "2026-11-06",
+    "characterCount": 24
+  },
+  {
+    "key": "ios_listing.keywords",
+    "source": "comics,manga,cbz,cbr,pdf,offline,reader,reading,list,series",
+    "translation": "cómics,manga,cbz,cbr,pdf,sin conexión,lector,lectura,lista,series",
+    "context": "Proposed iOS App Store metadata; owner approval pending. Product base prices USD 1.99/4.99/9.99; no MXN pricing set.",
+    "placeholders": [],
+    "status": "Draft — awaiting fluent Mexican Spanish review; not published",
+    "reviewer": null,
+    "approval": null,
+    "date": "2026-11-06",
+    "characterCount": 65
+  },
+  {
+    "key": "ios_listing.small_tip",
+    "source": "Small tip",
+    "translation": "Propina pequeña",
+    "context": "Proposed iOS App Store metadata; owner approval pending. Product base prices USD 1.99/4.99/9.99; no MXN pricing set.",
+    "placeholders": [],
+    "status": "Draft — awaiting fluent Mexican Spanish review; not published",
+    "reviewer": null,
+    "approval": null,
+    "date": "2026-11-06",
+    "characterCount": 15
+  },
+  {
+    "key": "ios_listing.medium_tip",
+    "source": "Medium tip",
+    "translation": "Propina mediana",
+    "context": "Proposed iOS App Store metadata; owner approval pending. Product base prices USD 1.99/4.99/9.99; no MXN pricing set.",
+    "placeholders": [],
+    "status": "Draft — awaiting fluent Mexican Spanish review; not published",
+    "reviewer": null,
+    "approval": null,
+    "date": "2026-11-06",
+    "characterCount": 15
+  },
+  {
+    "key": "ios_listing.large_tip",
+    "source": "Large tip",
+    "translation": "Propina grande",
+    "context": "Proposed iOS App Store metadata; owner approval pending. Product base prices USD 1.99/4.99/9.99; no MXN pricing set.",
+    "placeholders": [],
+    "status": "Draft — awaiting fluent Mexican Spanish review; not published",
+    "reviewer": null,
+    "approval": null,
+    "date": "2026-11-06",
+    "characterCount": 14
+  },
+  {
+    "key": "ios_listing.tip_description",
+    "source": "Support Leaf’s development. Unlocks nothing.",
+    "translation": "Apoya el desarrollo de Leaf. No desbloquea nada.",
+    "context": "Proposed iOS App Store metadata; owner approval pending. Product base prices USD 1.99/4.99/9.99; no MXN pricing set.",
+    "placeholders": [],
+    "status": "Draft — awaiting fluent Mexican Spanish review; not published",
+    "reviewer": null,
+    "approval": null,
+    "date": "2026-11-06",
+    "characterCount": 48
+  }
+]

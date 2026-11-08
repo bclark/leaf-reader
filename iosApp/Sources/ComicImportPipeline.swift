@@ -12,10 +12,10 @@ enum ComicImportError: Error, LocalizedError {
     case invalidName, invalidComic, sizeMismatch, collision
     var errorDescription: String? {
         switch self {
-        case .invalidName: return "The comic filename is invalid."
-        case .invalidComic: return "The file is not a readable comic archive or PDF."
-        case .sizeMismatch: return "The downloaded file is incomplete."
-        case .collision: return "A comic with this name already exists."
+        case .invalidName: return String(localized: "The comic filename is invalid.")
+        case .invalidComic: return String(localized: "The file is not a readable comic archive or PDF.")
+        case .sizeMismatch: return String(localized: "The downloaded file is incomplete.")
+        case .collision: return String(localized: "A comic with this name already exists.")
         }
     }
 }

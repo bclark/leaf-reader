@@ -14,8 +14,8 @@ enum CbrReader {
         case open, read
         var errorDescription: String? {
             switch self {
-            case .open: return "Could not open the archive"
-            case .read: return "Could not read the archive"
+            case .open: return String(localized: "Could not open the archive")
+            case .read: return String(localized: "Could not read the archive")
             }
         }
     }

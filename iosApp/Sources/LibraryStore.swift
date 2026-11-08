@@ -65,7 +65,7 @@ final class LibraryStore: ObservableObject {
             } catch is CancellationError {
                 // Cancellation is not a failed comic.
             } catch {
-                importError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)"
+                importError = String(localized: "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)")
             }
         }
     }
@@ -252,7 +252,7 @@ final class LibraryStore: ObservableObject {
 
                         items.append(
                             .seriesStack(
-                                seriesName: metadata[group[0].lastPathComponent]?.series ?? "Series",
+                                seriesName: metadata[group[0].lastPathComponent]?.series ?? String(localized: "Series"),
                                 volume: nil,
                                 issues: sortedIssues,
                                 topCoverComic: nextIssue,
@@ -288,7 +288,7 @@ final class LibraryStore: ObservableObject {
                 let unreadCount = sortedIssues.count { !ReadingProgress.isCompleted($0) }
 
                 return LibraryItem.seriesStack(
-                    seriesName: metadata[group[0].lastPathComponent]?.series ?? "Series",
+                    seriesName: metadata[group[0].lastPathComponent]?.series ?? String(localized: "Series"),
                     volume: nil,
                     issues: sortedIssues,
                     topCoverComic: nextIssue,

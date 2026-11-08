@@ -8,7 +8,14 @@ public enum LibraryFilter: String, CaseIterable, Identifiable {
     case unread = "UNREAD"
 
     public var id: String { rawValue }
-    public var label: String { rawValue }
+    public var label: String {
+        switch self {
+        case .all: return String(localized: "ALL")
+        case .series: return String(localized: "SERIES")
+        case .readingLists: return String(localized: "LISTS")
+        case .unread: return String(localized: "UNREAD")
+        }
+    }
 }
 
 /// Sealed representation of items in the library grid: single comic, series stack, or reading list stack.

@@ -1,0 +1,191 @@
+{
+  "date": "2026-11-06",
+  "status": "Engineering UI verification only; translations remain drafts awaiting fluent Mexican Spanish review.",
+  "source": "HEAD 0f03e38 + dirty working tree; later captures include menu, SMB share-label, and series accessibility fixes.",
+  "version": "1.0",
+  "build": "2026110601",
+  "scheme": "Leaf Tips Local",
+  "device": {
+    "name": "Leaf SMB QA",
+    "uuid": "81F7ADFA-4D16-4C66-9035-B9A3B6E64D53",
+    "model": "iPhone Duo",
+    "iOS": "27.1",
+    "capturePoints": "466×678",
+    "appContentWidthPoints": 382,
+    "orientation": "portrait; compact display includes system sidebar"
+  },
+  "language": {
+    "primary": "es-MX",
+    "region": "es_MX",
+    "mechanism": "AppleLanguages / AppleLocale launch arguments; no app locale override",
+    "additionalMatching": [
+      "es",
+      "es-ES"
+    ],
+    "additionalMatchingResult": "Both launch requests rendered Spanish library strings using available es-MX localization."
+  },
+  "storekit": {
+    "configuration": "Tests/LeafTips.storekit",
+    "locale": "en_US",
+    "storefront": "USA",
+    "observedProductNames": [
+      "Small tip",
+      "Medium tip",
+      "Large tip"
+    ],
+    "observedPrices": [
+      "$1.99",
+      "$4.99",
+      "$9.99"
+    ],
+    "note": "Independent of app language/region; not evidence of Mexican storefront prices. No purchase attempted in this QA pass."
+  },
+  "checked": [
+    "Library tabs, header, empty state, accented CÓMIC labels",
+    "Synthetic QA Español 001/002 series stack, issue labels, 3 páginas and 2 números · 2 sin leer",
+    "Menu appearance, Claro/Oscuro changes, icon labels",
+    "Backup section, about version, explicit English legal/support destinations",
+    "SMB settings without network access; fixed persistent share label normal and AX5",
+    "Tip sheet app copy and product cards at normal and largest Dynamic Type, scroll behavior",
+    "Generic es and es-ES library visual matching",
+    "Final hierarchy confirms menu MENÚ, single mark-all label, Quitar de la serie labels"
+  ],
+  "fixedIssues": [
+    "Menu inherited Arrastrar SF Symbol label: parent added MENÚ accessibility label, verified",
+    "SMB long share placeholder truncated: parent added persistent wrapping label, verified normal/AX5",
+    "Mark-all accessibility repeated label: parent combined semantics, verified single button label",
+    "Series remove xmark labeled Cerrar: parent added Quitar de la serie, verified"
+  ],
+  "notChecked": [
+    "iPad and conventional non-Duo iPhone",
+    "Successful landscape layout: requested landscapeLeft twice; device reported landscape but app remained portrait in compact Duo presentation",
+    "Actual per-app language picker in system Settings",
+    "Live local-network permission prompt/server or real SMB import",
+    "Real App Store Mexico storefront, Mexican prices, external account changes",
+    "Purchase, cancellation, pending/refund flows in this pass (covered separately by native tests per parent)",
+    "Full app largest-Dynamic-Type matrix: checked tip sheet/cards and SMB share label only",
+    "Reading-list creation/detail, reader control interaction, complete backup export/restore",
+    "Fluent Mexican Spanish review, owner release approval, publishing"
+  ],
+  "cleanup": {
+    "session": "closed",
+    "scheme": "Leaf",
+    "destination": "Bryan’s iPhone",
+    "dynamicType": "restored large",
+    "theme": "restored Dark; AMOLED on and automatic icon unchanged",
+    "fixtures": "Removed only QA Español 001.cbz and QA Español 002.cbz copies. No user comics replaced. Derived metadata/cache may remain in isolated simulator.",
+    "language": "Launch arguments only, not persisted to scheme."
+  },
+  "screenshots": [
+    {
+      "file": "library_es-MX_iphone-duo_portrait.png",
+      "hierarchyTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_28_06_947-hierarchy.txt",
+      "logsTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_28_06_947-logs.txt",
+      "language": "es-MX",
+      "region": "es_MX",
+      "dynamicType": "large",
+      "storekitLocale": "en_US",
+      "storefront": "USA"
+    },
+    {
+      "file": "appearance_es-MX_iphone-duo_light.png",
+      "hierarchyTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_28_38_622-hierarchy.txt",
+      "logsTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_28_38_622-logs.txt",
+      "language": "es-MX",
+      "region": "es_MX",
+      "dynamicType": "large",
+      "storekitLocale": "en_US",
+      "storefront": "USA"
+    },
+    {
+      "file": "backup_about_es-MX_iphone-duo_light.png",
+      "hierarchyTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_29_17_424-hierarchy.txt",
+      "logsTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_29_17_424-logs.txt",
+      "language": "es-MX",
+      "region": "es_MX",
+      "dynamicType": "large",
+      "storekitLocale": "en_US",
+      "storefront": "USA"
+    },
+    {
+      "file": "support_es-MX_iphone-duo_light.png",
+      "hierarchyTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_29_26_199-hierarchy.txt",
+      "logsTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_29_26_199-logs.txt",
+      "language": "es-MX",
+      "region": "es_MX",
+      "dynamicType": "large",
+      "storekitLocale": "en_US",
+      "storefront": "USA"
+    },
+    {
+      "file": "tips_es-MX_iphone-duo_us-storekit.png",
+      "hierarchyTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_29_41_832-hierarchy.txt",
+      "logsTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_29_41_832-logs.txt",
+      "language": "es-MX",
+      "region": "es_MX",
+      "dynamicType": "large",
+      "storekitLocale": "en_US",
+      "storefront": "USA"
+    },
+    {
+      "file": "tip_cards_es-MX_iphone-duo_ax5.png",
+      "hierarchyTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_29_56_065-hierarchy.txt",
+      "logsTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_29_56_065-logs.txt",
+      "language": "es-MX",
+      "region": "es_MX",
+      "dynamicType": "accessibility-extra-extra-extra-large",
+      "storekitLocale": "en_US",
+      "storefront": "USA"
+    },
+    {
+      "file": "series_es-MX_iphone-duo_portrait.png",
+      "hierarchyTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_31_24_195-hierarchy.txt",
+      "logsTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_31_24_195-logs.txt",
+      "language": "es-MX",
+      "region": "es_MX",
+      "dynamicType": "large",
+      "storekitLocale": "en_US",
+      "storefront": "USA"
+    },
+    {
+      "file": "smb_es-MX_iphone-duo_fixed.png",
+      "hierarchyTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_32_12_039-hierarchy.txt",
+      "logsTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_32_12_039-logs.txt",
+      "language": "es-MX",
+      "region": "es_MX",
+      "dynamicType": "large",
+      "storekitLocale": "en_US",
+      "storefront": "USA"
+    },
+    {
+      "file": "smb_es-MX_iphone-duo_ax5.png",
+      "hierarchyTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_32_23_414-hierarchy.txt",
+      "logsTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_32_23_414-logs.txt",
+      "language": "es-MX",
+      "region": "es_MX",
+      "dynamicType": "accessibility-extra-extra-extra-large",
+      "storekitLocale": "en_US",
+      "storefront": "USA"
+    },
+    {
+      "file": "library_es_iphone-duo_matching.png",
+      "hierarchyTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_33_00_530-hierarchy.txt",
+      "logsTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_33_00_530-logs.txt",
+      "language": "es",
+      "region": "es_MX",
+      "dynamicType": "large",
+      "storekitLocale": "en_US",
+      "storefront": "USA"
+    },
+    {
+      "file": "library_es-ES_iphone-duo_matching.png",
+      "hierarchyTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_33_22_585-hierarchy.txt",
+      "logsTemporaryPath": "/var/folders/9h/9wkh47m11wz2hdczg3p5zmjm0000gn/T/ActionArtifacts/757E1016-63C5-4277-9BDD-05B0A5D3F459/DeviceInteractionSynthesize/Verify Mexican Spanish Localization-08_33_22_585-logs.txt",
+      "language": "es-ES",
+      "region": "es_MX",
+      "dynamicType": "large",
+      "storekitLocale": "en_US",
+      "storefront": "USA"
+    }
+  ]
+}

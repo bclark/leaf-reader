@@ -106,10 +106,10 @@ enum BackupManager {
 
     static func parseAndValidate(jsonString: String) throws -> BackupPayload {
         guard let data = jsonString.data(using: .utf8) else {
-            throw BackupError.invalidData("Could not decode string as UTF-8.")
+            throw BackupError.invalidData(String(localized: "Could not decode string as UTF-8."))
         }
         guard let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw BackupError.invalidData("File does not contain valid JSON.")
+            throw BackupError.invalidData(String(localized: "File does not contain valid JSON."))
         }
         guard let version = jsonObject["version"] as? Int else {
             throw BackupError.missingVersion
@@ -122,7 +122,7 @@ enum BackupManager {
         do {
             return try decoder.decode(BackupPayload.self, from: data)
         } catch {
-            throw BackupError.invalidData("Failed to parse backup payload: \(error.localizedDescription)")
+            throw BackupError.invalidData(String(localized: "Failed to parse backup payload: \(error.localizedDescription)"))
         }
     }
 
@@ -335,9 +335,9 @@ enum BackupError: LocalizedError {
         case .invalidData(let message):
             return message
         case .missingVersion:
-            return "Invalid backup: missing version identifier."
+            return String(localized: "Invalid backup: missing version identifier.")
         case .unsupportedVersion(let version, let expected):
-            return "Unsupported backup version \(version). Expected version \(expected)."
+            return String(localized: "Unsupported backup version \(version). Expected version \(expected).")
         }
     }
 }

@@ -113,9 +113,9 @@ enum ReaderTurnLogic {
         isSpread: Bool = false
     ) -> String {
         if let second = secondPage, isSpread {
-            return "Pages \(firstPage + 1)-\(second + 1)/\(pageCount)"
+            return String(localized: "Pages \(firstPage + 1)-\(second + 1)/\(pageCount)")
         } else {
-            return "Page \(page + 1)/\(pageCount)"
+            return String(localized: "Page \(page + 1)/\(pageCount)")
         }
     }
 

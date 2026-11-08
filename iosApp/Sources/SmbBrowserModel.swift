@@ -35,7 +35,7 @@ final class SmbBrowserModel: ObservableObject {
     func navigate(_ path: String) {
         guard !busy, let profile else { return }
         do { state = try SmbBrowserLogic.shared.begin(state: state, path: path) }
-        catch { message = "This folder path is invalid."; return }
+        catch { message = String(localized: "This folder path is invalid."); return }
         retryPath = path
         let generation = state.generation
         let pending = state.pendingPath ?? ""
@@ -110,7 +110,7 @@ final class SmbBrowserModel: ObservableObject {
                 let batchTransport = try await transport.snapshot(for: connection)
                 for (index, entry) in entries.enumerated() {
                     try Task.checkCancellation()
-                    activity = "\(index + 1) of \(entries.count): \(entry.name)"
+                    activity = String(localized: "\(index + 1) of \(entries.count): \(entry.name)")
                     fraction = nil
                     let fileID = UUID()
                     transferID = fileID
@@ -132,12 +132,12 @@ final class SmbBrowserModel: ObservableObject {
                     catch {
                         // Native exception text may include addresses or account information.
                         let detail = (error as? ComicImportError)?.localizedDescription
-                            ?? "Could not download or prepare this comic."
+                            ?? String(localized: "Could not download or prepare this comic.")
                         result.failures.append(SmbBatchSummary.Failure(name: entry.name, message: detail))
                     }
                 }
             } catch is CancellationError { }
-            catch { message = "Check the saved SMB connection and try again." }
+            catch { message = String(localized: "Check the saved SMB connection and try again.") }
             summary = result
             state = SmbBrowserLogic.shared.clearSelection(state: state)
         }
@@ -156,15 +156,15 @@ final class SmbBrowserModel: ObservableObject {
             let rate = Int64(Double(bytes) / elapsed)
             let downloaded = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
             let speed = ByteCountFormatter.string(fromByteCount: rate, countStyle: .file)
-            progressDetail = "Downloading \(downloaded) · \(speed)/s"
+            progressDetail = String(localized: "Downloading \(downloaded) · \(speed)/s")
             phase = .downloading
             transfer = SmbTransferProgress(bytesTransferred: bytes, totalBytes: total ?? 0, bytesPerSec: rate)
         case .preparing:
-            progressDetail = "Preparing comic…"
+            progressDetail = String(localized: "Preparing comic…")
             phase = .preparing
             transfer = SmbTransferProgress(bytesTransferred: 1, totalBytes: 1, bytesPerSec: 0)
         case .publishing:
-            progressDetail = "Adding to library…"
+            progressDetail = String(localized: "Adding to library…")
             phase = .importing
             transfer = SmbTransferProgress(bytesTransferred: 1, totalBytes: 1, bytesPerSec: 0)
         }

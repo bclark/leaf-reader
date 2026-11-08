@@ -41,7 +41,7 @@ public enum ReadingListStore {
     @discardableResult
     public static func createList(name: String, itemFilenames: [String] = []) -> ReadingListRecord {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let list = ReadingListRecord(name: trimmed.isEmpty ? "Reading List" : trimmed, itemFilenames: itemFilenames)
+        let list = ReadingListRecord(name: trimmed.isEmpty ? String(localized: "Reading List") : trimmed, itemFilenames: itemFilenames)
         lock.lock()
         var lists = inMemoryLists ?? loadLocked()
         lists.append(list)

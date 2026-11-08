@@ -184,7 +184,7 @@ struct LibraryView: View {
             .alert("Create Reading List", isPresented: $showCreateListAlert) {
                 TextField("e.g. Summer Crossover Event", text: $newListNameInput)
                 Button("Cancel", role: .cancel) {}
-                Button(selectedComics.isEmpty && !library.comics.isEmpty ? "Create & Add Comics" : "Create") {
+                Button(selectedComics.isEmpty && !library.comics.isEmpty ? String(localized: "Create & Add Comics") : String(localized: "Create")) {
                     let name = newListNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !name.isEmpty else { return }
                     let preselected = Array(selectedComics)
@@ -220,7 +220,7 @@ struct LibraryView: View {
             } message: {
                 Text("This removes the imported copy. The original file is untouched.")
             }
-            .alert("Delete \(selectedComics.count) \(selectedComics.count == 1 ? "comic" : "comics")?", isPresented: $showBatchDeleteAlert) {
+            .alert("Delete \(selectedComics.count) comics?", isPresented: $showBatchDeleteAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Delete", role: .destructive) {
                     withAnimation {
@@ -277,6 +277,7 @@ struct LibraryView: View {
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(Text("MENU"))
                 }
             }
 
@@ -349,131 +350,105 @@ struct LibraryView: View {
         }
     }
 
-    // Subheader row
+    // Keep display choices on their own row so the badge and editing actions
+    // cannot compress column labels. At larger text sizes the groups stack.
     private func subheader(for width: CGFloat) -> some View {
-        HStack(alignment: .center) {
-            if isEditMode {
-                OchreBadge(text: "\(selectedComics.count) SELECTED")
-            } else if !searchQuery.isEmpty {
-                OchreBadge(text: "FOUND \(currentItems.count) ITEMS")
-            } else {
-                switch selectedFilter {
-                case .all: OchreBadge(text: "Your Library")
-                case .series: OchreBadge(text: "Series Stacks")
-                case .readingLists: OchreBadge(text: "Reading Lists")
-                case .unread: OchreBadge(text: "Unread Comics")
+        VStack(alignment: .leading, spacing: 12) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    libraryStatusBadge.fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: 0)
+                    libraryEditActions.fixedSize(horizontal: true, vertical: false)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    libraryStatusBadge
+                    libraryEditActions
                 }
             }
-
-            Spacer()
-
-            HStack(spacing: 8) {
-                if !isEditMode && !library.comics.isEmpty {
-                    Button {
-                        withAnimation { isEditMode = true }
-                    } label: {
-                        Text("EDIT")
-                            .font(.anton(11))
-                            .foregroundColor(Leaf.text)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(settings.groundSoft)
-                            .clipShape(RoundedCornerShape(cornerRadius: 3))
-                            .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.ink, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                } else if isEditMode {
-                    let allSelected = !library.comics.isEmpty && selectedComics.count == library.comics.count
-                    Button {
-                        withAnimation {
-                            if allSelected { selectedComics.removeAll() }
-                            else { selectedComics = Set(library.comics) }
-                        }
-                    } label: {
-                        Text(allSelected ? "DESELECT ALL" : "SELECT ALL")
-                            .font(.anton(11))
-                            .foregroundColor(allSelected ? Leaf.ink : Leaf.text)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                            .background(allSelected ? Leaf.ochre : settings.groundSoft)
-                            .clipShape(RoundedCornerShape(cornerRadius: 3))
-                            .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.ink, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        withAnimation {
-                            isEditMode = false
-                            selectedComics.removeAll()
-                        }
-                    } label: {
-                        Text("DONE")
-                            .font(.anton(11))
-                            .foregroundColor(Leaf.ink)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(Leaf.ochre)
-                            .clipShape(RoundedCornerShape(cornerRadius: 3))
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                if !isEditMode {
-                    // Columns / Density toggle
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text("COLUMNS")
-                            .font(.archivo(7, weight: 600))
-                            .foregroundColor(Leaf.secondaryText)
-                        HStack(spacing: 1) {
-                            ForEach(availableColumns(for: width), id: \.self) { count in
-                                let isSelected = actualColumns(for: width) == count
-                                Button {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        settings.libraryColumns = count
-                                    }
-                                } label: {
-                                    Text("\(count)")
-                                        .font(.archivo(11.5, weight: 700))
-                                        .foregroundColor(isSelected ? Leaf.ink : Leaf.secondaryText)
-                                        .padding(.horizontal, 7)
-                                        .padding(.vertical, 3.5)
-                                        .background(isSelected ? Leaf.ochre : Color.clear)
-                                        .clipShape(RoundedCornerShape(cornerRadius: 2))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(1)
-                        .background(settings.groundSoft)
-                        .clipShape(RoundedCornerShape(cornerRadius: 3))
-                        .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.ink, lineWidth: 1))
-                    }
-
-                    // Global default direction
-                    Button {
-                        defaultRTL.toggle()
-                        ReadingPrefs.defaultRightToLeft = defaultRTL
-                    } label: {
-                        VStack(alignment: .trailing, spacing: 1) {
-                            Text("NEW COMICS")
-                                .font(.archivo(7, weight: 600))
-                                .foregroundColor(Leaf.secondaryText)
-                            Text(defaultRTL ? "RTL" : "LTR")
-                                .font(.archivo(12, weight: 700))
-                                .foregroundColor(Leaf.ink)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(Leaf.ochre)
-                                .clipShape(RoundedCornerShape(cornerRadius: 3))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
+            if !isEditMode {
+                LibraryDisplayControls(
+                    columns: availableColumns(for: width),
+                    selectedColumn: actualColumns(for: width),
+                    defaultRTL: $defaultRTL
+                )
             }
         }
         .padding(.horizontal, 18)
         .padding(.top, 10)
         .padding(.bottom, 6)
+    }
+
+    @ViewBuilder
+    private var libraryStatusBadge: some View {
+        if isEditMode {
+            OchreBadge(text: "\(selectedComics.count) SELECTED")
+        } else if !searchQuery.isEmpty {
+            OchreBadge(text: "FOUND \(currentItems.count) ITEMS")
+        } else {
+            switch selectedFilter {
+            case .all: OchreBadge(text: "YOUR LIBRARY")
+            case .series: OchreBadge(text: "SERIES STACKS")
+            case .readingLists: OchreBadge(text: "READING LISTS")
+            case .unread: OchreBadge(text: "UNREAD COMICS")
+            }
+        }
+    }
+
+    private var libraryEditActions: some View {
+        HStack(spacing: 8) {
+            if !isEditMode && !library.comics.isEmpty {
+                Button {
+                    withAnimation { isEditMode = true }
+                } label: {
+                    Text("EDIT")
+                        .font(.anton(11))
+                        .foregroundColor(Leaf.text)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background(settings.groundSoft)
+                        .clipShape(RoundedCornerShape(cornerRadius: 3))
+                        .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.ink, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            } else if isEditMode {
+                let allSelected = !library.comics.isEmpty && selectedComics.count == library.comics.count
+                Button {
+                    withAnimation {
+                        if allSelected { selectedComics.removeAll() }
+                        else { selectedComics = Set(library.comics) }
+                    }
+                } label: {
+                    Text(allSelected ? String(localized: "DESELECT ALL") : String(localized: "SELECT ALL"))
+                        .font(.anton(11))
+                        .foregroundColor(allSelected ? Leaf.ink : Leaf.text)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background(allSelected ? Leaf.ochre : settings.groundSoft)
+                        .clipShape(RoundedCornerShape(cornerRadius: 3))
+                        .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.ink, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    withAnimation {
+                        isEditMode = false
+                        selectedComics.removeAll()
+                    }
+                } label: {
+                    Text("DONE")
+                        .font(.anton(11))
+                        .foregroundColor(Leaf.ink)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background(Leaf.ochre)
+                        .clipShape(RoundedCornerShape(cornerRadius: 3))
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     // Main Grid Content
@@ -607,7 +582,7 @@ struct LibraryView: View {
                                     let allDone = unread == 0
                                     library.markComicsRead(urls: issues, read: !allDone)
                                 } label: {
-                                    Label(unread == 0 ? "Mark All Unread" : "Mark All Read", systemImage: "checkmark.circle")
+                                    Label(unread == 0 ? String(localized: "Mark All Unread") : String(localized: "Mark All Read"), systemImage: "checkmark.circle")
                                 }
                             }
 
@@ -660,10 +635,10 @@ struct LibraryView: View {
 
     private var emptyMessage: String {
         switch selectedFilter {
-        case .all: return "No comics yet. Tap LOAD COMIC to add a CBZ, CBR, or PDF."
-        case .series: return "No series stacks yet. Group comics by setting a Series Name."
-        case .readingLists: return "No reading lists yet. Tap CREATE LIST to make one."
-        case .unread: return "No unread comics in your library."
+        case .all: return String(localized: "No comics yet. Tap LOAD COMIC to add a CBZ, CBR, or PDF.")
+        case .series: return String(localized: "No series stacks yet. Group comics by setting a Series Name.")
+        case .readingLists: return String(localized: "No reading lists yet. Tap CREATE LIST to make one.")
+        case .unread: return String(localized: "No unread comics in your library.")
         }
     }
 
@@ -679,7 +654,7 @@ struct LibraryView: View {
     private var editActionBar: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(selectedComics.count) \(selectedComics.count == 1 ? "COMIC" : "COMICS") SELECTED")
+                Text("\(selectedComics.count) COMICS SELECTED")
                     .font(.anton(14))
                     .foregroundColor(Leaf.text)
                     .lineLimit(1)
@@ -977,7 +952,7 @@ struct ComicStackCard: View {
                                     .resizable()
                                     .scaledToFill()
                             } else {
-                                GeneratedCover(title: seriesName.uppercased(), columns: columns)
+                                GeneratedCover(title: seriesName, columns: columns)
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1004,7 +979,7 @@ struct ComicStackCard: View {
                         if let topCoverImage {
                             Image(uiImage: topCoverImage).resizable().scaledToFill()
                         } else {
-                            GeneratedCover(title: seriesName.uppercased(), columns: columns)
+                            GeneratedCover(title: seriesName, columns: columns)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1076,14 +1051,14 @@ struct ComicStackCard: View {
             )
 
             // Series Name in Archivo ExtraBold
-            Text(seriesName.uppercased())
+            Text(seriesName)
                 .font(.archivo(columns >= 4 ? 10.5 : 12, weight: 800))
                 .foregroundColor(Leaf.text)
                 .lineLimit(2)
                 .padding(.top, columns >= 4 ? 6 : 9)
 
             // Subtitle: X issues · Y unread
-            Text("\(totalIssues) issues · \(unreadIssues > 0 ? "\(unreadIssues) unread" : "all read")")
+            Text("\(totalIssues) issues · \(unreadIssues) unread")
                 .font(.archivo(columns >= 4 ? 8.5 : 9.5, weight: 600))
                 .foregroundColor(unreadIssues > 0 ? Leaf.goldText : Leaf.secondaryText)
                 .lineLimit(1)
@@ -1116,7 +1091,7 @@ struct ComicStackCard: View {
     @ViewBuilder
     private func stackBadge(issueNumber: Int) -> some View {
         HStack {
-            Text(totalIssues > 1 ? "ISSUE #\(issueNumber) OF \(totalIssues)" : (volume ?? "1 ISSUE").uppercased())
+            Text(totalIssues > 1 ? String(localized: "ISSUE #\(issueNumber) OF \(totalIssues)") : (volume ?? String(localized: "1 ISSUE")))
                 .font(.anton(columns >= 4 ? 7.5 : 8.5))
                 .foregroundColor(Leaf.cream)
                 .padding(.horizontal, columns >= 4 ? 4 : 5)
@@ -1236,7 +1211,7 @@ struct ReadingListCard: View {
                                     .resizable()
                                     .scaledToFill()
                             } else {
-                                GeneratedCover(title: list.name.uppercased(), columns: columns)
+                                GeneratedCover(title: list.name, columns: columns)
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1275,13 +1250,13 @@ struct ReadingListCard: View {
                         if let topCoverImage {
                             Image(uiImage: topCoverImage).resizable().scaledToFill()
                         } else {
-                            GeneratedCover(title: list.name.uppercased(), columns: columns)
+                            GeneratedCover(title: list.name, columns: columns)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
 
-                    Text(itemCount > 1 ? "ITEM \(currentItemNum) OF \(itemCount)" : "\(itemCount) \(itemCount == 1 ? "ITEM" : "ITEMS")")
+                    Text("ITEM \(currentItemNum) OF \(itemCount)")
                         .font(.anton(columns >= 4 ? 7.5 : 8.5))
                         .foregroundColor(Leaf.cream)
                         .padding(.horizontal, columns >= 4 ? 4 : 5)
@@ -1352,13 +1327,13 @@ struct ReadingListCard: View {
                     }
             )
 
-            Text(list.name.uppercased())
+            Text(list.name)
                 .font(.archivo(columns >= 4 ? 10.5 : 12, weight: 800))
                 .foregroundColor(Leaf.text)
                 .lineLimit(2)
                 .padding(.top, columns >= 4 ? 6 : 9)
 
-            Text("\(itemCount) \(itemCount == 1 ? "item" : "items")")
+            Text("\(itemCount) items")
                 .font(.archivo(columns >= 4 ? 8.5 : 9.5, weight: 600))
                 .foregroundColor(Leaf.secondaryText)
                 .lineLimit(1)
@@ -1396,7 +1371,7 @@ struct ComicCard: View {
     @State private var cover: UIImage?
     @State private var pages = 0
 
-    private var title: String { url.deletingPathExtension().lastPathComponent.uppercased() }
+    private var title: String { url.deletingPathExtension().lastPathComponent }
     private var lastPage: Int { progress?.page ?? 0 }
     private var pageCount: Int { progress?.total ?? pages }
     private var started: Bool { lastPage > 0 }
@@ -1456,8 +1431,8 @@ struct ComicCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, columns >= 4 ? 6 : 9)
             Text(started
-                 ? "\(Int(pct * 100))% · pg \(lastPage + 1)/\(pageCount)"
-                 : "\(pageCount) pages")
+                 ? String(localized: "\(pct.formatted(.percent.precision(.fractionLength(0)))) · page \(lastPage + 1) of \(pageCount)")
+                 : String(localized: "\(pageCount) pages"))
                 .font(.archivo(columns >= 4 ? 8.5 : 9.5)).foregroundColor(Leaf.secondaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 2)
@@ -1495,7 +1470,7 @@ struct GeneratedCover: View {
 struct AddTile: View {
     let importing: Bool
     var columns: Int = 2
-    var title: String = "LOAD COMIC"
+    var title: LocalizedStringKey = "LOAD COMIC"
     let onTap: () -> Void
 
     private var leafSize: CGFloat { columns >= 4 ? 48 : 64 }
@@ -1534,5 +1509,86 @@ struct RoundedCornerShape: Shape {
     var cornerRadius: CGFloat
     func path(in rect: CGRect) -> Path {
         Path(roundedRect: rect, cornerRadius: cornerRadius)
+    }
+}
+
+/// Display choices keep their full touch targets and reflow with available space.
+private struct LibraryDisplayControls: View {
+    let columns: [Int]
+    let selectedColumn: Int
+    @Binding var defaultRTL: Bool
+    @EnvironmentObject private var settings: LeafSettings
+    @ScaledMetric(relativeTo: .body) private var choiceSize = 15.0
+    @ScaledMetric(relativeTo: .caption) private var labelSize = 12.0
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .bottom, spacing: 16) {
+                columnChoices.fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 0)
+                directionChoice.fixedSize(horizontal: true, vertical: false)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                columnChoices
+                directionChoice
+            }
+        }
+    }
+
+    private var columnChoices: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("COLUMNS")
+                .font(.archivo(labelSize, weight: 600))
+                .foregroundColor(Leaf.secondaryText)
+            HStack(spacing: 1) {
+                ForEach(columns, id: \.self) { count in
+                    let isSelected = selectedColumn == count
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            settings.libraryColumns = count
+                        }
+                    } label: {
+                        Text("\(count)")
+                            .font(.archivo(choiceSize, weight: 700))
+                            .foregroundColor(isSelected ? Leaf.ink : Leaf.secondaryText)
+                            .padding(.horizontal, 8)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .background(isSelected ? Leaf.ochre : Color.clear)
+                            .clipShape(RoundedCornerShape(cornerRadius: 3))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("COLUMNS"))
+                    .accessibilityValue(Text("\(count)"))
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                }
+            }
+            .padding(1)
+            .background(settings.groundSoft)
+            .clipShape(RoundedCornerShape(cornerRadius: 3))
+            .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.secondaryText, lineWidth: 1))
+        }
+    }
+
+    private var directionChoice: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("NEW COMICS")
+                .font(.archivo(labelSize, weight: 600))
+                .foregroundColor(Leaf.secondaryText)
+            Button {
+                defaultRTL.toggle()
+                ReadingPrefs.defaultRightToLeft = defaultRTL
+            } label: {
+                Text(defaultRTL ? String(localized: "RTL") : String(localized: "LTR"))
+                    .font(.archivo(choiceSize, weight: 700))
+                    .foregroundColor(Leaf.ink)
+                    .padding(.horizontal, 12)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .background(Leaf.ochre)
+                    .clipShape(RoundedCornerShape(cornerRadius: 3))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("NEW COMICS"))
+            .accessibilityValue(Text(defaultRTL ? String(localized: "RTL") : String(localized: "LTR")))
+        }
     }
 }

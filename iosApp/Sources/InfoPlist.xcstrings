@@ -1,0 +1,80 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "CFBundleDisplayName" : {
+      "comment" : "Bundle display name",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Leaf"
+          }
+        },
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "machine_translated",
+            "value" : "Leaf"
+          }
+        }
+      }
+    },
+    "CFBundleName" : {
+      "comment" : "Bundle name",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Leaf"
+          }
+        },
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "machine_translated",
+            "value" : "Leaf"
+          }
+        }
+      }
+    },
+    "Comic Book RAR Archive" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "machine_translated",
+            "value" : "Archivo RAR de cómic"
+          }
+        }
+      }
+    },
+    "Comic Book ZIP Archive" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "machine_translated",
+            "value" : "Archivo ZIP de cómic"
+          }
+        }
+      }
+    },
+    "NSLocalNetworkUsageDescription" : {
+      "comment" : "Privacy - Local Network Usage Description",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Leaf connects to your SMB drive to browse and import comics you choose."
+          }
+        },
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "machine_translated",
+            "value" : "Leaf se conecta a tu unidad SMB para explorar e importar los cómics que elijas."
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.3"
+}

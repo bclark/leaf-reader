@@ -14,7 +14,7 @@ struct SmbBrowserView: View {
         NavigationStack {
             List {
                 Section {
-                    Text(model.state.path.isEmpty ? "Drive folder" : model.state.path)
+                    Text(model.state.path.isEmpty ? String(localized: "Drive folder") : model.state.path)
                         .font(.archivo(15, weight: 700))
                     HStack {
                         Button("Up") { model.up() }.disabled(model.state.path.isEmpty || model.busy)
@@ -53,7 +53,7 @@ struct SmbBrowserView: View {
                     Section {
                         if let fraction = model.fraction { ProgressView(value: fraction) }
                         else { ProgressView() }
-                        Text(model.cancelling ? "Cancelling and cleaning up…" : (model.activity.isEmpty ? "Loading folder…" : model.activity))
+                        Text(model.cancelling ? String(localized: "Cancelling and cleaning up…") : (model.activity.isEmpty ? String(localized: "Loading folder…") : model.activity))
                         if !model.progressDetail.isEmpty { Text(model.progressDetail).font(.caption) }
                         Button("Cancel", role: .cancel) { model.cancel() }.disabled(model.cancelling)
                     }
