@@ -27,14 +27,13 @@ Likely iOS integration points: `JellyfinClient.swift`, `JellyfinStore.swift`, `K
 Jellyfin represents playback position in `PlaybackPositionTicks` (100-nanosecond intervals), where **1 second = 10,000,000 ticks**.
 
 For book/comic formats in Jellyfin:
-- Page index $N$ (0-based) is mapped directly to seconds: `ticks = N * 10,000,000L`.
-- Page index derivation: `pageIndex = ticks / 10,000,000L`.
+- Page index $N$ (0-based) is mapped using Android’s comic-page convention (not seconds): `ticks = N * 10,000L`.
+- Page index derivation: `pageIndex = ticks / 10,000L`.
 
 Shared reference:
 ```kotlin
 object JellyfinProgress {
-    const val TICKS_PER_SECOND = 10_000_000L
-    const val TICKS_PER_PAGE = TICKS_PER_SECOND
+    const val TICKS_PER_PAGE = 10_000L
 
     fun pageToTicks(pageIndex: Int): Long = pageIndex.coerceAtLeast(0).toLong() * TICKS_PER_PAGE
     fun ticksToPage(ticks: Long): Int = (ticks.coerceAtLeast(0) / TICKS_PER_PAGE).toInt()
@@ -115,3 +114,6 @@ Once authenticated, include `X-Emby-Token: <AccessToken>`.
    - On iOS, configure App Transport Security (`NSAppTransportSecurity`) with `NSAllowsLocalNetworking: true` rather than opening arbitrary HTTP traffic.
 3. **Secure Credential Storage:** Store `AccessToken` and server configuration in the iOS Keychain. Never persist plain text passwords or auth tokens in `UserDefaults`.
 4. **Privacy:** Zero analytics, zero crash telemetry, 100% offline-first reading.
+
+
+Release clarification: Android progress writes are best effort. Durable retry, cross-client conflict reconciliation, pending-write cancellation at logout, and reread/completion semantics remain acceptance items. Import seeds server progress; existing downloads are not automatically reconciled. Verify installed-server round trips before porting this behavior to iOS.

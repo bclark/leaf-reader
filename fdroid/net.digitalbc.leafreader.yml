@@ -15,14 +15,14 @@ RepoType: git
 Repo: https://github.com/bclark/leaf-reader.git
 
 Builds:
-  - versionName: 0.3.6
-    versionCode: 30600
-    commit: v0.3.6
+  - versionName: 0.3.7
+    versionCode: 30700
+    commit: v0.3.7
     subdir: app
     gradle:
       - fdroid
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9.]+$
-CurrentVersion: 0.3.6
-CurrentVersionCode: 30600
+CurrentVersion: 0.3.7
+CurrentVersionCode: 30700

@@ -1,19 +1,13 @@
-Leaf is a panel-by-panel comic reader. Open a CBZ or CBR comic file and Leaf detects the panels on each
-page with an on-device machine-learning model, then guides you through them one tap at a time:
-page, then panel by panel, then back out to the whole page before turning to the next one. It turns
-pinch-and-squint full-page reading into a comfortable, guided experience on a phone or tablet.
+Leaf is an offline comic and manga reader for Android. Open your CBZ, CBR, or PDF comics and enjoy smooth whole-page reading, customizable single-page and two-page spreads, interactive page transitions, and local network drive imports.
 
 Features:
 
-* Reads CBZ (ZIP) archives in all builds, and CBR (RAR/RAR5) archives in full releases.
-* On-device panel detection — a small neural model finds panels and speech balloons. Fully offline;
-  nothing is uploaded.
-* Smart grouping — tiny adjacent panels are merged into one comfortable zoom, and oversized panels
-  are split with a bubble-aware cut.
-* Reader controls — tap to step through panels, swipe to turn pages, pinch and drag to pan, a page
-  scrubber, a "show whole page" button, and a left-to-right / right-to-left (manga) toggle.
-* Library — import comics from your device, cover thumbnails, and resume exactly where you left off
-  (page and panel).
-* Privacy-focused — no accounts, no ads, no telemetry or tracking. Network permission is used exclusively for optional user-configured SMB local network drive connections.
+* Archive Support — Reads CBZ (ZIP) archives and PDF files across all builds, plus CBR (RAR/RAR5) archives in full releases.
+* Reading Layouts — Single-page view or two-page spreads in landscape and portrait, with smart cover page handling and fit-to-page / fit-to-width modes.
+* Interactive Transitions — Smooth page turns with interactive 3D page curl or side-by-side sliding.
+* Jellyfin — Browse your server libraries, download comics, import server progress and report reading progress back. Reporting is best effort; failed offline writes are not durably retried.
+* Local SMB Drive — Connect directly to your home NAS or local network share to browse and download comic archives directly into your library.
+* Portable Backup & Restore — Export and restore your reading progress, reading lists, and layout preferences as JSON without exposing sensitive credentials or local paths.
+* Privacy-First & Offline — No accounts, no advertising, no analytics, no tracking, and no cloud dependencies. Optional network access connects directly to your configured SMB and Jellyfin servers. Jellyfin-linked reading reports progress to your server.
 
-Leaf is free and open source (Mozilla Public License 2.0), forked from Chika.
+Leaf is free and open source under the Mozilla Public License 2.0 (MPL-2.0), forked with appreciation from Chika by Chakra.
