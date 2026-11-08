@@ -1,0 +1,4 @@
+• Connect directly to Jellyfin servers to browse comic libraries and download issues for offline reading.
+• Two-way progress sync keeps your reading spot and read status synchronized between Leaf and Jellyfin.
+• Accessibility improvements: 48dp minimum touch targets and explicit TalkBack roles across all controls.
+• Updated privacy and backup controls for seamless device transfer.
