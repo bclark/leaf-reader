@@ -523,6 +523,7 @@ struct ReadingListDetailView: View {
 /// Comic card inside `ReadingListDetailView` showing sequence badge (#1, #2),
 /// top-right quick-remove (x), and bottom-right Move Up / Move Down arrows.
 struct ReadingListComicCard: View {
+    @ObservedObject private var covers = CoverLoader.shared
     @EnvironmentObject private var settings: LeafSettings
     let url: URL
     let sequenceNumber: Int
@@ -669,7 +670,7 @@ struct ReadingListComicCard: View {
                 .lineLimit(1)
                 .padding(.top, 2)
         }
-        .task {
+        .task(id: covers.revisions(for: [url])) {
             let loaded = await CoverLoader.load(for: url)
             cover = loaded.cover
             pages = loaded.pageCount

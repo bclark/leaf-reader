@@ -144,6 +144,18 @@ final class TipStore: ObservableObject {
         purchaseTask?.cancel()
     }
 
+    #if DEBUG
+    /// Fixture teardown must drain observers before SKTestSession resets shared transactions.
+    func stopForTesting() async {
+        let tasks = [listener, recovery, purchaseTask].compactMap { $0 }
+        tasks.forEach { $0.cancel() }
+        for task in tasks { await task.value }
+        listener = nil
+        recovery = nil
+        purchaseTask = nil
+    }
+    #endif
+
     func start() {
         guard listener == nil else { return }
         let stream = client.updates()

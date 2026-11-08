@@ -67,7 +67,28 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # SMB adds native cryptographic code. Leave export classification to the
         # App Store questionnaire until the dependency review is recorded.
-        NSLocalNetworkUsageDescription: "Leaf connects to your SMB drive to browse and import comics you choose."
+        NSLocalNetworkUsageDescription: "Leaf connects to your SMB drive or Jellyfin server to browse and download comics you choose."
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          # iOS 17+ requires explicit IP exceptions. The client separately requires
+          # per-connection consent and rejects public HTTP before sending credentials.
+          NSExceptionDomains:
+            "10.0.0.0/8":
+              NSExceptionAllowsInsecureHTTPLoads: true
+            "172.16.0.0/12":
+              NSExceptionAllowsInsecureHTTPLoads: true
+            "192.168.0.0/16":
+              NSExceptionAllowsInsecureHTTPLoads: true
+            "127.0.0.0/8":
+              NSExceptionAllowsInsecureHTTPLoads: true
+            "::1":
+              NSExceptionAllowsInsecureHTTPLoads: true
+            "lan":
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
+            "home.arpa":
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
         UILaunchScreen: {}
         UIAppFonts:
           - Anton-Regular.ttf
@@ -146,6 +167,8 @@ targets:
   LeafTests:
     type: bundle.unit-test
     platform: iOS
+    # Current Xcode test frameworks require iOS 17; the app still supports iOS 16.
+    deploymentTarget: "17.0"
     sources:
       - path: Tests
         excludes:

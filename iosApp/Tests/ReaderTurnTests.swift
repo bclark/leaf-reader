@@ -302,7 +302,7 @@ final class ReaderTurnTests: XCTestCase {
     func testInteractiveDragSnapBack() {
         let width: CGFloat = 400
         let pageCount = 10
-        var currentPage = 0
+        let currentPage = 0
 
         let startX = width * 0.9
         let endX = width * 0.75
@@ -656,10 +656,7 @@ final class ReaderTurnTests: XCTestCase {
 
         let cbzURL = tempDir.appendingPathComponent("TestComic-\(UUID().uuidString).cbz")
         defer { ReadingProgress.clear(cbzURL) }
-        guard let archive = Archive(url: cbzURL, accessMode: .create) else {
-            XCTFail("Could not create test CBZ archive")
-            return
-        }
+        let archive = try Archive(url: cbzURL, accessMode: .create)
 
         let colors: [UIColor] = [.systemRed, .systemGreen, .systemBlue, .systemOrange, .systemPurple, .systemTeal]
         for (i, color) in colors.enumerated() {
@@ -765,10 +762,7 @@ final class ReaderTurnTests: XCTestCase {
 
         let cbzURL = tempDir.appendingPathComponent("TestRTLSpreadComic-\(UUID().uuidString).cbz")
         defer { ReadingProgress.clear(cbzURL) }
-        guard let archive = Archive(url: cbzURL, accessMode: .create) else {
-            XCTFail("Could not create test CBZ archive")
-            return
-        }
+        let archive = try Archive(url: cbzURL, accessMode: .create)
 
         let colors: [UIColor] = [.systemRed, .systemGreen, .systemBlue, .systemOrange, .systemPurple, .systemTeal]
         for (i, color) in colors.enumerated() {

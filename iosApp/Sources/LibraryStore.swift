@@ -75,6 +75,7 @@ final class LibraryStore: ObservableObject {
     func importComicAwaitingCompletion(
         from url: URL, originalName: String? = nil, expectedBytes: Int64? = nil,
         collision: ComicImportCollision = .keepBoth,
+        beforePublish: @escaping @Sendable (URL) throws -> Void = { _ in },
         phase: @escaping @Sendable (ComicImportPhase) -> Void = { _ in }
     ) async throws -> URL {
         pendingImports += 1
@@ -85,12 +86,15 @@ final class LibraryStore: ObservableObject {
         }
         let result = try await importPipeline.importFile(from: url,
             originalName: originalName ?? url.lastPathComponent, expectedBytes: expectedBytes,
-            collision: collision, phase: phase)
+            collision: collision, beforePublish: beforePublish, phase: phase)
         // Do not check cancellation after publication: finish this transaction consistently.
         ReadingProgress.markOpened(result.url)
-        if ComicMetadataStore.get(result.url) == nil {
+        if ComicMetadataStore.get(result.url)?.userModified != true {
             ComicMetadataStore.set(result.url, metadata: result.metadata)
         }
+        ReadingProgress.resyncTotalIfNeeded(result.url, actualTotal: result.pageCount)
+        ReadingProgress.flushSync()
+        CoverLoader.invalidate(result.url)
         refresh(backfill: false)
         return result.url
     }

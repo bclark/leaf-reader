@@ -52,6 +52,33 @@ struct TipStoreTests {
         #expect(condition())
     }
 
+    @Test func fixtureTeardownWaitsForInFlightTransactionHandler() async throws {
+        let client = FakeTipClient()
+        let store = TipStore(client: client, defaults: defaults())
+        var release: CheckedContinuation<Void, Never>?
+        var finished = false
+        store.start()
+        client.continuation?.yield(.verified(VerifiedTip(id: 900, productID: TipCatalog.productIDs[0],
+            isConsumable: true, isRevoked: false, finish: {
+                await withCheckedContinuation { release = $0 }
+                finished = true
+            })))
+        try await settle { release != nil }
+        var drained = false
+        let teardown = Task { await store.stopForTesting(); drained = true }
+        await Task.yield()
+        #expect(!drained)
+        release?.resume()
+        await teardown.value
+        #expect(finished)
+        #expect(drained)
+        // The cancelled stream cannot consume a transaction from the next fixture.
+        if let continuation = client.continuation {
+            let result = continuation.yield(.unverified)
+            if case .terminated = result {} else { Issue.record("Old observer still accepts fixture updates") }
+        }
+    }
+
     @Test func partialCatalogRejectsUnknownAndWrongTypesAndSorts() async {
         let client = FakeTipClient()
         let small = client.catalog[0]
@@ -197,7 +224,7 @@ struct TipStoreTests {
     @Test func delayedApprovalClearsPendingAndObserverDoesNotRetainStore() async throws {
         let client = FakeTipClient()
         var store: TipStore? = TipStore(client: client, defaults: defaults())
-        weak var weakStore = store
+        let storeWasReleased = { [weak store] in store == nil }
         await store?.loadProducts()
         store?.start()
         client.result = .pending
@@ -210,7 +237,7 @@ struct TipStoreTests {
         #expect(store?.pendingProductID == nil)
         #expect(store?.notice == .thankYou)
         store = nil
-        try await settle { weakStore == nil }
+        try await settle { storeWasReleased() }
     }
 
     @Test func approvalRacingPendingResultDoesNotLeaveStalePendingState() async throws {

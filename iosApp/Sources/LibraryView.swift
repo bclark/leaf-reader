@@ -24,6 +24,7 @@ struct LibraryView: View {
     @State private var showPicker = false
     @State private var showImportSource = false
     @State private var showSmbBrowser = false
+    @State private var showJellyfinBrowser = false
     @State private var showMenu = false
 
     // Single comic awaiting delete confirmation
@@ -161,6 +162,10 @@ struct LibraryView: View {
             .confirmationDialog("Add Comics", isPresented: $showImportSource, titleVisibility: .visible) {
                 Button("From Files") { showPicker = true }
                 Button("From SMB Drive") { showSmbBrowser = true }
+                Button("From Jellyfin") { showJellyfinBrowser = true }
+            }
+            .sheet(isPresented: $showJellyfinBrowser) {
+                JellyfinBrowserView().environmentObject(library)
             }
             .sheet(isPresented: $showSmbBrowser) {
                 SmbBrowserView().environmentObject(library)
@@ -859,6 +864,7 @@ struct LibraryView: View {
 /// Interactive neat stack card matching Android's ComicStackCard.
 /// Supports 3-layer paper card styling with bottom-left issue badge and vertical downward cover peel!
 struct ComicStackCard: View {
+    @ObservedObject private var covers = CoverLoader.shared
     @EnvironmentObject private var settings: LeafSettings
     let seriesName: String
     let volume: String?
@@ -1077,7 +1083,7 @@ struct ComicStackCard: View {
                 topIndex = idx
             }
         }
-        .task(id: currentTopComic) {
+        .task(id: covers.revisions(for: [currentTopComic] + issues)) {
             topCoverImage = await CoverLoader.load(for: currentTopComic).cover
             if let l2 = layer2Comic {
                 layer2CoverImage = await CoverLoader.load(for: l2).cover
@@ -1122,6 +1128,7 @@ struct ComicStackCard: View {
 /// Reading List Card displayed in the library grid — "Messy Stack" visual with rotated layers
 /// and downward cover peel matching Android's `ReadingListCard`.
 struct ReadingListCard: View {
+    @ObservedObject private var covers = CoverLoader.shared
     @EnvironmentObject private var settings: LeafSettings
     let list: ReadingListRecord
     let previewUrls: [URL]
@@ -1339,7 +1346,7 @@ struct ReadingListCard: View {
                 .lineLimit(1)
                 .padding(.top, 2)
         }
-        .task(id: currentTopComic) {
+        .task(id: covers.revisions(for: previewUrls) + covers.revisions(for: [currentTopComic].compactMap { $0 })) {
             if let top = currentTopComic {
                 topCoverImage = await CoverLoader.load(for: top).cover
             } else {
@@ -1361,6 +1368,7 @@ struct ReadingListCard: View {
 
 /// A single comic in the grid
 struct ComicCard: View {
+    @ObservedObject private var covers = CoverLoader.shared
     @EnvironmentObject private var settings: LeafSettings
     let url: URL
     let progress: Progress?
@@ -1371,7 +1379,7 @@ struct ComicCard: View {
     @State private var cover: UIImage?
     @State private var pages = 0
 
-    private var title: String { url.deletingPathExtension().lastPathComponent }
+    private var title: String { ComicMetadataStore.displayFilename(for: url) }
     private var lastPage: Int { progress?.page ?? 0 }
     private var pageCount: Int { progress?.total ?? pages }
     private var started: Bool { lastPage > 0 }
@@ -1437,7 +1445,7 @@ struct ComicCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 2)
         }
-        .task {
+        .task(id: covers.revisions(for: [url])) {
             let loaded = await CoverLoader.load(for: url)
             cover = loaded.cover
             pages = loaded.pageCount

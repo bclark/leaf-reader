@@ -408,6 +408,7 @@ struct SeriesDetailView: View {
 
 /// Small 36x50 cover thumbnail used in multi-select picker sheets.
 struct SmallCoverThumb: View {
+    @ObservedObject private var covers = CoverLoader.shared
     let url: URL
     @State private var cover: UIImage?
 
@@ -428,7 +429,7 @@ struct SmallCoverThumb: View {
         }
         .frame(width: 36, height: 50)
         .clipShape(RoundedCornerShape(cornerRadius: 3))
-        .task(id: url) {
+        .task(id: covers.revisions(for: [url])) {
             cover = await CoverLoader.load(for: url).cover
         }
     }
@@ -436,6 +437,7 @@ struct SmallCoverThumb: View {
 
 /// Single issue card in the series detail view.
 struct SeriesIssueCard: View {
+    @ObservedObject private var covers = CoverLoader.shared
     @EnvironmentObject private var settings: LeafSettings
     let url: URL
     let metadata: ComicMetadataRecord?
@@ -561,7 +563,7 @@ struct SeriesIssueCard: View {
                 .lineLimit(1)
                 .padding(.top, 2)
         }
-        .task {
+        .task(id: covers.revisions(for: [url])) {
             let loaded = await CoverLoader.load(for: url)
             cover = loaded.cover
             pages = loaded.pageCount

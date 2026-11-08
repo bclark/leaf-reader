@@ -175,11 +175,12 @@ enum ReadingProgress {
         if inMemoryProgress == nil { _ = inMemoryProgressLocked() }
         let filename = url.lastPathComponent
         if var current = inMemoryProgress?[filename] {
-            if current.total != actualTotal || current.page >= actualTotal {
+            if current.total != actualTotal || current.page >= actualTotal || current.step != -1 {
                 let wasCompleted = current.isCompleted
                 current.total = actualTotal
+                current.step = -1
                 if wasCompleted {
-                    current.page = max(0, actualTotal - 1)
+                    current.page = actualTotal == 1 ? 1 : actualTotal - 1
                 } else {
                     current.page = min(max(current.page, 0), actualTotal - 1)
                 }

@@ -44,3 +44,12 @@ Any change to this policy will be published at this URL alongside the app's sour
 ## Contact
 
 Questions? Open an issue at <https://github.com/bclark/leaf-reader/issues>.
+
+
+### iOS Jellyfin feature candidate
+
+The iOS Jellyfin feature adds optional connections to a server you choose. Sign-in sends your username and password to that server; Leaf retains the resulting access token in the device-only, non-synchronizing Keychain, not the password. Browsing, cover requests and downloads send the token and a random installation identifier to the configured server. These requests occur when using the Jellyfin browser. Your server may keep its own access logs.
+
+HTTPS uses normal certificate validation. Local HTTP requires an explicit choice and sends credentials and content without encryption. Disconnect removes the saved token and stops the session; downloaded comics stay in your local library. Tokens are excluded from Leaf exports and portable backups. Local server/item identifiers are stored separately to associate downloaded files with their source.
+
+This first milestone does not send reading progress to Jellyfin. Downloaded comics remain readable offline. The feature candidate is separate from previously published builds; it has not been uploaded or published as part of this implementation work.

@@ -64,13 +64,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "Leaf connects to your SMB drive to browse and import comics you choose."
+            "value" : "Leaf connects to your SMB drive or Jellyfin server to browse and download comics you choose."
           }
         },
         "es-MX" : {
           "stringUnit" : {
             "state" : "machine_translated",
-            "value" : "Leaf se conecta a tu unidad SMB para explorar e importar los cómics que elijas."
+            "value" : "Leaf se conecta a tu unidad SMB o servidor Jellyfin para explorar y descargar los cómics que elijas."
           }
         }
       }

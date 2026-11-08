@@ -45,6 +45,9 @@ struct ReaderView: View {
     @StateObject private var dismissal = ReaderDismissMotion()
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var settings: LeafSettings
+    @ObservedObject private var covers = CoverLoader.shared
+    @State private var hasReloaded = false
+    @State private var loadedRevision: [CoverLoader.Revision]?
     @State private var state: LoadState = .loading
     @State private var page = 0
     @State private var pageCount = 1
@@ -73,7 +76,7 @@ struct ReaderView: View {
     @State private var scrub: Double = 0
     @State private var scrubbing = false
 
-    private var title: String { comicURL.deletingPathExtension().lastPathComponent }
+    private var title: String { ComicMetadataStore.displayFilename(for: comicURL) }
     private var isReady: Bool { if case .ready = state { return true }; return false }
 
     private var currentLoader: PageLoader? {
@@ -121,7 +124,7 @@ struct ReaderView: View {
             settings.ground.ignoresSafeArea()
             switch state {
             case .loading:
-                if let openingCover {
+                if let openingCover, !hasReloaded {
                     GeometryReader { screen in
                         renderSinglePage(image: openingCover, panX: 0, panY: 0, zoom: 1, container: screen.size)
                     }
@@ -157,7 +160,7 @@ struct ReaderView: View {
         .leafAppearance(settings.theme)
         .navigationBarHidden(true)
         .statusBarHidden(!showChrome)
-        .task { load() }
+        .task(id: covers.revisions(for: [comicURL])) { load() }
         .onChange(of: scenePhase) { phase in
             if phase != .active { dismissal.reset() }
         }
@@ -170,6 +173,14 @@ struct ReaderView: View {
     }
 
     private func load() {
+        loadToken &+= 1
+        currentSpread = nil; nextSpread = nil; prevSpread = nil
+        widePages = []; sizesKnownThrough = 0
+        curlAnimator.reset()
+        resetZoom()
+        scrubbing = false
+        hasReloaded = loadedRevision != nil
+        loadedRevision = covers.revisions(for: [comicURL])
         do {
             let archive = try CbzArchive(url: comicURL)
             let loader = PageLoader(archive: archive)
@@ -197,7 +208,11 @@ struct ReaderView: View {
     }
 
     private func persist() {
-        ReadingProgress.set(comicURL, page: page, step: -1, total: pageCount, rtl: rightToLeft)
+        // A replaced archive's old reader must not overwrite reconciled progress.
+        guard isReady, loadedRevision == covers.revisions(for: [comicURL]) else { return }
+        // A single-page comic uses page 1 as its completed marker, while displaying page 0.
+        let savedPage = pageCount == 1 && ReadingProgress.isCompleted(comicURL) ? 1 : page
+        ReadingProgress.set(comicURL, page: savedPage, step: -1, total: pageCount, rtl: rightToLeft)
     }
 
     private func syncLoadSpread(loader: PageLoader, spread: ReaderSpread?) -> DisplaySpread? {
@@ -459,7 +474,7 @@ struct ReaderView: View {
         .clipped()
         .overlay {
             if currentSpread == nil {
-                if let openingCover, page == 0 {
+                if let openingCover, !hasReloaded, page == 0 {
                     renderSinglePage(image: openingCover, panX: 0, panY: 0, zoom: 1, container: size)
                 } else {
                     ProgressView().tint(Leaf.ochre)

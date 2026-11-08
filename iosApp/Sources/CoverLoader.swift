@@ -1,10 +1,30 @@
 import UIKit
+import SwiftUI
 import ImageIO
 
 /// Loads and caches comic cover thumbnails (page 0 of each CBZ). Uses ImageIO downsampling, which
 /// decodes JPEG/PNG/HEIC/WebP robustly and builds a small thumbnail without inflating the full-res
 /// page into memory — more reliable than UIImage(data:) + byPreparingThumbnail for big scans.
-enum CoverLoader {
+@MainActor
+final class CoverLoader: ObservableObject {
+    static let shared = CoverLoader()
+    @Published private var generations: [URL: Int] = [:]
+
+    struct Revision: Hashable {
+        let url: URL
+        let generation: Int
+    }
+
+    func revisions(for urls: [URL]) -> [Revision] {
+        urls.map { Revision(url: $0, generation: generations[$0, default: 0]) }
+    }
+
+    static func invalidate(_ url: URL) {
+        shared.generations[url, default: 0] += 1
+        cache.removeObject(forKey: url as NSURL)
+        countCache.removeObject(forKey: url as NSURL)
+    }
+
     private static let cache = NSCache<NSURL, UIImage>()
     private static let countCache = NSCache<NSURL, NSNumber>()
 
@@ -20,6 +40,7 @@ enum CoverLoader {
         let cachedCount = countCache.object(forKey: url as NSURL)?.intValue
         if let cachedCover, let cachedCount { return (cachedCover, cachedCount) }
 
+        let revision = shared.revisions(for: [url])
         let result: (UIImage?, Int) = await Task.detached(priority: .userInitiated) {
             guard let archive = try? CbzArchive(url: url) else { return (nil, 0) }
             let n = archive.pageCount
@@ -28,12 +49,14 @@ enum CoverLoader {
             return (img, n)
         }.value
 
+        // A read begun before replacement must never repopulate the new file's cache.
+        guard revision == shared.revisions(for: [url]) else { return await load(for: url) }
         if let img = result.0 { cache.setObject(img, forKey: url as NSURL) }
         countCache.setObject(NSNumber(value: result.1), forKey: url as NSURL)
         return result
     }
 
-    private static func thumbnail(from data: Data, maxPixel: Int) -> UIImage? {
+    nonisolated private static func thumbnail(from data: Data, maxPixel: Int) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
