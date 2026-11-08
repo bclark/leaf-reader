@@ -3,9 +3,14 @@ package net.digitalbc.leafreader.data.jellyfin
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -371,14 +376,30 @@ class JellyfinClient(
             .header("X-Emby-Authorization", header)
     }
 
-    private inline fun <T> executeRequest(request: Request, block: (Response) -> T): T {
-        return try {
-            okHttpClient.newCall(request).execute().use(block)
-        } catch (t: Throwable) {
-            if (t is JellyfinException) throw t
-            throw mapNetworkException(t)
+    private suspend fun <T> executeRequest(request: Request, block: (Response) -> T): T =
+        suspendCancellableCoroutine { continuation ->
+            val call = okHttpClient.newCall(request)
+            continuation.invokeOnCancellation {
+                call.cancel()
+            }
+            call.enqueue(object : Callback {
+                override fun onResponse(call: Call, response: Response) {
+                    try {
+                        val result = response.use(block)
+                        continuation.resume(result)
+                    } catch (t: Throwable) {
+                        val mapped = if (t is JellyfinException) t else mapNetworkException(t)
+                        continuation.resumeWithException(mapped)
+                    }
+                }
+
+                override fun onFailure(call: Call, e: IOException) {
+                    if (continuation.isCancelled) return
+                    val mapped = if (e is JellyfinException) e else mapNetworkException(e)
+                    continuation.resumeWithException(mapped)
+                }
+            })
         }
-    }
 
     private fun mapHttpError(code: Int, defaultMessage: String): Nothing {
         val kind = when (code) {
@@ -392,6 +413,7 @@ class JellyfinClient(
     }
 
     private fun mapNetworkException(t: Throwable): JellyfinException {
+        if (t is JellyfinException) return t
         val kind = when (t) {
             is SocketTimeoutException -> JellyfinFailureKind.TIMEOUT
             is UnknownHostException -> JellyfinFailureKind.UNAVAILABLE

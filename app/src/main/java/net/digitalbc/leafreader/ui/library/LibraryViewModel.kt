@@ -728,7 +728,7 @@ class LibraryViewModel(
             val comics = repository.observeComicsForList(listId).firstOrNull() ?: return@launch
             for (comic in comics) {
                 val newPage = if (read) (comic.pageCount - 1).coerceAtLeast(0) else 0
-                repository.saveProgress(comic.id, newPage, 0)
+                repository.saveProgress(comic.id, newPage, 0, explicitPlayed = read)
             }
             _message.value = if (read) "Marked all comics in list as read" else "Marked all comics in list as unread"
         }
@@ -738,7 +738,7 @@ class LibraryViewModel(
         viewModelScope.launch {
             val comic = repository.getComic(comicId) ?: return@launch
             val newPage = if (read) (comic.pageCount - 1).coerceAtLeast(0) else 0
-            repository.saveProgress(comic.id, newPage, 0)
+            repository.saveProgress(comic.id, newPage, 0, explicitPlayed = read)
             _message.value = if (read) "Marked \"${comic.title}\" as read" else "Marked \"${comic.title}\" as unread"
         }
     }
@@ -752,7 +752,7 @@ class LibraryViewModel(
             }
             for (comic in matching) {
                 val newPage = if (read) (comic.pageCount - 1).coerceAtLeast(0) else 0
-                repository.saveProgress(comic.id, newPage, 0)
+                repository.saveProgress(comic.id, newPage, 0, explicitPlayed = read)
             }
             _message.value = if (read) "Marked $seriesName as completed" else "Marked $seriesName as unread"
         }

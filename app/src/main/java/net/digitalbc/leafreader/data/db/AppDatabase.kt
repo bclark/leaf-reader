@@ -13,14 +13,16 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ReadingListEntity::class,
         ReadingListItemEntity::class,
         RemoteComicLinkEntity::class,
+        JellyfinSyncOutboxEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun comicDao(): ComicDao
     abstract fun readingListDao(): ReadingListDao
     abstract fun remoteComicLinkDao(): RemoteComicLinkDao
+    abstract fun jellyfinSyncOutboxDao(): JellyfinSyncOutboxDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -69,6 +71,32 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS jellyfin_sync_outbox (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        comicId INTEGER NOT NULL,
+                        serverId TEXT NOT NULL,
+                        userId TEXT NOT NULL,
+                        itemId TEXT NOT NULL,
+                        pageIndex INTEGER NOT NULL,
+                        markPlayed INTEGER,
+                        updatedAt INTEGER NOT NULL,
+                        FOREIGN KEY(comicId) REFERENCES comics(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_jellyfin_sync_outbox_comicId ON jellyfin_sync_outbox(comicId)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_jellyfin_sync_outbox_serverId_userId ON jellyfin_sync_outbox(serverId, userId)"
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -76,7 +104,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "comics.db",
                 )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build().also { instance = it }
             }
     }

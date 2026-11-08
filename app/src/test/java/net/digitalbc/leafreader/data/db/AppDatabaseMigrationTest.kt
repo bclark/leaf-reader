@@ -111,4 +111,87 @@ class AppDatabaseMigrationTest {
         assertNull(linkDao.findLink("jellyfin", "srv-1", "usr-1", "item-cascade"))
         assertNull(linkDao.findByComicId(comicId))
     }
+
+    @Test
+    fun insertAndQueryJellyfinSyncOutbox() = runBlocking {
+        val outboxDao = db.jellyfinSyncOutboxDao()
+        val comicId = comicDao.insert(
+            ComicEntity(
+                title = "Outbox Test Comic",
+                filePath = "/data/outbox.cbz",
+                coverPath = null,
+                format = "CBZ",
+                pageCount = 25,
+                dateAdded = 1000L,
+                lastOpened = 1000L,
+            )
+        )
+
+        val entry = JellyfinSyncOutboxEntity(
+            comicId = comicId,
+            serverId = "srv-1",
+            userId = "usr-1",
+            itemId = "item-outbox-1",
+            pageIndex = 12,
+            markPlayed = null,
+            updatedAt = 3000L,
+        )
+        outboxDao.upsert(entry)
+
+        val pending = outboxDao.getPendingForUser("srv-1", "usr-1")
+        assertEquals(1, pending.size)
+        assertEquals(12, pending[0].pageIndex)
+        assertEquals("item-outbox-1", pending[0].itemId)
+        assertNull(pending[0].markPlayed)
+
+        val forComic = outboxDao.getPendingForComic(comicId)
+        assertNotNull(forComic)
+        assertEquals(12, forComic?.pageIndex)
+
+        // Update page to 24 (completed)
+        outboxDao.upsert(entry.copy(pageIndex = 24, markPlayed = true, updatedAt = 4000L))
+        val updated = outboxDao.getPendingForComic(comicId)
+        assertEquals(24, updated?.pageIndex)
+        assertEquals(true, updated?.markPlayed)
+        assertEquals(1, outboxDao.countPendingForUser("srv-1", "usr-1"))
+
+        // Delete by comic ID
+        outboxDao.deleteByComicId(comicId)
+        assertEquals(0, outboxDao.countPendingForUser("srv-1", "usr-1"))
+    }
+
+    @Test
+    fun deletingComicCascadesToSyncOutbox() = runBlocking {
+        val outboxDao = db.jellyfinSyncOutboxDao()
+        val comicId = comicDao.insert(
+            ComicEntity(
+                title = "Outbox Cascade Test",
+                filePath = "/data/outbox_cascade.cbz",
+                coverPath = null,
+                format = "CBZ",
+                pageCount = 10,
+                dateAdded = 1000L,
+                lastOpened = 1000L,
+            )
+        )
+
+        outboxDao.upsert(
+            JellyfinSyncOutboxEntity(
+                comicId = comicId,
+                serverId = "srv-1",
+                userId = "usr-1",
+                itemId = "item-cascade-outbox",
+                pageIndex = 5,
+            )
+        )
+
+        assertEquals(1, outboxDao.countPendingForUser("srv-1", "usr-1"))
+
+        // Delete the parent comic
+        comicDao.delete(comicId)
+
+        // Outbox entry should be cascade-deleted
+        assertEquals(0, outboxDao.countPendingForUser("srv-1", "usr-1"))
+        assertNull(outboxDao.getPendingForComic(comicId))
+    }
 }

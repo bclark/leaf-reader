@@ -26,6 +26,9 @@ import net.digitalbc.leafreader.data.db.ReadingListEntity
 import net.digitalbc.leafreader.data.db.ReadingListItemEntity
 import net.digitalbc.leafreader.data.db.RemoteComicLinkDao
 import net.digitalbc.leafreader.data.db.RemoteComicLinkEntity
+import net.digitalbc.leafreader.data.db.JellyfinSyncOutboxDao
+import net.digitalbc.leafreader.data.db.JellyfinSyncOutboxEntity
+import java.util.concurrent.atomic.AtomicLong
 import net.digitalbc.leafreader.data.jellyfin.JellyfinAuth
 import net.digitalbc.leafreader.data.jellyfin.JellyfinClient
 import net.digitalbc.leafreader.data.jellyfin.JellyfinCredentialStore
@@ -73,11 +76,13 @@ class LibraryRepository(
     private val readingListDao: ReadingListDao? = null,
     private val db: AppDatabase? = null,
     val remoteComicLinkDao: RemoteComicLinkDao? = db?.remoteComicLinkDao(),
+    val jellyfinSyncOutboxDao: JellyfinSyncOutboxDao? = db?.jellyfinSyncOutboxDao(),
     val jellyfinClient: JellyfinClient = JellyfinClient(settings.jellyfinDeviceId),
     val jellyfinCredentialStore: JellyfinCredentialStore = JellyfinCredentialStore(context),
     val jellyfinSyncScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
     private val progressSyncJobs = ConcurrentHashMap<Long, Job>()
+    private val sessionGeneration = AtomicLong(0L)
 
     val comics: Flow<List<ComicEntity>> = dao.observeAll()
 
@@ -166,56 +171,71 @@ class LibraryRepository(
 
     suspend fun getComic(id: Long): ComicEntity? = dao.getById(id)
 
-    suspend fun saveProgress(id: Long, page: Int, slot: Int): Int =
+    suspend fun saveProgress(id: Long, page: Int, slot: Int, explicitPlayed: Boolean? = null): Int =
         withContext(NonCancellable + Dispatchers.IO) {
             val updated = dao.updateProgress(id, page, slot, System.currentTimeMillis())
-            triggerJellyfinProgressSync(id, page)
+            triggerJellyfinProgressSync(id, page, explicitPlayed = explicitPlayed)
             updated
         }
 
-    fun triggerJellyfinProgressSync(comicId: Long, page: Int, debounceMs: Long = 1500L): Job? {
+    fun triggerJellyfinProgressSync(
+        comicId: Long,
+        page: Int,
+        debounceMs: Long = 1500L,
+        explicitPlayed: Boolean? = null,
+    ): Job? {
         val linkDao = remoteComicLinkDao ?: return null
         val auth = jellyfinCredentialStore.loadAuth() ?: return null
         val serverUrl = settings.jellyfinServerUrl
         if (serverUrl.isBlank()) return null
         val config = runCatching { JellyfinServerConfig(serverUrl, settings.jellyfinAllowInsecureHttp) }.getOrNull() ?: return null
 
+        val currentGen = sessionGeneration.get()
+
+        // Cancel prior pending debounced job for this comic
         progressSyncJobs[comicId]?.cancel()
 
+        // Debounced network flush
         val job = jellyfinSyncScope.launch {
             try {
+                // 1. Durably record pending sync in Room outbox (J-06) so it survives app kill or offline state
+                val link = linkDao.findByComicId(comicId) ?: return@launch
+                if (link.provider == "jellyfin" && link.serverId == auth.serverId && link.userId == auth.userId) {
+                    val comic = dao.getById(comicId) ?: return@launch
+                    val isCompleted = comic.pageCount > 0 && page >= comic.pageCount - 1
+                    val markPlayed = if (explicitPlayed != null) {
+                        explicitPlayed
+                    } else if (isCompleted) {
+                        true
+                    } else {
+                        null
+                    }
+                    jellyfinSyncOutboxDao?.upsert(
+                        JellyfinSyncOutboxEntity(
+                            comicId = comicId,
+                            serverId = auth.serverId,
+                            userId = auth.userId,
+                            itemId = link.itemId,
+                            pageIndex = page,
+                            markPlayed = markPlayed,
+                            updatedAt = System.currentTimeMillis(),
+                        )
+                    )
+                }
+
                 if (debounceMs > 0L) {
                     delay(debounceMs)
                 }
-                val link = linkDao.findByComicId(comicId) ?: return@launch
-                if (link.provider != "jellyfin" || link.serverId != auth.serverId || link.userId != auth.userId) {
+                // Check session generation (J-07): abort if logged out or switched account during debounce
+                if (sessionGeneration.get() != currentGen) {
                     return@launch
                 }
-                val comic = dao.getById(comicId) ?: return@launch
-                val isCompleted = comic.pageCount > 0 && page >= comic.pageCount - 1
-
-                jellyfinClient.reportProgress(
-                    config = config,
-                    auth = auth,
-                    itemId = link.itemId,
-                    pageIndex = page,
-                )
-
-                if (isCompleted) {
-                    jellyfinClient.markPlayedStatus(
-                        config = config,
-                        auth = auth,
-                        itemId = link.itemId,
-                        played = true,
-                    )
-                } else if (page == 0) {
-                    jellyfinClient.markPlayedStatus(
-                        config = config,
-                        auth = auth,
-                        itemId = link.itemId,
-                        played = false,
-                    )
+                val currentAuth = jellyfinCredentialStore.loadAuth()
+                if (currentAuth == null || currentAuth.serverId != auth.serverId || currentAuth.userId != auth.userId) {
+                    return@launch
                 }
+
+                flushJellyfinOutboxForComic(config, currentAuth, comicId)
             } catch (c: CancellationException) {
                 // Debounced or cancelled
             } catch (e: Exception) {
@@ -228,8 +248,94 @@ class LibraryRepository(
         return job
     }
 
-    suspend fun syncJellyfinProgressDirect(comicId: Long, page: Int) {
-        triggerJellyfinProgressSync(comicId, page, debounceMs = 0L)?.join()
+    private suspend fun flushJellyfinOutboxForComic(
+        config: JellyfinServerConfig,
+        auth: JellyfinAuth,
+        comicId: Long,
+    ) {
+        val outboxDao = jellyfinSyncOutboxDao ?: return
+        val entry = outboxDao.getPendingForComic(comicId) ?: return
+        if (entry.serverId != auth.serverId || entry.userId != auth.userId) return
+
+        jellyfinClient.reportProgress(
+            config = config,
+            auth = auth,
+            itemId = entry.itemId,
+            pageIndex = entry.pageIndex,
+        )
+        if (entry.markPlayed != null) {
+            jellyfinClient.markPlayedStatus(
+                config = config,
+                auth = auth,
+                itemId = entry.itemId,
+                played = entry.markPlayed,
+            )
+        }
+        outboxDao.deleteById(entry.id)
+    }
+
+    suspend fun flushJellyfinOutbox(
+        config: JellyfinServerConfig? = null,
+        auth: JellyfinAuth? = null,
+    ): Unit = withContext(Dispatchers.IO) {
+        val activeAuth = auth ?: jellyfinCredentialStore.loadAuth() ?: return@withContext
+        val activeConfig = config ?: runCatching {
+            val url = settings.jellyfinServerUrl
+            if (url.isBlank()) null else JellyfinServerConfig(url, settings.jellyfinAllowInsecureHttp)
+        }.getOrNull() ?: return@withContext
+
+        val outboxDao = jellyfinSyncOutboxDao ?: return@withContext
+        val pending = outboxDao.getPendingForUser(activeAuth.serverId, activeAuth.userId)
+        val currentGen = sessionGeneration.get()
+
+        for (entry in pending) {
+            if (!isActive || sessionGeneration.get() != currentGen) break
+            try {
+                jellyfinClient.reportProgress(
+                    config = activeConfig,
+                    auth = activeAuth,
+                    itemId = entry.itemId,
+                    pageIndex = entry.pageIndex,
+                )
+                if (entry.markPlayed != null) {
+                    jellyfinClient.markPlayedStatus(
+                        config = activeConfig,
+                        auth = activeAuth,
+                        itemId = entry.itemId,
+                        played = entry.markPlayed,
+                    )
+                }
+                outboxDao.deleteById(entry.id)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                Log.d(TAG, "Failed to flush outbox item ${entry.itemId}: ${e.message}")
+                break
+            }
+        }
+    }
+
+    suspend fun reconcileItemProgressFromRemote(item: JellyfinItem): Unit = withContext(Dispatchers.IO) {
+        val auth = jellyfinCredentialStore.loadAuth() ?: return@withContext
+        val linkDao = remoteComicLinkDao ?: return@withContext
+        val link = linkDao.findLink("jellyfin", auth.serverId, auth.userId, item.id) ?: return@withContext
+
+        // If local user has an un-synced outbox entry, local reading state takes precedence
+        if (jellyfinSyncOutboxDao?.getPendingForComic(link.comicId) != null) return@withContext
+
+        val comic = dao.getById(link.comicId) ?: return@withContext
+        val remotePage = if (item.played) {
+            (comic.pageCount - 1).coerceAtLeast(0)
+        } else {
+            JellyfinProgress.ticksToPage(item.playbackPositionTicks, comic.pageCount)
+        }
+        if (remotePage > comic.lastPage) {
+            dao.updateProgress(comic.id, remotePage, 0, System.currentTimeMillis())
+        }
+    }
+
+    suspend fun syncJellyfinProgressDirect(comicId: Long, page: Int, explicitPlayed: Boolean? = null) {
+        triggerJellyfinProgressSync(comicId, page, debounceMs = 0L, explicitPlayed = explicitPlayed)?.join()
     }
 
     suspend fun updateComicPageCount(id: Long, pageCount: Int): Int =
@@ -465,6 +571,11 @@ class LibraryRepository(
             settings.jellyfinUserId = auth.userId
             settings.jellyfinServerId = auth.serverId
             settings.jellyfinServerName = auth.serverName.orEmpty()
+            sessionGeneration.incrementAndGet()
+            progressSyncJobs.values.forEach { it.cancel() }
+            progressSyncJobs.clear()
+            // Flush any offline pending outbox items for this user
+            jellyfinSyncScope.launch { flushJellyfinOutbox(config, auth) }
             Result.success(auth)
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
@@ -474,6 +585,9 @@ class LibraryRepository(
     }
 
     suspend fun disconnectJellyfin(): Unit = withContext(Dispatchers.IO) {
+        sessionGeneration.incrementAndGet()
+        progressSyncJobs.values.forEach { it.cancel() }
+        progressSyncJobs.clear()
         jellyfinCredentialStore.clear()
         settings.clearJellyfinConfig()
     }
@@ -505,7 +619,13 @@ class LibraryRepository(
 
         try {
             val config = JellyfinServerConfig(serverUrl, settings.jellyfinAllowInsecureHttp)
-            Result.success(jellyfinClient.getItems(config, auth, parentId, startIndex, limit))
+            val result = jellyfinClient.getItems(config, auth, parentId, startIndex, limit)
+            for (item in result.items) {
+                if (!item.isFolder) {
+                    reconcileItemProgressFromRemote(item)
+                }
+            }
+            Result.success(result)
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
             Result.failure(t)

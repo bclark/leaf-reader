@@ -4,6 +4,8 @@ import androidx.room.Room
 import kotlinx.coroutines.runBlocking
 import net.digitalbc.leafreader.data.db.AppDatabase
 import net.digitalbc.leafreader.data.db.ComicDao
+import net.digitalbc.leafreader.data.db.JellyfinSyncOutboxDao
+import net.digitalbc.leafreader.data.db.JellyfinSyncOutboxEntity
 import net.digitalbc.leafreader.data.db.RemoteComicLinkDao
 import net.digitalbc.leafreader.data.jellyfin.JellyfinAuth
 import net.digitalbc.leafreader.data.jellyfin.JellyfinClient
@@ -26,6 +28,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -37,6 +40,7 @@ class LibraryRepositoryJellyfinTest {
     private lateinit var db: AppDatabase
     private lateinit var comicDao: ComicDao
     private lateinit var linkDao: RemoteComicLinkDao
+    private lateinit var outboxDao: JellyfinSyncOutboxDao
     private lateinit var repository: LibraryRepository
     private lateinit var settings: AppSettings
     private lateinit var credStore: JellyfinCredentialStore
@@ -52,6 +56,7 @@ class LibraryRepositoryJellyfinTest {
             .build()
         comicDao = db.comicDao()
         linkDao = db.remoteComicLinkDao()
+        outboxDao = db.jellyfinSyncOutboxDao()
         settings = AppSettings(context)
         val testKey = javax.crypto.spec.SecretKeySpec("LeafTestKey12345678901234567890!".toByteArray(), "AES")
         credStore = JellyfinCredentialStore(context, keyProvider = { testKey })
@@ -438,6 +443,279 @@ class LibraryRepositoryJellyfinTest {
         val rowsUpdated = repository.saveProgress(comicId, page = 2, slot = 0)
         assertEquals(1, rowsUpdated)
 
+        val comic = comicDao.getById(comicId)
+        assertEquals(2, comic?.lastPage)
+    }
+
+    @Test
+    fun outboxPersistsAndDeletesOnSuccessfulSync() = runBlocking {
+        val cbzBytes = createValidCbzBytes(pageCount = 5)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/octet-stream")
+                .setHeader("Content-Length", cbzBytes.size)
+                .setBody(okio.Buffer().write(cbzBytes))
+        )
+
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val item = JellyfinItem(id = "outbox-item-1", name = "OutboxTest.cbz", isFolder = false, container = "cbz")
+        val comicId = repository.importJellyfinComic(item).getOrThrow()
+        server.takeRequest(5, TimeUnit.SECONDS) // consume download
+
+        server.enqueue(MockResponse().setResponseCode(204))
+        repository.syncJellyfinProgressDirect(comicId, page = 2)
+
+        val req = server.takeRequest(5, TimeUnit.SECONDS)
+        assertNotNull(req)
+        assertEquals("/Sessions/Playing/Progress", req?.path)
+
+        // After successful sync, outbox entry should be deleted
+        assertNull(outboxDao.getPendingForComic(comicId))
+    }
+
+    @Test
+    fun outboxRetainsEntryOnServerErrorAndFlushesOnReconnect() = runBlocking {
+        val cbzBytes = createValidCbzBytes(pageCount = 5)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/octet-stream")
+                .setHeader("Content-Length", cbzBytes.size)
+                .setBody(okio.Buffer().write(cbzBytes))
+        )
+
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val item = JellyfinItem(id = "retry-item-1", name = "RetryTest.cbz", isFolder = false, container = "cbz")
+        val comicId = repository.importJellyfinComic(item).getOrThrow()
+        server.takeRequest(5, TimeUnit.SECONDS) // consume download
+
+        // Server fails with 500
+        server.enqueue(MockResponse().setResponseCode(500).setBody("Server Error"))
+        repository.syncJellyfinProgressDirect(comicId, page = 3)
+        server.takeRequest(5, TimeUnit.SECONDS) // consume failed progress request
+
+        // Outbox must retain the pending entry
+        val pending = outboxDao.getPendingForComic(comicId)
+        assertNotNull(pending)
+        assertEquals(3, pending?.pageIndex)
+        assertEquals("retry-item-1", pending?.itemId)
+
+        // Server recovers
+        server.enqueue(MockResponse().setResponseCode(204))
+        repository.flushJellyfinOutbox()
+
+        val flushedReq = server.takeRequest(5, TimeUnit.SECONDS)
+        assertNotNull(flushedReq)
+        assertEquals("/Sessions/Playing/Progress", flushedReq?.path)
+
+        // Outbox entry should now be deleted
+        assertNull(outboxDao.getPendingForComic(comicId))
+    }
+
+    @Test
+    fun sessionCancellationAbortsDelayedSyncOnDisconnect() = runBlocking {
+        val cbzBytes = createValidCbzBytes(pageCount = 5)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/octet-stream")
+                .setHeader("Content-Length", cbzBytes.size)
+                .setBody(okio.Buffer().write(cbzBytes))
+        )
+
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val item = JellyfinItem(id = "cancel-item-1", name = "CancelTest.cbz", isFolder = false, container = "cbz")
+        val comicId = repository.importJellyfinComic(item).getOrThrow()
+        server.takeRequest(5, TimeUnit.SECONDS) // consume download
+
+        // Trigger sync with 600ms debounce
+        repository.triggerJellyfinProgressSync(comicId, page = 2, debounceMs = 600L)
+
+        // Disconnect immediately
+        repository.disconnectJellyfin()
+
+        // Wait for debounce period to pass
+        kotlinx.coroutines.delay(800L)
+
+        // Verify no progress request was sent
+        val request = server.takeRequest(200, TimeUnit.MILLISECONDS)
+        assertNull("Cancelled session must not send HTTP request", request)
+    }
+
+    @Test
+    fun navigatingToPageZeroDoesNotUnmarkPlayed() = runBlocking {
+        val cbzBytes = createValidCbzBytes(pageCount = 5)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/octet-stream")
+                .setHeader("Content-Length", cbzBytes.size)
+                .setBody(okio.Buffer().write(cbzBytes))
+        )
+
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val item = JellyfinItem(id = "page0-item-1", name = "Page0Test.cbz", isFolder = false, container = "cbz")
+        val comicId = repository.importJellyfinComic(item).getOrThrow()
+        server.takeRequest(5, TimeUnit.SECONDS) // consume download
+
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        // Read page 0 without explicit unread flag
+        repository.syncJellyfinProgressDirect(comicId, page = 0)
+
+        val progressReq = server.takeRequest(5, TimeUnit.SECONDS)
+        assertNotNull(progressReq)
+        assertEquals("/Sessions/Playing/Progress", progressReq?.path)
+
+        // No DELETE request should be sent to PlayedItems
+        val deleteReq = server.takeRequest(200, TimeUnit.MILLISECONDS)
+        assertNull("Page 0 navigation must not unmark played status", deleteReq)
+    }
+
+    @Test
+    fun explicitMarkUnreadSendsDeleteToPlayedItems() = runBlocking {
+        val cbzBytes = createValidCbzBytes(pageCount = 5)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/octet-stream")
+                .setHeader("Content-Length", cbzBytes.size)
+                .setBody(okio.Buffer().write(cbzBytes))
+        )
+
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val item = JellyfinItem(id = "unread-item-1", name = "UnreadTest.cbz", isFolder = false, container = "cbz")
+        val comicId = repository.importJellyfinComic(item).getOrThrow()
+        server.takeRequest(5, TimeUnit.SECONDS) // consume download
+
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+
+        // Explicit mark unread
+        repository.syncJellyfinProgressDirect(comicId, page = 0, explicitPlayed = false)
+
+        val progressReq = server.takeRequest(5, TimeUnit.SECONDS)
+        assertNotNull(progressReq)
+
+        val deleteReq = server.takeRequest(5, TimeUnit.SECONDS)
+        assertNotNull(deleteReq)
+        assertEquals("/Users/u/PlayedItems/unread-item-1", deleteReq?.path)
+        assertEquals("DELETE", deleteReq?.method)
+    }
+
+    @Test
+    fun remoteProgressReconciliationUpdatesLocalWhenRemoteIsAheadAndOutboxEmpty() = runBlocking {
+        val cbzBytes = createValidCbzBytes(pageCount = 10)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/octet-stream")
+                .setHeader("Content-Length", cbzBytes.size)
+                .setBody(okio.Buffer().write(cbzBytes))
+        )
+
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val item = JellyfinItem(id = "reconcile-item-1", name = "ReconcileTest.cbz", isFolder = false, container = "cbz")
+        val comicId = repository.importJellyfinComic(item).getOrThrow()
+        server.takeRequest(5, TimeUnit.SECONDS) // consume download
+
+        // Remote has progress at page 6 (60,000 ticks)
+        val remoteItem = JellyfinItem(
+            id = "reconcile-item-1",
+            name = "ReconcileTest.cbz",
+            isFolder = false,
+            container = "cbz",
+            playbackPositionTicks = 60_000L,
+            played = false,
+        )
+
+        repository.reconcileItemProgressFromRemote(remoteItem)
+
+        val updated = comicDao.getById(comicId)
+        assertEquals(6, updated?.lastPage)
+    }
+
+    @Test
+    fun remoteProgressReconciliationPreservesLocalWhenOutboxPending() = runBlocking {
+        val cbzBytes = createValidCbzBytes(pageCount = 10)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/octet-stream")
+                .setHeader("Content-Length", cbzBytes.size)
+                .setBody(okio.Buffer().write(cbzBytes))
+        )
+
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val item = JellyfinItem(id = "pending-outbox-item", name = "PendingOutbox.cbz", isFolder = false, container = "cbz")
+        val comicId = repository.importJellyfinComic(item).getOrThrow()
+        server.takeRequest(5, TimeUnit.SECONDS) // consume download
+
+        // Set local page to 2
+        comicDao.updateProgress(comicId, 2, 0, System.currentTimeMillis())
+
+        // Insert pending outbox entry for page 2
+        outboxDao.upsert(
+            JellyfinSyncOutboxEntity(
+                comicId = comicId,
+                serverId = "srv",
+                userId = "u",
+                itemId = "pending-outbox-item",
+                pageIndex = 2,
+                markPlayed = null,
+                updatedAt = System.currentTimeMillis(),
+            )
+        )
+
+        // Remote is ahead at page 8
+        val remoteItem = JellyfinItem(
+            id = "pending-outbox-item",
+            name = "PendingOutbox.cbz",
+            isFolder = false,
+            container = "cbz",
+            playbackPositionTicks = 80_000L,
+            played = false,
+        )
+
+        repository.reconcileItemProgressFromRemote(remoteItem)
+
+        // Local progress should NOT be overwritten because an outbox entry is still pending
         val comic = comicDao.getById(comicId)
         assertEquals(2, comic?.lastPage)
     }
