@@ -1,46 +1,72 @@
-# Leaf Privacy Policy
+# Leaf Privacy Policies
 
-_Last updated: 6 November 2026_
+_Last updated: 9 November 2026_
 
-Leaf reads and stores your comics on your device. Reading and local Files imports work without an internet connection.
+Leaf has platform-specific privacy policies. Choose the policy for the app you use:
 
-## Data we collect
+- **Android:** https://digitalbc.net/leaf/privacy/
+- **iPhone and iPad:** https://digitalbc.net/leaf/privacy/ios/
 
-**None is collected by us.** Leaf has no telemetry or service that collects your data.
+The iOS policy is reproduced below so the privacy link in existing iOS builds remains useful. Android behavior is described separately at the Android URL above; iOS statements below do not describe Android.
 
-- Leaf has no telemetry, tracking, or cloud sync. Android and iOS support opt-in connections to your own SMB/Samba server. SMB connections send authentication and file requests only to the server explicitly configured for that operation. There is no automatic discovery or background sync.
-- iOS SMB passwords are stored in the device-only, non-synchronizing Keychain and are accessible while the device is unlocked. Completed downloads are imported locally and remain readable without a network connection.
-- Comics you import are copied into the app's private storage on your device and are readable only by Leaf.
-- Reading progress, library metadata, and settings are stored locally on your device only.
-- Where a build includes panel detection, it runs entirely on-device. The iOS App Store packaging excludes the model. No page images or derived data are ever uploaded anywhere.
-- Leaf contains no analytics, no crash reporting, no advertising, and no third-party tracking SDKs.
+---
 
-## Data sharing
+# Leaf Privacy Policy for iOS
 
-Leaf does not upload your library, reading activity, or settings to us. Optional SMB imports communicate with your chosen server; optional iOS tips use Apple’s purchase services as described below.
+_Last updated: 9 November 2026_
 
-## Optional iOS tips
+Leaf is a comic and manga reader developed by Bryan Clark under the DigitalBC name. This policy describes Leaf for iPhone and iPad, including optional SMB and Jellyfin imports and optional tips through Apple.
 
-Leaf offers optional, repeatable one-time tips through Apple’s in-app purchase system. All app features remain free, and a tip unlocks no content or privileges. Loading tip options and making a purchase require access to Apple’s services; reading, Files imports, settings, and backups do not depend on purchases or connectivity.
+## Your library stays under your control
 
-Apple processes payments and purchase information under its own privacy policy. Leaf uses StoreKit on your device to verify and finish tip transactions, including purchases completed after an interruption. Leaf does not send receipts or transaction details to a developer-operated server and does not add analytics. A pending tip’s product identifier may be stored locally to show its status; it is not a record of your library or payment details. Apple retains its purchase records independently of uninstalling Leaf.
+Leaf does not require a Leaf account. Imported comic copies, cover thumbnails, library metadata, reading lists, reading progress and preferences are stored on your device. Leaf does not operate a service that receives your comic library or reading history. The reviewed iOS app contains no advertising, analytics or integrated automatic crash-reporting SDK.
 
-## Data deletion
+When you import a file, Leaf reads the file you select and stores an app-managed copy for offline reading. If you choose a cloud storage provider in the Files picker, that provider may transfer the selected file under its own policies.
 
-Uninstalling the app deletes imported comic copies, covers, reading progress, and app settings. iOS Keychain items can survive uninstall; removing an SMB connection must explicitly delete its saved password. Use Forget Connection in SMB Drive settings to delete the saved password.
+## Optional SMB network shares
 
-## External links
+If you configure an SMB connection, Leaf connects directly to the server you choose to authenticate, browse folders and import comics. The server receives the connection and the authentication and file requests needed for those actions. Its operator may keep logs. The requests do not pass through a DigitalBC server.
 
-The app's menu contains a link to the project's GitHub page. Opening it hands off to your browser; the standard privacy terms of GitHub then apply.
+Leaf stores connection settings locally and saves SMB passwords in the iOS Keychain with device-only, non-synchronizing protection, accessible while the device is unlocked. Transport protection depends on your server and SMB configuration; Leaf does not require encryption for every SMB connection. Use servers and networks you trust.
 
-## Children
+## Optional Jellyfin servers
 
-Leaf does not collect data from anyone, including children.
+Jellyfin is optional and requires your own account on a server you choose. Signing in sends your username and password to that server. Leaf stores the returned access token, not your Jellyfin password, in device-only, non-synchronizing Keychain storage. Server connection details and a random installation identifier are stored locally.
 
-## Changes
+Browsing libraries, requesting covers and downloading comics sends authenticated requests and the installation identifier to your configured Jellyfin server. The server operator may record access logs. Leaf does not provide or operate a Jellyfin server, and these requests do not pass through DigitalBC.
 
-Any change to this policy will be published at this URL alongside the app's source code.
+HTTPS connections use normal certificate validation. If you explicitly allow local HTTP, credentials and content can be transmitted without encryption. This iOS version imports comics for local reading; it does not send reading progress back to Jellyfin. Leaf retains local source identifiers to associate downloaded comics with their server items.
 
-## Contact
+## Exports and device backups
 
-Questions? Open an issue at <https://github.com/bclark/leaf-reader/issues>.
+Leaf's export feature creates an unencrypted JSON file containing library metadata, reading progress, reading lists, relevant timestamps and selected preferences. It does not include comic files, cover images, saved SMB passwords or Jellyfin tokens. You choose the export destination. A backup can reveal your reading choices, so store it securely and review it before sharing it.
+
+Restore reads the backup you select and applies its data locally. Apple device backup or transfer features may separately include app data according to your settings and Apple's behavior. Leaf's device-only credentials are not configured to synchronize through iCloud Keychain. Leaf has no DigitalBC-hosted library backup service.
+
+## Optional tips and Apple services
+
+Tips are optional, repeatable one-time purchases processed by Apple. They unlock no features or content. Apple handles payment information under its own policies; you do not enter payment-card details in Leaf.
+
+Leaf uses StoreKit on your device to load products and verify and finish transactions, including transactions completed after an interruption. A pending tip's product identifier may be stored locally to show its status. Leaf does not send receipts or transaction details to a DigitalBC-operated server.
+
+Apple may provide transaction, sales and financial reports to the developer through its App Store services. Apple also processes App Store, TestFlight and optional diagnostic information under its own policies and your settings. Uninstalling Leaf does not remove records held by Apple. See https://www.apple.com/legal/privacy/.
+
+## Diagnostics, links and support
+
+Leaf may write errors to local device logs. Such logs can include file paths or error messages from a file provider. Leaf does not automatically upload those logs to DigitalBC. If you choose to share diagnostics or TestFlight feedback through Apple, Apple may make that information available to the developer.
+
+Leaf's menu links to external project, license and privacy pages. Opening a link sends you to your browser or another app, where the destination's privacy practices apply. Leaf does not attach your comics, server credentials or reading history to those links.
+
+If you contact Bryan Clark / DigitalBC at bclark@digitalbc.net, we receive the contact details, message and attachments you choose to send. We use that correspondence to respond and troubleshoot, and retain it as needed for those purposes and applicable obligations. Please do not send passwords, private server credentials, or comic files you lack permission to share. You may contact us to request deletion of information we hold; legal recordkeeping obligations may limit immediate deletion.
+
+## Removing your data
+
+You can remove imported comics and library entries in Leaf. This does not delete the original files or copies on your servers. Use Forget Connection for SMB and Disconnect for Jellyfin to remove saved credentials before uninstalling. Removing a server connection does not remove comics already imported into your library.
+
+Deleting the app removes its local app data, but iOS Keychain items may survive deletion. Offloading an app is not the same as deleting its data. Original files, exported backups, Apple/device backups, server logs and external-service records must be managed separately.
+
+## Changes and contact
+
+We will publish updates to this policy with a revised date when Leaf's practices change.
+
+Privacy contact: Bryan Clark / DigitalBC — bclark@digitalbc.net.
