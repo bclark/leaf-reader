@@ -84,6 +84,7 @@ abstract class AppDatabase : RoomDatabase() {
                         pageIndex INTEGER NOT NULL,
                         markPlayed INTEGER,
                         updatedAt INTEGER NOT NULL,
+                        revision INTEGER NOT NULL DEFAULT 1,
                         FOREIGN KEY(comicId) REFERENCES comics(id) ON UPDATE NO ACTION ON DELETE CASCADE
                     )
                     """.trimIndent()

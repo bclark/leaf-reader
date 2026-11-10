@@ -19,6 +19,9 @@ interface JellyfinSyncOutboxDao {
     @Query("DELETE FROM jellyfin_sync_outbox WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    @Query("DELETE FROM jellyfin_sync_outbox WHERE id = :id AND revision = :revision")
+    suspend fun deleteIfRevisionMatches(id: Long, revision: Long): Int
+
     @Query("DELETE FROM jellyfin_sync_outbox WHERE comicId = :comicId")
     suspend fun deleteByComicId(comicId: Long)
 

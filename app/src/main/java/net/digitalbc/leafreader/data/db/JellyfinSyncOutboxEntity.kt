@@ -35,4 +35,5 @@ data class JellyfinSyncOutboxEntity(
     val pageIndex: Int,
     val markPlayed: Boolean? = null,
     val updatedAt: Long = System.currentTimeMillis(),
+    val revision: Long = 1L,
 )

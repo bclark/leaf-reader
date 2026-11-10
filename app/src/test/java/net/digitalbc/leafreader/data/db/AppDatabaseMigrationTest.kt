@@ -306,13 +306,11 @@ class AppDatabaseMigrationTest {
             """.trimIndent()
         )
 
-        // 2. Execute Room Migration 4 -> 5 on the live database
-        AppDatabase.MIGRATION_4_5.migrate(v4Db)
-        v4Db.version = 5
+        // 2. Close v4 database at version 4 to let Room execute MIGRATION_4_5 via its normal upgrade pipeline
         v4Db.close()
         helper.close()
 
-        // 3. Open migrated database with Room, validating full schema integrity and RoomOpenHelper checks
+        // 3. Open database with Room, exercising Room's normal upgrade path and RoomOpenHelper validation
         val migratedDb = Room.databaseBuilder(context, AppDatabase::class.java, "test_migration_4_5.db")
             .addMigrations(AppDatabase.MIGRATION_4_5)
             .allowMainThreadQueries()
@@ -333,12 +331,17 @@ class AppDatabaseMigrationTest {
             assertEquals(42L, link?.comicId)
             assertEquals("folder-spidey", link?.parentId)
 
-            // Verify reading list and items survived migration intact
+            // Verify reading list and its items survived migration intact
             val lists = migratedDb.readingListDao().getAllLists()
             assertEquals(1, lists.size)
             assertEquals("Favorites", lists[0].name)
+            val listItems = migratedDb.readingListDao().getAllItems()
+            assertEquals(1, listItems.size)
+            assertEquals(42L, listItems[0].comicId)
+            assertEquals(1L, listItems[0].listId)
+            assertEquals(0, listItems[0].sortOrder)
 
-            // Verify newly created jellyfin_sync_outbox table works with Room DAO
+            // Verify newly created jellyfin_sync_outbox table works with Room DAO and includes revision
             val outboxDao = migratedDb.jellyfinSyncOutboxDao()
             val outboxEntry = JellyfinSyncOutboxEntity(
                 comicId = 42,
@@ -348,11 +351,13 @@ class AppDatabaseMigrationTest {
                 pageIndex = 16,
                 markPlayed = null,
                 updatedAt = 3000L,
+                revision = 1L,
             )
             outboxDao.upsert(outboxEntry)
             val pending = outboxDao.getPendingForComic(42)
             assertNotNull("Outbox entry must be queryable in migrated DB", pending)
             assertEquals(16, pending?.pageIndex)
+            assertEquals(1L, pending?.revision)
 
             // Verify cascade delete from comic to outbox and remote link in migrated DB
             migratedDb.comicDao().delete(42)

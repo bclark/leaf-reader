@@ -884,4 +884,159 @@ class LibraryRepositoryJellyfinTest {
         val req2 = server.takeRequest(300, TimeUnit.MILLISECONDS)
         assertNull("Second request in bulk flush must be cancelled on disconnect", req2)
     }
+
+    @Test
+    fun inFlightFlushDoesNotDeleteNewerSaveProgressOrLoseExplicitUnread() = runBlocking {
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val comic = comicDao.insert(
+            net.digitalbc.leafreader.data.db.ComicEntity(
+                title = "Race Comic",
+                filePath = "/race.cbz",
+                coverPath = null,
+                format = "CBZ",
+                pageCount = 10,
+                dateAdded = 1000L,
+                lastOpened = 1000L,
+            )
+        )
+        linkDao.insert(
+            net.digitalbc.leafreader.data.db.RemoteComicLinkEntity(
+                comicId = comic,
+                provider = "jellyfin",
+                serverId = "srv",
+                userId = "u",
+                itemId = "race-item-1",
+                parentId = "root",
+                downloadedAt = 1000L,
+            )
+        )
+
+        // Initial save: page 4, revision 1
+        repository.saveProgress(comic, page = 4, slot = 0)
+        val initialOutbox = outboxDao.getPendingForComic(comic)
+        assertNotNull(initialOutbox)
+        assertEquals(4, initialOutbox?.pageIndex)
+        assertEquals(1L, initialOutbox?.revision)
+
+        // Enqueue delayed response for the first progress report
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(204)
+                .setHeadersDelay(400, TimeUnit.MILLISECONDS)
+        )
+
+        // Launch flush in background
+        val config = JellyfinServerConfig(baseUrl(), true)
+        val flushJob = repository.jellyfinSyncScope.launch {
+            repository.flushJellyfinOutbox(config, auth)
+        }
+
+        // Wait briefly for flush to pick up revision 1 and start sending
+        kotlinx.coroutines.delay(100L)
+
+        // While request is in-flight, user saves page 0 with explicit unread
+        repository.saveProgress(comic, page = 0, slot = 0, explicitPlayed = false)
+        val midOutbox = outboxDao.getPendingForComic(comic)
+        assertNotNull(midOutbox)
+        assertEquals(0, midOutbox?.pageIndex)
+        assertEquals(false, midOutbox?.markPlayed)
+        assertEquals("Monotonic revision must increment on newer save", 2L, midOutbox?.revision)
+
+        // Wait for first flush to finish
+        flushJob.join()
+
+        // Verify the newer outbox row was NOT deleted by the older flush!
+        val preservedOutbox = outboxDao.getPendingForComic(comic)
+        assertNotNull("Outbox must NOT be deleted by stale in-flight response", preservedOutbox)
+        assertEquals(0, preservedOutbox?.pageIndex)
+        assertEquals(false, preservedOutbox?.markPlayed)
+        assertEquals(2L, preservedOutbox?.revision)
+
+        // Server consumes first progress request (page 4)
+        val req1 = server.takeRequest(5, TimeUnit.SECONDS)
+        assertNotNull(req1)
+        assertEquals("/Sessions/Playing/Progress", req1?.path)
+
+        // Enqueue responses for the second flush (progress for page 0 + unmark played)
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+
+        // Flush outbox again
+        repository.flushJellyfinOutbox(config, auth)
+
+        // Verify outbox entry is now deleted after successfully sending revision 2
+        assertNull("Outbox must be deleted after successfully syncing latest revision", outboxDao.getPendingForComic(comic))
+
+        // Verify server received page 0 progress and PlayedItems DELETE
+        val req2 = server.takeRequest(5, TimeUnit.SECONDS)
+        assertNotNull(req2)
+        assertEquals("/Sessions/Playing/Progress", req2?.path)
+
+        val req3 = server.takeRequest(5, TimeUnit.SECONDS)
+        assertNotNull(req3)
+        assertEquals("/Users/u/PlayedItems/race-item-1", req3?.path)
+        assertEquals("DELETE", req3?.method)
+    }
+
+    @Test
+    fun concurrentFlushesForSameComicAreSerialized() = runBlocking {
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val comic = comicDao.insert(
+            net.digitalbc.leafreader.data.db.ComicEntity(
+                title = "Serialized Comic",
+                filePath = "/serialized.cbz",
+                coverPath = null,
+                format = "CBZ",
+                pageCount = 10,
+                dateAdded = 1000L,
+                lastOpened = 1000L,
+            )
+        )
+        linkDao.insert(
+            net.digitalbc.leafreader.data.db.RemoteComicLinkEntity(
+                comicId = comic,
+                provider = "jellyfin",
+                serverId = "srv",
+                userId = "u",
+                itemId = "ser-item-1",
+                parentId = "root",
+                downloadedAt = 1000L,
+            )
+        )
+
+        repository.saveProgress(comic, page = 3, slot = 0)
+
+        // Enqueue one response
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        val config = JellyfinServerConfig(baseUrl(), true)
+
+        // Launch bulk flush and per-comic debounce flush concurrently
+        val job1 = repository.jellyfinSyncScope.launch {
+            repository.flushJellyfinOutbox(config, auth)
+        }
+        val job2 = repository.triggerJellyfinProgressSync(comic, page = 3, debounceMs = 0L)
+
+        job1.join()
+        job2?.join()
+
+        // Outbox must be cleaned up
+        assertNull(outboxDao.getPendingForComic(comic))
+
+        // Exactly one network progress request should have been processed (second one skips because outbox is empty)
+        val req = server.takeRequest(5, TimeUnit.SECONDS)
+        assertNotNull(req)
+        val extra = server.takeRequest(200, TimeUnit.MILLISECONDS)
+        assertNull("Redundant concurrent flush must not send duplicate request", extra)
+    }
 }
