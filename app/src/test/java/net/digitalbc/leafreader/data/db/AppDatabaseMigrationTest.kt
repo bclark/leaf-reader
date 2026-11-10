@@ -194,4 +194,173 @@ class AppDatabaseMigrationTest {
         assertEquals(0, outboxDao.countPendingForUser("srv-1", "usr-1"))
         assertNull(outboxDao.getPendingForComic(comicId))
     }
+
+    @Test
+    fun migrationFrom4To5PreservesPopulatedDataAndCreatesOutboxTable() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val dbFile = context.getDatabasePath("test_migration_4_5.db")
+        if (dbFile.exists()) dbFile.delete()
+
+        // 1. Create a SQLite database at Schema Version 4 and populate with comics, links, and lists
+        val config = androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(context)
+            .name("test_migration_4_5.db")
+            .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(4) {
+                override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                    db.execSQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS comics (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                            title TEXT NOT NULL,
+                            filePath TEXT NOT NULL,
+                            coverPath TEXT,
+                            format TEXT NOT NULL,
+                            pageCount INTEGER NOT NULL,
+                            rightToLeft INTEGER NOT NULL,
+                            lastPage INTEGER NOT NULL,
+                            lastSlot INTEGER NOT NULL,
+                            source TEXT NOT NULL DEFAULT 'local',
+                            series TEXT,
+                            volume TEXT,
+                            issueNumber REAL,
+                            dateAdded INTEGER NOT NULL,
+                            lastOpened INTEGER NOT NULL
+                        )
+                        """.trimIndent()
+                    )
+                    db.execSQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS reading_lists (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                            name TEXT NOT NULL,
+                            createdAt INTEGER NOT NULL,
+                            updatedAt INTEGER NOT NULL
+                        )
+                        """.trimIndent()
+                    )
+                    db.execSQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS reading_list_items (
+                            listId INTEGER NOT NULL,
+                            comicId INTEGER NOT NULL,
+                            sortOrder INTEGER NOT NULL,
+                            addedAt INTEGER NOT NULL,
+                            PRIMARY KEY(listId, comicId)
+                        )
+                        """.trimIndent()
+                    )
+                    db.execSQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS remote_comic_links (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                            comicId INTEGER NOT NULL,
+                            provider TEXT NOT NULL,
+                            serverId TEXT NOT NULL,
+                            userId TEXT NOT NULL,
+                            itemId TEXT NOT NULL,
+                            parentId TEXT,
+                            downloadedAt INTEGER NOT NULL,
+                            remoteVersionTag TEXT,
+                            remoteName TEXT,
+                            FOREIGN KEY(comicId) REFERENCES comics(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                        )
+                        """.trimIndent()
+                    )
+                    db.execSQL(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS index_remote_comic_links_provider_serverId_userId_itemId ON remote_comic_links(provider, serverId, userId, itemId)"
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS index_remote_comic_links_comicId ON remote_comic_links(comicId)"
+                    )
+                }
+
+                override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+            })
+            .build()
+
+        val helper = androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory().create(config)
+        val v4Db = helper.writableDatabase
+
+        // Populate Schema 4 data
+        v4Db.execSQL(
+            """
+            INSERT INTO comics (id, title, filePath, coverPath, format, pageCount, rightToLeft, lastPage, lastSlot, source, series, volume, issueNumber, dateAdded, lastOpened)
+            VALUES (42, 'Spider-Man #1', '/data/spidey.cbz', '/data/cover.jpg', 'CBZ', 32, 0, 15, 0, 'jellyfin', 'Amazing Spider-Man', 'Vol 1', 1.0, 1000, 2000)
+            """.trimIndent()
+        )
+        v4Db.execSQL(
+            """
+            INSERT INTO remote_comic_links (id, comicId, provider, serverId, userId, itemId, parentId, downloadedAt, remoteVersionTag, remoteName)
+            VALUES (1, 42, 'jellyfin', 'srv-test', 'usr-test', 'item-spidey-42', 'folder-spidey', 2000, 'tag-1', 'Spider-Man #1')
+            """.trimIndent()
+        )
+        v4Db.execSQL(
+            """
+            INSERT INTO reading_lists (id, name, createdAt, updatedAt)
+            VALUES (1, 'Favorites', 1000, 2000)
+            """.trimIndent()
+        )
+        v4Db.execSQL(
+            """
+            INSERT INTO reading_list_items (listId, comicId, sortOrder, addedAt)
+            VALUES (1, 42, 0, 2000)
+            """.trimIndent()
+        )
+
+        // 2. Execute Room Migration 4 -> 5 on the live database
+        AppDatabase.MIGRATION_4_5.migrate(v4Db)
+        v4Db.version = 5
+        v4Db.close()
+        helper.close()
+
+        // 3. Open migrated database with Room, validating full schema integrity and RoomOpenHelper checks
+        val migratedDb = Room.databaseBuilder(context, AppDatabase::class.java, "test_migration_4_5.db")
+            .addMigrations(AppDatabase.MIGRATION_4_5)
+            .allowMainThreadQueries()
+            .build()
+
+        try {
+            // Verify existing comic survived migration intact
+            val comic = migratedDb.comicDao().getById(42)
+            assertNotNull("Comic 42 must survive migration", comic)
+            assertEquals("Spider-Man #1", comic?.title)
+            assertEquals(15, comic?.lastPage)
+            assertEquals(32, comic?.pageCount)
+            assertEquals("jellyfin", comic?.source)
+
+            // Verify remote comic link survived migration intact
+            val link = migratedDb.remoteComicLinkDao().findLink("jellyfin", "srv-test", "usr-test", "item-spidey-42")
+            assertNotNull("Remote comic link must survive migration", link)
+            assertEquals(42L, link?.comicId)
+            assertEquals("folder-spidey", link?.parentId)
+
+            // Verify reading list and items survived migration intact
+            val lists = migratedDb.readingListDao().getAllLists()
+            assertEquals(1, lists.size)
+            assertEquals("Favorites", lists[0].name)
+
+            // Verify newly created jellyfin_sync_outbox table works with Room DAO
+            val outboxDao = migratedDb.jellyfinSyncOutboxDao()
+            val outboxEntry = JellyfinSyncOutboxEntity(
+                comicId = 42,
+                serverId = "srv-test",
+                userId = "usr-test",
+                itemId = "item-spidey-42",
+                pageIndex = 16,
+                markPlayed = null,
+                updatedAt = 3000L,
+            )
+            outboxDao.upsert(outboxEntry)
+            val pending = outboxDao.getPendingForComic(42)
+            assertNotNull("Outbox entry must be queryable in migrated DB", pending)
+            assertEquals(16, pending?.pageIndex)
+
+            // Verify cascade delete from comic to outbox and remote link in migrated DB
+            migratedDb.comicDao().delete(42)
+            assertNull(migratedDb.remoteComicLinkDao().findLink("jellyfin", "srv-test", "usr-test", "item-spidey-42"))
+            assertNull(outboxDao.getPendingForComic(42))
+        } finally {
+            migratedDb.close()
+            context.deleteDatabase("test_migration_4_5.db")
+        }
+    }
 }

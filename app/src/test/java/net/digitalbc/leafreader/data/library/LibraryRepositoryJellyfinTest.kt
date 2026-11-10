@@ -1,6 +1,7 @@
 package net.digitalbc.leafreader.data.library
 
 import androidx.room.Room
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import net.digitalbc.leafreader.data.db.AppDatabase
 import net.digitalbc.leafreader.data.db.ComicDao
@@ -11,6 +12,7 @@ import net.digitalbc.leafreader.data.jellyfin.JellyfinAuth
 import net.digitalbc.leafreader.data.jellyfin.JellyfinClient
 import net.digitalbc.leafreader.data.jellyfin.JellyfinCredentialStore
 import net.digitalbc.leafreader.data.jellyfin.JellyfinItem
+import net.digitalbc.leafreader.data.jellyfin.JellyfinServerConfig
 import net.digitalbc.leafreader.data.settings.AppSettings
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -718,5 +720,168 @@ class LibraryRepositoryJellyfinTest {
         // Local progress should NOT be overwritten because an outbox entry is still pending
         val comic = comicDao.getById(comicId)
         assertEquals(2, comic?.lastPage)
+    }
+
+    @Test
+    fun saveProgressPersistsOutboxAtomicallyBeforeNetworkDispatch() = runBlocking {
+        val cbzBytes = createValidCbzBytes(pageCount = 10)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/octet-stream")
+                .setHeader("Content-Length", cbzBytes.size)
+                .setBody(okio.Buffer().write(cbzBytes))
+        )
+
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val item = JellyfinItem(id = "atomic-item-1", name = "AtomicTest.cbz", isFolder = false, container = "cbz")
+        val comicId = repository.importJellyfinComic(item).getOrThrow()
+        server.takeRequest(5, TimeUnit.SECONDS) // consume download
+
+        // Call saveProgress with page 4
+        repository.saveProgress(comicId, page = 4, slot = 0)
+
+        // The outbox entry must be persisted synchronously in the database transaction immediately
+        val pending = outboxDao.getPendingForComic(comicId)
+        assertNotNull("Outbox entry must be persisted synchronously in Room transaction", pending)
+        assertEquals(4, pending?.pageIndex)
+        assertEquals("srv", pending?.serverId)
+        assertEquals("u", pending?.userId)
+        assertEquals("atomic-item-1", pending?.itemId)
+    }
+
+    @Test
+    fun routinePageTurnPreservesExplicitMarkUnreadIntent() = runBlocking {
+        val cbzBytes = createValidCbzBytes(pageCount = 10)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/octet-stream")
+                .setHeader("Content-Length", cbzBytes.size)
+                .setBody(okio.Buffer().write(cbzBytes))
+        )
+
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        val item = JellyfinItem(id = "intent-item-1", name = "IntentTest.cbz", isFolder = false, container = "cbz")
+        val comicId = repository.importJellyfinComic(item).getOrThrow()
+        server.takeRequest(5, TimeUnit.SECONDS) // consume download
+
+        // 1. Explicitly mark as unread (explicitPlayed = false)
+        repository.saveProgress(comicId, page = 0, slot = 0, explicitPlayed = false)
+        val initialOutbox = outboxDao.getPendingForComic(comicId)
+        assertNotNull(initialOutbox)
+        assertEquals(false, initialOutbox?.markPlayed)
+
+        // 2. Turn to page 1 during normal reading without explicit flag (explicitPlayed = null)
+        repository.saveProgress(comicId, page = 1, slot = 0, explicitPlayed = null)
+        val updatedOutbox = outboxDao.getPendingForComic(comicId)
+        assertNotNull(updatedOutbox)
+        assertEquals(1, updatedOutbox?.pageIndex)
+        // Must preserve markPlayed = false instead of reverting to null!
+        assertEquals("Routine page turn must preserve pending explicit markPlayed intent", false, updatedOutbox?.markPlayed)
+
+        // 3. Flush to server and verify both progress and PlayedItems DELETE are sent
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+
+        repository.flushJellyfinOutbox()
+
+        val progressReq = server.takeRequest(5, TimeUnit.SECONDS)
+        assertNotNull(progressReq)
+        assertEquals("/Sessions/Playing/Progress", progressReq?.path)
+
+        val deleteReq = server.takeRequest(5, TimeUnit.SECONDS)
+        assertNotNull(deleteReq)
+        assertEquals("/Users/u/PlayedItems/intent-item-1", deleteReq?.path)
+        assertEquals("DELETE", deleteReq?.method)
+    }
+
+    @Test
+    fun disconnectJellyfinCancelsInFlightBulkFlush() = runBlocking {
+        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+
+        // Insert two comics and pending outbox entries
+        val comic1 = comicDao.insert(
+            net.digitalbc.leafreader.data.db.ComicEntity(
+                title = "Bulk Comic 1",
+                filePath = "/c1.cbz",
+                coverPath = null,
+                format = "CBZ",
+                pageCount = 10,
+                dateAdded = 1000L,
+                lastOpened = 1000L,
+            )
+        )
+        val comic2 = comicDao.insert(
+            net.digitalbc.leafreader.data.db.ComicEntity(
+                title = "Bulk Comic 2",
+                filePath = "/c2.cbz",
+                coverPath = null,
+                format = "CBZ",
+                pageCount = 10,
+                dateAdded = 1000L,
+                lastOpened = 1000L,
+            )
+        )
+
+        outboxDao.upsert(
+            JellyfinSyncOutboxEntity(
+                comicId = comic1,
+                serverId = "srv",
+                userId = "u",
+                itemId = "bulk-item-1",
+                pageIndex = 5,
+            )
+        )
+        outboxDao.upsert(
+            JellyfinSyncOutboxEntity(
+                comicId = comic2,
+                serverId = "srv",
+                userId = "u",
+                itemId = "bulk-item-2",
+                pageIndex = 10,
+            )
+        )
+
+        // First request is held / delayed
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(204)
+                .setHeadersDelay(1000, TimeUnit.MILLISECONDS)
+        )
+
+        // Launch bulk flush in repository's jellyfinSyncScope
+        val config = JellyfinServerConfig(baseUrl(), true)
+        val flushJob = repository.jellyfinSyncScope.launch {
+            repository.flushJellyfinOutbox(config, auth)
+        }
+
+        // Wait briefly for first call to begin, then disconnect
+        kotlinx.coroutines.delay(200L)
+        repository.disconnectJellyfin()
+
+        flushJob.join()
+
+        // Consume first request
+        val req1 = server.takeRequest(5, TimeUnit.SECONDS)
+        assertNotNull(req1)
+
+        // Second request must NOT have been sent because session was disconnected and cancelled
+        val req2 = server.takeRequest(300, TimeUnit.MILLISECONDS)
+        assertNull("Second request in bulk flush must be cancelled on disconnect", req2)
     }
 }
