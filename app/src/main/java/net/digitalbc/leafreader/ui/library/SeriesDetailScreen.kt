@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -57,6 +58,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -624,14 +626,24 @@ private fun SeriesComicItem(
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(4.dp)
-                    .size(22.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
-                    .clickable(onClick = onRemove),
-                contentAlignment = Alignment.Center,
+                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    .clickable(
+                        role = Role.Button,
+                        onClickLabel = "Remove from series",
+                        onClick = onRemove,
+                    ),
+                contentAlignment = Alignment.TopEnd,
             ) {
-                Icon(Icons.Default.Close, contentDescription = "Remove from series", tint = ComicRose, modifier = Modifier.size(13.dp))
+                Box(
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Remove from series", tint = ComicRose, modifier = Modifier.size(13.dp))
+                }
             }
 
             Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(progressHeight).background(MaterialTheme.colorScheme.surface)) {

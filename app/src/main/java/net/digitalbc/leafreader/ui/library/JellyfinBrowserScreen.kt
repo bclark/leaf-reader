@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -682,13 +683,8 @@ private fun JellyfinItemRow(
     }
     val borderColor = if (isSelected) Ochre else Color.Transparent
 
-    val role = if (item.isFolder) {
-        Role.Button
-    } else if (item.isImportable && !isDownloaded) {
-        Role.Checkbox
-    } else {
-        null
-    }
+    val isToggleable = !item.isFolder && item.isImportable && !isDownloaded
+    val isButtonClickable = item.isFolder
 
     Row(
         modifier = Modifier
@@ -698,10 +694,17 @@ private fun JellyfinItemRow(
             .background(bgColor)
             .border(1.dp, borderColor, shape)
             .then(
-                if (role != null) {
-                    Modifier.clickable(role = role, onClick = onClick)
-                } else {
-                    Modifier
+                when {
+                    isToggleable -> Modifier.toggleable(
+                        value = isSelected,
+                        role = Role.Checkbox,
+                        onValueChange = { onClick() },
+                    )
+                    isButtonClickable -> Modifier.clickable(
+                        role = Role.Button,
+                        onClick = onClick,
+                    )
+                    else -> Modifier
                 }
             )
             .padding(horizontal = 14.dp, vertical = 12.dp),

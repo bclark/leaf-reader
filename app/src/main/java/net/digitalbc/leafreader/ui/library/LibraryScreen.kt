@@ -37,6 +37,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -244,8 +252,13 @@ fun LibraryScreen(
     val actualColumns = libraryColumns.coerceIn(2, availableColumns.last())
     val gridState = rememberLazyGridState()
 
+    val isRtlLayout = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val targetRtlRotation = when {
+        isRtlLayout -> if (defaultRtl) 0f else 180f
+        else -> if (defaultRtl) 180f else 0f
+    }
     val rtlRotation by animateFloatAsState(
-        targetValue = if (defaultRtl) 180f else 0f,
+        targetValue = targetRtlRotation,
         animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
         label = "directionFlip",
     )
@@ -287,15 +300,16 @@ fun LibraryScreen(
                 ) {
                     LeafWordmark()
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(
                             Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(if (isSearchOpen) Ochre else PaperWhite.copy(alpha = 0.14f))
-                                .clickable {
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .clickable(
+                                    role = Role.Button,
+                                    onClickLabel = if (isSearchOpen) "Close search" else "Open search",
+                                ) {
                                     isSearchOpen = !isSearchOpen
                                     if (!isSearchOpen) {
                                         viewModel.clearSearch()
@@ -304,27 +318,45 @@ fun LibraryScreen(
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
-                            Icon(
-                                Icons.Default.Search,
-                                contentDescription = "Search",
-                                tint = if (isSearchOpen) Ink else PaperWhite,
-                                modifier = Modifier.size(18.dp),
-                            )
+                            Box(
+                                Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isSearchOpen) Ochre else PaperWhite.copy(alpha = 0.14f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Default.Search,
+                                    contentDescription = "Search",
+                                    tint = if (isSearchOpen) Ink else PaperWhite,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
                         }
                         Box(
                             Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(PaperWhite.copy(alpha = 0.14f))
-                                .clickable(onClick = onOpenMenu),
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .clickable(
+                                    role = Role.Button,
+                                    onClickLabel = "Open menu",
+                                    onClick = onOpenMenu,
+                                ),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Icon(
-                                Icons.Default.Menu,
-                                contentDescription = "Menu",
-                                tint = PaperWhite,
-                                modifier = Modifier.size(18.dp),
-                            )
+                            Box(
+                                Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(PaperWhite.copy(alpha = 0.14f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Default.Menu,
+                                    contentDescription = "Menu",
+                                    tint = PaperWhite,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -437,123 +469,183 @@ fun LibraryScreen(
                             OchreBadge("YOUR LIBRARY")
                         }
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             if (!isEditMode && comics.isNotEmpty()) {
                                 Box(
                                     modifier = Modifier
-                                        .height(30.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                                        .border(1.dp, Ink, RoundedCornerShape(4.dp))
-                                        .clickable { viewModel.setEditMode(true) }
-                                        .padding(horizontal = 10.dp),
+                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                        .clickable(
+                                            role = Role.Button,
+                                            onClickLabel = "Edit library selection",
+                                            onClick = { viewModel.setEditMode(true) },
+                                        ),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Text(
-                                        "EDIT",
-                                        fontFamily = Anton,
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .height(30.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                                            .border(1.dp, Ink, RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 10.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            "EDIT",
+                                            fontFamily = Anton,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                        )
+                                    }
                                 }
                             } else if (isEditMode) {
                                 val allSelected = comics.isNotEmpty() && selectedComicIds.size == comics.size
                                 Box(
                                     modifier = Modifier
-                                        .height(30.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(if (allSelected) Ochre else MaterialTheme.colorScheme.surfaceVariant)
-                                        .border(1.dp, Ink, RoundedCornerShape(4.dp))
-                                        .clickable {
-                                            if (allSelected) viewModel.clearComicSelection()
-                                            else viewModel.selectAllComics(comics.map { it.id })
-                                        }
-                                        .padding(horizontal = 10.dp),
+                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                        .clickable(
+                                            role = Role.Button,
+                                            onClickLabel = if (allSelected) "Deselect all comics" else "Select all comics",
+                                            onClick = {
+                                                if (allSelected) viewModel.clearComicSelection()
+                                                else viewModel.selectAllComics(comics.map { it.id })
+                                            },
+                                        ),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Text(
-                                        if (allSelected) "DESELECT ALL" else "SELECT ALL",
-                                        fontFamily = Anton,
-                                        fontSize = 11.sp,
-                                        color = if (allSelected) Ink else MaterialTheme.colorScheme.onSurface,
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .height(30.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(Ochre)
-                                        .clickable { viewModel.setEditMode(false) }
-                                        .padding(horizontal = 10.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        "DONE",
-                                        fontFamily = Anton,
-                                        fontSize = 11.sp,
-                                        color = Ink,
-                                    )
-                                }
-                            }
-
-                            if (!isEditMode) {
-                                Box(
-                                    modifier = Modifier
-                                        .height(30.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(Ochre)
-                                        .border(1.dp, Ink, RoundedCornerShape(4.dp))
-                                        .clickable {
-                                            val idx = availableColumns.indexOf(actualColumns)
-                                            val next = availableColumns[(if (idx >= 0) idx + 1 else 0) % availableColumns.size]
-                                            viewModel.setLibraryColumns(next)
-                                        }
-                                        .padding(horizontal = 9.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    Box(
+                                        modifier = Modifier
+                                            .height(30.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(if (allSelected) Ochre else MaterialTheme.colorScheme.surfaceVariant)
+                                            .border(1.dp, Ink, RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 10.dp),
+                                        contentAlignment = Alignment.Center,
                                     ) {
-                                        ColumnDensityIcon(columns = actualColumns)
                                         Text(
-                                            "$actualColumns",
+                                            if (allSelected) "DESELECT ALL" else "SELECT ALL",
+                                            fontFamily = Anton,
+                                            fontSize = 11.sp,
+                                            color = if (allSelected) Ink else MaterialTheme.colorScheme.onSurface,
+                                        )
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                        .clickable(
+                                            role = Role.Button,
+                                            onClickLabel = "Done editing",
+                                            onClick = { viewModel.setEditMode(false) },
+                                        ),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .height(30.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Ochre)
+                                            .padding(horizontal = 10.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            "DONE",
                                             fontFamily = Anton,
                                             fontSize = 11.sp,
                                             color = Ink,
                                         )
                                     }
                                 }
+                            }
+
+                            if (!isEditMode) {
+                                Box(
+                                    modifier = Modifier
+                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                        .clickable(
+                                            role = Role.Button,
+                                            onClickLabel = "Change grid density",
+                                            onClick = {
+                                                val idx = availableColumns.indexOf(actualColumns)
+                                                val next = availableColumns[(if (idx >= 0) idx + 1 else 0) % availableColumns.size]
+                                                viewModel.setLibraryColumns(next)
+                                            },
+                                        )
+                                        .semantics {
+                                            contentDescription = "Library grid columns, $actualColumns"
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .height(30.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Ochre)
+                                            .border(1.dp, Ink, RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 9.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        ) {
+                                            ColumnDensityIcon(columns = actualColumns)
+                                            Text(
+                                                "$actualColumns",
+                                                fontFamily = Anton,
+                                                fontSize = 11.sp,
+                                                color = Ink,
+                                            )
+                                        }
+                                    }
+                                }
 
                                 Box(
                                     modifier = Modifier
-                                        .height(30.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(Ochre)
-                                        .border(1.dp, Ink, RoundedCornerShape(4.dp))
-                                        .clickable { viewModel.toggleDefaultDirection() }
-                                        .padding(horizontal = 10.dp),
+                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                        .clickable(
+                                            role = Role.Button,
+                                            onClickLabel = "Toggle reading direction",
+                                            onClick = { viewModel.toggleDefaultDirection() },
+                                        )
+                                        .semantics {
+                                            contentDescription = if (defaultRtl) {
+                                                "Default reading direction: Right to Left"
+                                            } else {
+                                                "Default reading direction: Left to Right"
+                                            }
+                                        },
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        modifier = Modifier.graphicsLayer { rotationY = rtlRotation },
+                                    Box(
+                                        modifier = Modifier
+                                            .height(30.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Ochre)
+                                            .border(1.dp, Ink, RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 10.dp),
+                                        contentAlignment = Alignment.Center,
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.MenuBook,
-                                            contentDescription = null,
-                                            tint = Ink,
-                                            modifier = Modifier.size(14.dp),
-                                        )
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                            contentDescription = if (defaultRtl) "Reading Direction: RTL" else "Reading Direction: LTR",
-                                            tint = Ink,
-                                            modifier = Modifier.size(14.dp),
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            modifier = Modifier.graphicsLayer { rotationY = rtlRotation },
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                                                contentDescription = null,
+                                                tint = Ink,
+                                                modifier = Modifier.size(14.dp),
+                                            )
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                                contentDescription = null,
+                                                tint = Ink,
+                                                modifier = Modifier.size(14.dp),
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -574,19 +666,32 @@ fun LibraryScreen(
                                 val isSelected = currentFilter == filter
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(if (isSelected) Ochre else MaterialTheme.colorScheme.surfaceVariant)
-                                        .border(1.dp, if (isSelected) Ochre else Ink, RoundedCornerShape(4.dp))
-                                        .clickable { viewModel.setLibraryFilter(filter) }
-                                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                                        .defaultMinSize(minHeight = 48.dp)
+                                        .selectable(
+                                            selected = isSelected,
+                                            role = Role.Tab,
+                                            onClick = { viewModel.setLibraryFilter(filter) },
+                                        )
+                                        .semantics {
+                                            selected = isSelected
+                                        },
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Text(
-                                        text = filter.label,
-                                        fontFamily = Anton,
-                                        fontSize = 12.sp,
-                                        color = if (isSelected) Ink else MaterialTheme.colorScheme.onSurface,
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(if (isSelected) Ochre else MaterialTheme.colorScheme.surfaceVariant)
+                                            .border(1.dp, if (isSelected) Ochre else Ink, RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 14.dp, vertical = 7.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            text = filter.label,
+                                            fontFamily = Anton,
+                                            fontSize = 12.sp,
+                                            color = if (isSelected) Ink else MaterialTheme.colorScheme.onSurface,
+                                        )
+                                    }
                                 }
                             }
                         }

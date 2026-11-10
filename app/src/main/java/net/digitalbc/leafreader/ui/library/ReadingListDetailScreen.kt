@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -63,6 +64,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -445,60 +447,88 @@ fun ReadingListDetailScreen(
                                 Box(
                                     modifier = Modifier
                                         .align(Alignment.TopEnd)
-                                        .padding(6.dp)
-                                        .size(24.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
-                                        .clickable { comicToRemove = comic },
-                                    contentAlignment = Alignment.Center,
+                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                        .clickable(
+                                            role = Role.Button,
+                                            onClickLabel = "Remove from reading list",
+                                        ) { comicToRemove = comic },
+                                    contentAlignment = Alignment.TopEnd,
                                 ) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = "Remove from reading list",
-                                        tint = ComicRose,
-                                        modifier = Modifier.size(14.dp),
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(6.dp)
+                                            .size(24.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Remove from reading list",
+                                            tint = ComicRose,
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                    }
                                 }
 
                                 // Bottom Reorder Affordances
                                 Row(
                                     modifier = Modifier
                                         .align(Alignment.BottomEnd)
-                                        .padding(bottom = if (actualColumns >= 4) 10.dp else 12.dp, end = 6.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        .padding(bottom = if (actualColumns >= 4) 6.dp else 8.dp, end = 2.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     if (index > 0) {
                                         Box(
                                             modifier = Modifier
-                                                .size(22.dp)
-                                                .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
-                                                .clickable { viewModel.moveReadingListItem(listId, comic.id, -1) },
+                                                .defaultMinSize(minWidth = 36.dp, minHeight = 36.dp)
+                                                .clickable(
+                                                    role = Role.Button,
+                                                    onClickLabel = "Move earlier in reading order",
+                                                ) { viewModel.moveReadingListItem(listId, comic.id, -1) },
                                             contentAlignment = Alignment.Center,
                                         ) {
-                                            Icon(
-                                                Icons.Default.ArrowUpward,
-                                                contentDescription = "Move earlier in reading order",
-                                                tint = MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.size(12.dp),
-                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(22.dp)
+                                                    .clip(CircleShape)
+                                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.ArrowUpward,
+                                                    contentDescription = "Move earlier in reading order",
+                                                    tint = MaterialTheme.colorScheme.onSurface,
+                                                    modifier = Modifier.size(12.dp),
+                                                )
+                                            }
                                         }
                                     }
                                     if (index < listComics.size - 1) {
                                         Box(
                                             modifier = Modifier
-                                                .size(22.dp)
-                                                .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
-                                                .clickable { viewModel.moveReadingListItem(listId, comic.id, 1) },
+                                                .defaultMinSize(minWidth = 36.dp, minHeight = 36.dp)
+                                                .clickable(
+                                                    role = Role.Button,
+                                                    onClickLabel = "Move later in reading order",
+                                                ) { viewModel.moveReadingListItem(listId, comic.id, 1) },
                                             contentAlignment = Alignment.Center,
                                         ) {
-                                            Icon(
-                                                Icons.Default.ArrowDownward,
-                                                contentDescription = "Move later in reading order",
-                                                tint = MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.size(12.dp),
-                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(22.dp)
+                                                    .clip(CircleShape)
+                                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.ArrowDownward,
+                                                    contentDescription = "Move later in reading order",
+                                                    tint = MaterialTheme.colorScheme.onSurface,
+                                                    modifier = Modifier.size(12.dp),
+                                                )
+                                            }
                                         }
                                     }
                                 }
