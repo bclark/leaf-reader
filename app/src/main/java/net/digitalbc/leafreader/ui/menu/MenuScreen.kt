@@ -946,6 +946,32 @@ fun MenuScreen(
                 modifier = Modifier.clickable(onClick = openUpstream).padding(top = 2.dp),
             )
 
+            Spacer(Modifier.size(14.dp))
+            Text(
+                "Screenshot comics: Pepper&Carrot by David Revoy, licensed under CC BY 4.0. Comics are not included with Leaf.",
+                fontFamily = Archivo,
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(
+                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.peppercarrot.com/"))) },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text("Read Pepper&Carrot", fontFamily = Archivo)
+            }
+            TextButton(
+                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.davidrevoy.com/"))) },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text("David Revoy’s website", fontFamily = Archivo)
+            }
+            TextButton(
+                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://creativecommons.org/licenses/by/4.0/"))) },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text("CC BY 4.0 license", fontFamily = Archivo)
+            }
+
             Spacer(Modifier.size(18.dp))
             LinkRow("Privacy policy — Leaf collects no data.") {
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_URL)))
@@ -1182,9 +1208,12 @@ fun MenuScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        text = "• ${preview.totalComicsInBackup} comics in backup (${preview.matchingComicsCount} match existing library)\n" +
+                        text = "• ${preview.totalComicsInBackup} comics in backup (${preview.matchingComicsCount} safely match existing library)\n" +
                                 "• ${preview.readingListsCount} reading lists\n" +
-                                "• App settings: ${if (preview.hasSettings) "Included" else "None"}",
+                                "• App settings: ${if (preview.hasSettings) "Included" else "None"}\n" +
+                                "• Skipping ${preview.totalComicsInBackup - preview.matchingComicsCount} comics and " +
+                                "${preview.skippedReadingListItemsCount} list items with missing or ambiguous matches. " +
+                                "Their local progress and list membership will be kept.",
                         fontFamily = Archivo,
                         fontSize = 13.sp,
                         lineHeight = 19.sp,

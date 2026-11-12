@@ -87,8 +87,12 @@ fun SeriesDetailScreen(
     viewModel: LibraryViewModel,
     onOpenComic: (Long) -> Unit,
     onBack: () -> Unit,
+    offlineDownloads: Boolean = false,
 ) {
     val allComics by viewModel.comics.collectAsStateWithLifecycle()
+    val readable by viewModel.readableComics.collectAsStateWithLifecycle()
+    val requestedDownloads by viewModel.downloadedOnly.collectAsStateWithLifecycle()
+    val downloadedOnly = requestedDownloads || offlineDownloads
     val libraryColumns by viewModel.libraryColumns.collectAsStateWithLifecycle()
 
     val configuration = LocalConfiguration.current
@@ -102,8 +106,8 @@ fun SeriesDetailScreen(
     }
     val actualColumns = libraryColumns.coerceIn(2, availableColumns.last())
 
-    val seriesComics = remember(allComics, seriesName, volume) {
-        allComics.filter {
+    val seriesComics = remember(allComics, seriesName, volume, downloadedOnly, readable) {
+        allComics.filter { (!downloadedOnly || readable.any { copy -> copy.id == it.id }) &&
             it.series.equals(seriesName, ignoreCase = true) &&
             (volume.isNullOrBlank() || it.volume.equals(volume, ignoreCase = true))
         }.sortedWith(
@@ -190,6 +194,11 @@ fun SeriesDetailScreen(
                 horizontalArrangement = Arrangement.spacedBy(if (actualColumns >= 4) 12.dp else 16.dp),
                 verticalArrangement = Arrangement.spacedBy(if (actualColumns >= 4) 14.dp else 18.dp),
             ) {
+                item(span = { GridItemSpan(actualColumns) }) {
+                    androidx.compose.material3.FilterChip(selected = downloadedOnly, enabled = !offlineDownloads,
+                        onClick = { viewModel.downloadedOnly.value = !downloadedOnly },
+                        label = { Text("Downloaded only") }, modifier = Modifier.heightIn(min = 48.dp))
+                }
                 // Hero Card Header (Compact, Uncluttered Status Row)
                 item(span = { GridItemSpan(actualColumns) }) {
                     Card(

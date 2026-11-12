@@ -35,6 +35,16 @@ class ComicReaderApp : Application() {
         const val EXPERIMENT_DISABLE_PANEL_READING = true
     }
 
+    /** Refresh cached UI values after startup has finished any interrupted restore. */
+    fun refreshRestoredPreferences() {
+        _themeMode.value = settings.themeMode
+        _amoledTheme.value = settings.amoledTheme
+        _pageSlideEnabled.value = settings.pageSlideEnabled
+        _pageFitMode.value = settings.pageFitMode
+        _portraitSpread.value = settings.portraitSpread
+        _landscapeSpread.value = settings.landscapeSpread
+    }
+
     /** On-device ML panel detector; falls back to whole-page-only if the model can't load or experiment is active. */
     val panelSource: PanelSource by lazy {
         if (EXPERIMENT_DISABLE_PANEL_READING) {

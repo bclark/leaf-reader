@@ -196,15 +196,48 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrationFrom4To5PreservesPopulatedDataAndCreatesOutboxTable() = runBlocking {
-        val context = RuntimeEnvironment.getApplication()
-        val dbFile = context.getDatabasePath("test_migration_4_5.db")
-        if (dbFile.exists()) dbFile.delete()
+    fun migrationFrom4To7PreservesPopulatedDataAndCreatesOutboxTable() = runBlocking {
+        verifyPopulatedUpgrade(version = 4)
+    }
 
-        // 1. Create a SQLite database at Schema Version 4 and populate with comics, links, and lists
+    @Test
+    fun migrationFromPreRevision5PreservesPendingProgress() = runBlocking {
+        verifyPopulatedUpgrade(version = 5)
+    }
+
+    @Test
+    fun migrationFromPreRevision5PreservesExplicitRead() = runBlocking {
+        verifyPopulatedUpgrade(version = 5, markPlayed = true)
+    }
+
+    @Test
+    fun migrationFromPreRevision5PreservesExplicitUnread() = runBlocking {
+        verifyPopulatedUpgrade(version = 5, markPlayed = false)
+    }
+
+    @Test
+    fun migrationFromRevised5PreservesExistingRevision() = runBlocking {
+        verifyPopulatedUpgrade(version = 5, hasRevision = true, markPlayed = false)
+    }
+
+    @Test
+    fun migrationFrom6PreservesDataAndCreatesEmptyRecoveryJournal() = runBlocking {
+        verifyPopulatedUpgrade(version = 6, hasRevision = true, markPlayed = false)
+    }
+
+    private suspend fun verifyPopulatedUpgrade(
+        version: Int,
+        hasRevision: Boolean = false,
+        markPlayed: Boolean? = null,
+    ) {
+        val context = RuntimeEnvironment.getApplication()
+        val databaseName = "test_migration_to_7.db"
+        context.deleteDatabase(databaseName)
+
+        // Independent predecessor fixture, opened through Room's normal upgrade path.
         val config = androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(context)
-            .name("test_migration_4_5.db")
-            .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(4) {
+            .name(databaseName)
+            .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(version) {
                 override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                     db.execSQL(
                         """
@@ -306,17 +339,53 @@ class AppDatabaseMigrationTest {
             """.trimIndent()
         )
 
-        // 2. Close v4 database at version 4 to let Room execute MIGRATION_4_5 via its normal upgrade pipeline
-        v4Db.close()
+        if (version >= 5) {
+            val revisionColumn = if (hasRevision) ", revision INTEGER NOT NULL DEFAULT 1" else ""
+            v4Db.execSQL(
+                """
+                CREATE TABLE jellyfin_sync_outbox (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    comicId INTEGER NOT NULL,
+                    serverId TEXT NOT NULL,
+                    userId TEXT NOT NULL,
+                    itemId TEXT NOT NULL,
+                    pageIndex INTEGER NOT NULL,
+                    markPlayed INTEGER,
+                    updatedAt INTEGER NOT NULL
+                    $revisionColumn,
+                    FOREIGN KEY(comicId) REFERENCES comics(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                )
+                """.trimIndent()
+            )
+            v4Db.execSQL("CREATE UNIQUE INDEX index_jellyfin_sync_outbox_comicId ON jellyfin_sync_outbox(comicId)")
+            v4Db.execSQL("CREATE INDEX index_jellyfin_sync_outbox_serverId_userId ON jellyfin_sync_outbox(serverId, userId)")
+            val revisionName = if (hasRevision) ", revision" else ""
+            val revisionValue = if (hasRevision) ", 9" else ""
+            v4Db.execSQL(
+                """
+                INSERT INTO jellyfin_sync_outbox
+                    (id, comicId, serverId, userId, itemId, pageIndex, markPlayed, updatedAt$revisionName)
+                VALUES (7, 42, 'srv-test', 'usr-test', 'item-spidey-42', 15, ?, 2500$revisionValue)
+                """.trimIndent(),
+                arrayOf<Any?>(markPlayed?.let { if (it) 1 else 0 }),
+            )
+        }
         helper.close()
 
-        // 3. Open database with Room, exercising Room's normal upgrade path and RoomOpenHelper validation
-        val migratedDb = Room.databaseBuilder(context, AppDatabase::class.java, "test_migration_4_5.db")
-            .addMigrations(AppDatabase.MIGRATION_4_5)
+        fun openMigratedDatabase() = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
+            .addMigrations(AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8)
             .allowMainThreadQueries()
             .build()
 
+        var migratedDb = openMigratedDatabase()
+
         try {
+            // Force migration/validation, then reopen the on-disk database to check durability.
+            assertEquals(8, migratedDb.openHelper.writableDatabase.version)
+            assertNull(migratedDb.pendingBackupPreferencesDao().get())
+            migratedDb.close()
+            migratedDb = openMigratedDatabase()
+
             // Verify existing comic survived migration intact
             val comic = migratedDb.comicDao().getById(42)
             assertNotNull("Comic 42 must survive migration", comic)
@@ -340,9 +409,38 @@ class AppDatabaseMigrationTest {
             assertEquals(42L, listItems[0].comicId)
             assertEquals(1L, listItems[0].listId)
             assertEquals(0, listItems[0].sortOrder)
+            assertEquals(net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.reference(
+                "srv-test", "usr-test", "item-spidey-42"), listItems[0].referenceKey)
+            assertEquals("item-spidey-42", listItems[0].itemId)
+            migratedDb.readingListDao().insertItem(ReadingListItemEntity(1, 0, 1,
+                referenceKey = "remote-only-a", serverId = "srv-test", userId = "usr-test", itemId = "a"))
+            migratedDb.readingListDao().insertItem(ReadingListItemEntity(1, 0, 2,
+                referenceKey = "remote-only-b", serverId = "srv-test", userId = "usr-test", itemId = "b"))
+            assertEquals(3, migratedDb.readingListDao().getAllItems().size)
+            migratedDb.jellyfinMetadataCacheDao().put(JellyfinMetadataCache("s", "u", "url", "key", "metadata"))
+            assertEquals("metadata", migratedDb.jellyfinMetadataCacheDao().get("s", "u", "url", "key"))
+            assertNull(migratedDb.jellyfinMetadataCacheDao().get("s", "other", "url", "key"))
 
             // Verify newly created jellyfin_sync_outbox table works with Room DAO and includes revision
             val outboxDao = migratedDb.jellyfinSyncOutboxDao()
+            if (version >= 5) {
+                assertEquals(
+                    listOf(JellyfinSyncOutboxEntity(
+                        id = 7,
+                        comicId = 42,
+                        serverId = "srv-test",
+                        userId = "usr-test",
+                        itemId = "item-spidey-42",
+                        pageIndex = 15,
+                        markPlayed = markPlayed,
+                        updatedAt = 2500L,
+                        revision = if (hasRevision) 9L else 1L,
+                    )),
+                    outboxDao.getPendingForUser("srv-test", "usr-test"),
+                )
+            } else {
+                assertEquals(0, outboxDao.countPendingForUser("srv-test", "usr-test"))
+            }
             val outboxEntry = JellyfinSyncOutboxEntity(
                 comicId = 42,
                 serverId = "srv-test",
@@ -365,7 +463,7 @@ class AppDatabaseMigrationTest {
             assertNull(outboxDao.getPendingForComic(42))
         } finally {
             migratedDb.close()
-            context.deleteDatabase("test_migration_4_5.db")
+            context.deleteDatabase(databaseName)
         }
     }
 }

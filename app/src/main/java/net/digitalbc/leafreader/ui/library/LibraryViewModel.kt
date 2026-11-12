@@ -1,6 +1,7 @@
 package net.digitalbc.leafreader.ui.library
 
 import android.net.Uri
+import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -22,6 +23,12 @@ import net.digitalbc.leafreader.data.jellyfin.JellyfinBrowserState
 import net.digitalbc.leafreader.data.jellyfin.JellyfinException
 import net.digitalbc.leafreader.data.jellyfin.JellyfinFailureKind
 import net.digitalbc.leafreader.data.jellyfin.JellyfinItem
+import net.digitalbc.leafreader.data.jellyfin.JellyfinAuth
+import net.digitalbc.leafreader.data.jellyfin.JellyfinItemDetails
+import net.digitalbc.leafreader.data.jellyfin.JellyfinItemIdentity
+import net.digitalbc.leafreader.data.jellyfin.JellyfinLibraryEntry
+import net.digitalbc.leafreader.data.jellyfin.JellyfinView
+import net.digitalbc.leafreader.data.jellyfin.JellyfinItemsResult
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +39,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
@@ -64,28 +73,41 @@ sealed interface LibraryItem {
     ) : LibraryItem
 }
 
+data class JellyfinDetailState(
+    val item: JellyfinItem,
+    val identity: JellyfinItemIdentity?,
+    val loading: Boolean = true,
+    val details: JellyfinItemDetails? = null,
+    val failure: JellyfinFailureKind? = null,
+    val localComic: ComicEntity? = null,
+    val checkingLocal: Boolean = false,
+    val localCopyFailure: Boolean = false,
+    val readyComicId: Long? = null,
+)
+
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class LibraryViewModel(
     private val repository: LibraryRepository,
     private val settings: AppSettings,
+    private val loadJellyfinDetails: suspend (JellyfinItemIdentity) -> Result<JellyfinItemDetails> = repository::getJellyfinItemDetails,
+    private val jellyfinAuth: () -> JellyfinAuth? = repository::getJellyfinAuth,
+    private val loadLocalJellyfinComic: suspend (JellyfinItemIdentity) -> Result<ComicEntity?> = repository::getReadableJellyfinComic,
+    private val loadJellyfinViews: suspend () -> Result<List<JellyfinView>> = repository::listJellyfinViews,
+    private val loadJellyfinLandingItems: suspend (String) -> Result<JellyfinItemsResult> = {
+        repository.listJellyfinItems(it, syncReadingProgress = false)
+    },
+    private val defaultDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default,
     private val listSmbDirectory: suspend (String) -> Result<List<SmbEntry>> = repository::listSmbDirectory,
 ) : ViewModel() {
-
-    init {
-        viewModelScope.launch {
-            repository.backfillMetadataIfNeeded()
-        }
-        viewModelScope.launch {
-            repository.observeDownloadedJellyfinItemIds().collect { downloaded ->
-                _jellyfinBrowser.update { JellyfinBrowserLogic.updateDownloadedIds(it, downloaded) }
-            }
-        }
-    }
 
     private var importJob: Job? = null
 
     /** Search query for filtering comics in the library. */
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    val downloadedOnly = MutableStateFlow(false)
+    val readableComics = repository.readableComics
 
     private val _libraryFilter = MutableStateFlow(LibraryFilter.ALL)
     val libraryFilter: StateFlow<LibraryFilter> = _libraryFilter.asStateFlow()
@@ -95,11 +117,10 @@ class LibraryViewModel(
     }
 
     val comics: StateFlow<List<ComicEntity>> = combine(repository.comics, _searchQuery) { list, query ->
-        if (query.isBlank()) {
-            list
-        } else {
-            val q = query.trim()
-            list.filter { it.title.contains(q, ignoreCase = true) }
+        list to query.trim()
+    }.mapLatest { (list, query) ->
+        withContext(defaultDispatcher) {
+            if (query.isBlank()) list else list.filter { it.title.contains(query, ignoreCase = true) }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -107,118 +128,11 @@ class LibraryViewModel(
         repository.readingLists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val libraryItems: StateFlow<List<LibraryItem>> = combine(
-        repository.comics,
-        repository.readingLists,
-        repository.allReadingListItems,
-        _searchQuery,
-        _libraryFilter,
-    ) { allComics, lists, allListItems, query, filter ->
-        val filteredComics = if (query.isBlank()) {
-            allComics
-        } else {
-            val q = query.trim()
-            allComics.filter {
-                it.title.contains(q, ignoreCase = true) ||
-                (it.series?.contains(q, ignoreCase = true) == true)
-            }
-        }
-
-        val readingListCards = if (filter == LibraryFilter.ALL || filter == LibraryFilter.READING_LISTS) {
-            val filteredLists = if (query.isBlank()) {
-                lists
-            } else {
-                lists.filter { it.name.contains(query.trim(), ignoreCase = true) }
-            }
-            val comicMap = allComics.associateBy { it.id }
-            filteredLists.map { list ->
-                val listItems = allListItems.filter { it.listId == list.id }.sortedBy { it.sortOrder }
-                val listComics = listItems.mapNotNull { comicMap[it.comicId] }
-                LibraryItem.ReadingListItem(
-                    readingList = list,
-                    previewComics = listComics.take(4),
-                    itemCount = listComics.size,
-                )
-            }
-        } else emptyList()
-
-        when (filter) {
-            LibraryFilter.ALL -> {
-                val seriesGroups = filteredComics
-                    .filter { !it.series.isNullOrBlank() }
-                    .groupBy { "${it.series}__${it.volume.orEmpty()}".lowercase() }
-
-                val handledComicIds = mutableSetOf<Long>()
-                val items = mutableListOf<LibraryItem>()
-
-                for (comic in filteredComics) {
-                    if (comic.id in handledComicIds) continue
-
-                    val seriesKey = if (!comic.series.isNullOrBlank()) {
-                        "${comic.series}__${comic.volume.orEmpty()}".lowercase()
-                    } else null
-
-                    val group = if (seriesKey != null) seriesGroups[seriesKey] else null
-                    if (group != null && group.size >= 2) {
-                        val sortedIssues = group.sortedWith(
-                            compareBy<ComicEntity> { it.issueNumber ?: Float.MAX_VALUE }
-                                .thenBy { it.title }
-                        )
-                        val nextIssue = sortedIssues.firstOrNull { it.pageCount > 0 && it.lastPage < it.pageCount - 1 }
-                            ?: sortedIssues.first()
-                        val completedCount = sortedIssues.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-                        val unreadCount = sortedIssues.count { it.lastPage == 0 }
-
-                        items.add(
-                            LibraryItem.SeriesStack(
-                                seriesName = group.first().series ?: "Series",
-                                volume = group.first().volume,
-                                issues = sortedIssues,
-                                topCoverComic = nextIssue,
-                                totalIssues = sortedIssues.size,
-                                unreadIssues = unreadCount,
-                                progressFraction = if (sortedIssues.isNotEmpty()) completedCount.toFloat() / sortedIssues.size else 0f,
-                            )
-                        )
-                        for (c in group) handledComicIds.add(c.id)
-                    } else {
-                        items.add(LibraryItem.SingleComic(comic))
-                        handledComicIds.add(comic.id)
-                    }
-                }
-                items + readingListCards
-            }
-            LibraryFilter.SERIES -> {
-                val seriesGroups = filteredComics
-                    .filter { !it.series.isNullOrBlank() }
-                    .groupBy { "${it.series}__${it.volume.orEmpty()}".lowercase() }
-
-                seriesGroups.values.map { group ->
-                    val sortedIssues = group.sortedWith(
-                        compareBy<ComicEntity> { it.issueNumber ?: Float.MAX_VALUE }
-                            .thenBy { it.title }
-                    )
-                    val nextIssue = sortedIssues.firstOrNull { it.pageCount > 0 && it.lastPage < it.pageCount - 1 }
-                        ?: sortedIssues.first()
-                    val completedCount = sortedIssues.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-                    val unreadCount = sortedIssues.count { it.lastPage == 0 }
-
-                    LibraryItem.SeriesStack(
-                        seriesName = group.first().series ?: "Series",
-                        volume = group.first().volume,
-                        issues = sortedIssues,
-                        topCoverComic = nextIssue,
-                        totalIssues = sortedIssues.size,
-                        unreadIssues = unreadCount,
-                        progressFraction = if (sortedIssues.isNotEmpty()) completedCount.toFloat() / sortedIssues.size else 0f,
-                    )
-                }.sortedBy { it.seriesName.lowercase() }
-            }
-            LibraryFilter.READING_LISTS -> readingListCards
-            LibraryFilter.UNREAD -> {
-                val unreadComics = filteredComics.filter { it.lastPage == 0 }
-                unreadComics.map { LibraryItem.SingleComic(it) }
-            }
-        }
+        repository.comics, repository.readingLists, repository.allReadingListItems, _searchQuery, _libraryFilter,
+    ) { rows, lists, items, query, filter ->
+        LibraryProjectionInput(rows, lists, items, query, filter)
+    }.mapLatest { input ->
+        withContext(defaultDispatcher) { projectLibrary(input) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Global default reading direction applied to newly imported comics. */
@@ -271,6 +185,173 @@ class LibraryViewModel(
 
     val hasJellyfinConfig: Boolean get() = settings.hasJellyfinConfig
 
+    private val _jellyfinDetail = MutableStateFlow<JellyfinDetailState?>(null)
+    val jellyfinDetail = _jellyfinDetail.asStateFlow()
+    private var jellyfinDetailJob: Job? = null
+    private var jellyfinLocalJob: Job? = null
+    private var detailGeneration = 0L
+
+    private val _downloadedCopies = MutableStateFlow<Map<String, ComicEntity>>(emptyMap())
+    val downloadedCopies = _downloadedCopies.asStateFlow()
+    private var downloadedObserver: Job? = null
+    private var downloadedAccount: Triple<String, String, String>? = null
+
+    init {
+        viewModelScope.launch {
+            repository.backfillMetadataIfNeeded()
+        }
+        refreshDownloadedJellyfinItems()
+    }
+
+    fun refreshDownloadedJellyfinItems() {
+        val auth = jellyfinAuth()
+        val account = auth?.let { Triple(settings.jellyfinServerUrl, it.serverId, it.userId) }
+        if (account == downloadedAccount && downloadedObserver != null) return
+        downloadedObserver?.cancel()
+        downloadedAccount = account
+        _jellyfinBrowser.update { JellyfinBrowserLogic.updateDownloadedIds(it, emptySet()) }
+        _downloadedCopies.value = emptyMap()
+        downloadedObserver = viewModelScope.launch {
+            repository.observeDownloadedJellyfinCopies().collect { copies ->
+                if (downloadedAccount == account) {
+                    _downloadedCopies.value = copies
+                    _jellyfinBrowser.update { JellyfinBrowserLogic.updateDownloadedIds(it, copies.keys) }
+                }
+            }
+        }
+    }
+
+    fun openJellyfinDetail(item: JellyfinItem) {
+        if (item.isFolder) return
+        jellyfinDetailJob?.cancel()
+        jellyfinLocalJob?.cancel()
+        val generation = ++detailGeneration
+        val auth = jellyfinAuth()
+        val identity = auth?.let { JellyfinItemIdentity(it.serverId, it.userId, item.id) }
+        _jellyfinDetail.value = JellyfinDetailState(
+            item, identity, loading = identity != null,
+            failure = if (identity == null) JellyfinFailureKind.AUTHENTICATION else null,
+        )
+        if (identity == null) return
+        refreshJellyfinLocalCopy()
+        jellyfinDetailJob = viewModelScope.launch {
+            try {
+                val result = loadJellyfinDetails(identity)
+                if (generation != detailGeneration) return@launch
+                if (jellyfinAuth() != auth) {
+                    _jellyfinDetail.update { it?.copy(loading = false, details = null, failure = JellyfinFailureKind.AUTHENTICATION) }
+                    return@launch
+                }
+                val current = _jellyfinDetail.value ?: return@launch
+                _jellyfinDetail.value = result.fold(
+                    onSuccess = { details ->
+                        if (details.identity != identity) {
+                            current.copy(loading = false, failure = JellyfinFailureKind.PARSE_ERROR)
+                        } else current.copy(loading = false, details = details, failure = null)
+                    },
+                    onFailure = { error ->
+                        current.copy(loading = false,
+                            failure = (error as? JellyfinException)?.kind ?: JellyfinFailureKind.UNKNOWN)
+                    },
+                )
+            } catch (cancelled: CancellationException) {
+                if (isActive && generation == detailGeneration) {
+                    _jellyfinDetail.update { it?.copy(loading = false, details = null, failure = JellyfinFailureKind.AUTHENTICATION) }
+                }
+                throw cancelled
+            }
+        }
+    }
+
+    fun closeJellyfinDetail() {
+        ++detailGeneration
+        jellyfinDetailJob?.cancel()
+        jellyfinLocalJob?.cancel()
+        _jellyfinDetail.value = null
+    }
+
+    fun retryJellyfinDetail() {
+        val state = _jellyfinDetail.value ?: return
+        val auth = jellyfinAuth()
+        if (state.identity != null &&
+            (auth?.serverId != state.identity.serverId || auth.userId != state.identity.userId)
+        ) {
+            _jellyfinDetail.value = state.copy(loading = false, details = null,
+                failure = JellyfinFailureKind.AUTHENTICATION)
+            return
+        }
+        openJellyfinDetail(state.item)
+    }
+
+    fun refreshJellyfinLocalCopy(openWhenReady: Boolean = false) {
+        val state = _jellyfinDetail.value ?: return
+        val identity = state.identity ?: return
+        if (state.checkingLocal) return
+        val generation = detailGeneration
+        jellyfinLocalJob?.cancel()
+        _jellyfinDetail.value = state.copy(checkingLocal = true, readyComicId = null)
+        jellyfinLocalJob = viewModelScope.launch {
+            val result = loadLocalJellyfinComic(identity)
+            if (!isActive || generation != detailGeneration) return@launch
+            val auth = jellyfinAuth()
+            val differentAccount = auth != null &&
+                (auth.serverId != identity.serverId || auth.userId != identity.userId)
+            val comic = result.getOrNull().takeUnless { differentAccount }
+            _jellyfinDetail.update { current ->
+                current?.copy(
+                    localComic = comic, checkingLocal = false,
+                    localCopyFailure = result.isFailure || differentAccount || (openWhenReady && comic == null),
+                    readyComicId = comic?.id?.takeIf { openWhenReady },
+                )
+            }
+        }
+    }
+
+    /** Consume before navigating so recreation cannot replay a completed Read action. */
+    fun consumeJellyfinRead(): Long? {
+        val state = _jellyfinDetail.value ?: return null
+        val id = state.readyComicId ?: return null
+        _jellyfinDetail.value = state.copy(readyComicId = null)
+        return id
+    }
+
+    suspend fun loadJellyfinCover(item: JellyfinItem): Bitmap? = loadJellyfinCover(item, 400)
+
+    suspend fun loadJellyfinCover(item: JellyfinItem, maxWidth: Int): Bitmap? = withContext(Dispatchers.IO) {
+        // The synchronized encrypted credential store can wait on disk/Keystore and other cover readers.
+        val auth = net.digitalbc.leafreader.data.library.CoverPerformanceTrace.auth { jellyfinAuth() }
+            ?: return@withContext null
+        val bitmap = repository.loadJellyfinCoverBitmap(item.id, item.imageTag, maxWidth)
+        bitmap.takeIf { net.digitalbc.leafreader.data.library.CoverPerformanceTrace.auth { jellyfinAuth() } == auth }
+    }
+
+    fun downloadJellyfinDetail(openWhenReady: Boolean = false) {
+        val state = _jellyfinDetail.value ?: return
+        val requestGeneration = detailGeneration
+        val details = state.details ?: return
+        val auth = jellyfinAuth()
+        if (auth?.serverId != details.identity.serverId || auth.userId != details.identity.userId) {
+            _jellyfinDetail.value = state.copy(failure = JellyfinFailureKind.AUTHENTICATION)
+            return
+        }
+        if (!_importing.value) {
+            importJellyfinItems(listOf(details.item)) {
+                viewModelScope.launch {
+                    if (detailGeneration == requestGeneration && importJob?.isCancelled != true &&
+                        _jellyfinDetail.value?.identity == state.identity && !_importing.value) {
+                        refreshJellyfinLocalCopy(openWhenReady)
+                    }
+                }
+                // The link observer may have been started before the user connected.
+                viewModelScope.launch {
+                    repository.observeDownloadedJellyfinItemIds().firstOrNull()?.let { ids ->
+                        _jellyfinBrowser.update { JellyfinBrowserLogic.updateDownloadedIds(it, ids) }
+                    }
+                }
+            }
+        }
+    }
+
     fun toggleJellyfinSelection(itemId: String) {
         _jellyfinBrowser.update { JellyfinBrowserLogic.toggleSelection(it, itemId) }
     }
@@ -288,12 +369,79 @@ class LibraryViewModel(
         _jellyfinBrowser.update { it.copy(loading = false) }
     }
 
+    fun jellyfinBrowsePositionKey(parentId: String?): String = listOf(
+        settings.jellyfinServerUrl, settings.jellyfinServerId, settings.jellyfinUserId, parentId.orEmpty(),
+    ).joinToString(":") { "${it.length}:$it" }
+
+    private fun jellyfinConnectionScope() =
+        Triple(settings.jellyfinServerUrl, settings.jellyfinServerId, settings.jellyfinUserId)
+
+    private var jellyfinLandingScope: Triple<String, String, String>? = null
+    private var jellyfinLandingReady = false
+
+    /** Called on source entry, not on every recomposition/return from the reader. */
+    fun ensureJellyfinLanding(force: Boolean = false) {
+        if (!hasJellyfinConfig) {
+            cancelJellyfinBrowse()
+            closeJellyfinDetail()
+            jellyfinLandingScope = null
+            jellyfinLandingReady = false
+            _jellyfinBrowser.value = JellyfinBrowserState.empty().copy(generation = _jellyfinBrowser.value.generation)
+            return
+        }
+        val scope = jellyfinConnectionScope()
+        if (!force && scope == jellyfinLandingScope &&
+            (jellyfinLandingReady || _jellyfinBrowser.value.loading || _jellyfinBrowser.value.failure != null)
+        ) return
+        jellyfinListingJob?.cancel()
+        closeJellyfinDetail()
+        jellyfinLandingScope = scope
+        jellyfinLandingReady = false
+        val request = JellyfinBrowserLogic.begin(
+            JellyfinBrowserState.empty().copy(generation = _jellyfinBrowser.value.generation),
+        )
+        _jellyfinBrowser.value = request
+        jellyfinListingJob = viewModelScope.launch {
+            fun current() = isActive && scope == jellyfinConnectionScope() &&
+                _jellyfinBrowser.value.generation == request.generation
+            fun fail(error: Throwable) {
+                if (current()) {
+                    val kind = (error as? JellyfinException)?.kind ?: JellyfinFailureKind.UNKNOWN
+                    _jellyfinBrowser.update { JellyfinBrowserLogic.fail(it, request.generation, kind) }
+                }
+            }
+            val viewsResult = loadJellyfinViews()
+            if (!current()) return@launch
+            val views = viewsResult.getOrElse { fail(it); return@launch }
+            val automatic = JellyfinLibraryEntry.automaticLibrary(views)
+            if (automatic == null) {
+                val books = JellyfinLibraryEntry.comicLibraries(views)
+                _jellyfinBrowser.update {
+                    JellyfinBrowserLogic.completeViews(it, request.generation, books.ifEmpty { views })
+                }
+                jellyfinLandingReady = true
+                return@launch
+            }
+            val items = loadJellyfinLandingItems(automatic.id)
+            if (!current()) return@launch
+            items.onSuccess { result ->
+                _jellyfinBrowser.update {
+                    JellyfinBrowserLogic.completeItems(
+                        it, request.generation, automatic.id, automatic.name, result.items,
+                        listOf(JellyfinBreadcrumb(automatic.id, automatic.name)),
+                    )
+                }
+                jellyfinLandingReady = true
+            }.onFailure { fail(it) }
+        }
+    }
+
     fun loadJellyfinRoot() {
         jellyfinListingJob?.cancel()
         val request = JellyfinBrowserLogic.begin(_jellyfinBrowser.value)
         _jellyfinBrowser.value = request
         jellyfinListingJob = viewModelScope.launch {
-            val result = repository.listJellyfinViews()
+            val result = loadJellyfinViews()
             result.onSuccess { views ->
                 _jellyfinBrowser.update { JellyfinBrowserLogic.completeViews(it, request.generation, views) }
             }.onFailure { error ->
@@ -682,6 +830,47 @@ class LibraryViewModel(
             _isEditMode.value = false
             _message.value = "Added ${comicIds.size} ${if (comicIds.size == 1) "comic" else "comics"} to reading list"
         }
+    }
+
+    data class ListMember(
+        val reference: net.digitalbc.leafreader.data.db.ReadingListItemEntity,
+        val comic: ComicEntity?,
+        val remote: net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueEntry?,
+    )
+
+    fun observeListMembers(listId: Long): Flow<List<ListMember>> =
+        combine(repository.observeListReferences(listId), repository.comics) { rows, comics ->
+            val local = comics.associateBy { it.id }
+            val auth = jellyfinAuth()
+            rows.map { row ->
+                val accessible = auth?.serverId == row.serverId && auth?.userId == row.userId
+                val snapshot = if (accessible) row.snapshot?.let {
+                    runCatching { net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.decode(it) }.getOrNull()
+                } else null
+                ListMember(row, local[row.comicId], snapshot)
+            }
+        }
+
+    fun captureRemoteIdentity(item: JellyfinItem): JellyfinItemIdentity? =
+        jellyfinAuth()?.let { JellyfinItemIdentity(it.serverId, it.userId, item.id) }
+
+    fun addRemoteToList(listId: Long,
+        entry: net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueEntry,
+        identity: JellyfinItemIdentity, libraryId: String?) {
+        viewModelScope.launch {
+            val auth = jellyfinAuth()
+            if (auth?.serverId != identity.serverId || auth.userId != identity.userId) {
+                _message.value = "Account changed. Open this comic again."
+                return@launch
+            }
+            runCatching { repository.addRemoteToReadingList(listId, entry, identity, libraryId) }
+                .onSuccess { _message.value = "Added to Leaf list" }
+                .onFailure { if (it is CancellationException) throw it; _message.value = "Could not add to list" }
+        }
+    }
+
+    fun editListMember(listId: Long, key: String, direction: Int? = null) {
+        viewModelScope.launch { repository.editListReference(listId, key, direction) }
     }
 
     fun observeReadingList(listId: Long): Flow<ReadingListEntity?> =

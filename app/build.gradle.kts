@@ -49,6 +49,13 @@ android {
     }
 
     buildTypes {
+        // Device fault injection has its own sandbox and is never packaged in release builds.
+        create("recoveryQa") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".recoveryqa"
+            versionNameSuffix = "-recovery-qa"
+            matchingFallbacks += listOf("debug")
+        }
         release {
             // R8 strips dead code; resource shrinking drops unreferenced resources.
             isMinifyEnabled = true
@@ -63,6 +70,12 @@ android {
             if (releaseConfig != null) {
                 signingConfig = releaseConfig
             }
+        }
+        // Local release-like profiling: production optimizations, debug certificate, existing app data.
+        create("performance") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
         }
     }
 

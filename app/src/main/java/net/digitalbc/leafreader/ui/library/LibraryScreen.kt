@@ -1,6 +1,7 @@
 package net.digitalbc.leafreader.ui.library
 
 import android.graphics.BitmapFactory
+import android.graphics.Bitmap
 import android.util.LruCache
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -47,6 +48,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -112,6 +114,11 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import net.digitalbc.leafreader.data.jellyfin.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -175,7 +182,7 @@ private fun formatFileSize(bytes: Long): String = when {
     else -> "$bytes B"
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     viewModel: LibraryViewModel,
@@ -185,6 +192,7 @@ fun LibraryScreen(
     onOpenMenu: () -> Unit,
     onOpenDrive: () -> Unit,
     onOpenJellyfin: () -> Unit = {},
+    catalogue: JellyfinCatalogueViewModel? = null,
 ) {
     val comics by viewModel.comics.collectAsStateWithLifecycle()
     val libraryItems by viewModel.libraryItems.collectAsStateWithLifecycle()
@@ -199,6 +207,69 @@ fun LibraryScreen(
     val libraryColumns by viewModel.libraryColumns.collectAsStateWithLifecycle()
     val isEditMode by viewModel.isEditMode.collectAsStateWithLifecycle()
     val selectedComicIds by viewModel.selectedComicIds.collectAsStateWithLifecycle()
+
+    val catalogueState = catalogue?.state?.collectAsStateWithLifecycle()?.value
+        ?.takeIf { it.accountScope == catalogue.positionScope }
+    val readableDownloads by viewModel.readableComics.collectAsStateWithLifecycle()
+    val jellyfinDetail by viewModel.jellyfinDetail.collectAsStateWithLifecycle()
+    val jellyfinBrowser by viewModel.jellyfinBrowser.collectAsStateWithLifecycle()
+    val requestedDownloads by viewModel.downloadedOnly.collectAsStateWithLifecycle()
+    val launchFallback = catalogueState?.downloadedFallback == true
+    val downloadedOnly = requestedDownloads || launchFallback
+    var remoteSeries by rememberSaveable { mutableStateOf<String?>(null) }
+    var remoteListSelection by remember { mutableStateOf<RemoteListSelection?>(null) }
+    val remoteMode = viewModel.hasJellyfinConfig && catalogue != null &&
+        (!launchFallback || (currentFilter == LibraryFilter.SERIES && catalogueState?.canBrowseSaved == true)) &&
+        (!downloadedOnly || currentFilter in listOf(LibraryFilter.SERIES, LibraryFilter.READING_LISTS)) && !isEditMode
+    val downloadedCopies by viewModel.downloadedCopies.collectAsStateWithLifecycle()
+    val representedLocalIds = if (remoteMode && currentFilter == LibraryFilter.SERIES)
+        catalogueState?.entries.orEmpty().mapNotNull { downloadedCopies[it.item.id]?.id }.toSet() else emptySet()
+    val readableIds = readableDownloads.map { it.id }.toSet() - representedLocalIds
+    val displayedLocalItems: List<LibraryItem> = when {
+        remoteMode && currentFilter != LibraryFilter.READING_LISTS && !downloadedOnly -> emptyList()
+        downloadedOnly -> libraryItems.mapNotNull { item ->
+            when (item) {
+                is LibraryItem.SingleComic -> item.takeIf { it.comic.id in readableIds }
+                is LibraryItem.SeriesStack -> item.issues.filter { it.id in readableIds }.takeIf { it.isNotEmpty() }?.let {
+                    item.copy(issues = it, topCoverComic = it.first(), totalIssues = it.size,
+                        unreadIssues = it.count { c -> c.lastPage < c.pageCount - 1 })
+                }
+                is LibraryItem.ReadingListItem -> item
+            }
+        }
+        else -> libraryItems
+    }
+    RemoteListActions(remoteListSelection, catalogueState?.library?.id, viewModel) { remoteListSelection = null }
+    LaunchedEffect(catalogue, viewModel.jellyfinBrowsePositionKey(null), currentFilter,
+        catalogueState?.library?.id, catalogueState?.launchFailure, catalogueState?.browsingSaved, searchQuery, downloadedOnly) {
+        if (viewModel.hasJellyfinConfig && catalogue != null) {
+            catalogue.ensure()
+            viewModel.refreshDownloadedJellyfinItems()
+            if (catalogueState?.library != null) {
+                val target = if (downloadedOnly && currentFilter !in listOf(LibraryFilter.SERIES, LibraryFilter.READING_LISTS)) JellyfinCatalogueView.DOWNLOADED else when (currentFilter) {
+                    LibraryFilter.ALL -> JellyfinCatalogueView.ALL
+                    LibraryFilter.SERIES -> JellyfinCatalogueView.SERIES
+                    LibraryFilter.READING_LISTS -> JellyfinCatalogueView.LISTS
+                    LibraryFilter.UNREAD -> JellyfinCatalogueView.UNREAD
+                }
+                if (catalogue.state.value.view != target) catalogue.select(target)
+                delay(300)
+                catalogue.search(searchQuery)
+            }
+        }
+    }
+    val catalogueLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(catalogueLifecycle, catalogue) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && viewModel.hasJellyfinConfig)
+                catalogue?.onForeground()
+        }
+        catalogueLifecycle.lifecycle.addObserver(observer)
+        onDispose { catalogueLifecycle.lifecycle.removeObserver(observer) }
+    }
+    BackHandler(enabled = jellyfinDetail == null && (remoteSeries != null || catalogueState?.collection != null)) {
+        if (remoteSeries != null) remoteSeries = null else catalogue?.closeCollection()
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     var pendingDelete by remember { mutableStateOf<ComicEntity?>(null) }
@@ -250,7 +321,7 @@ fun LibraryScreen(
         }
     }
     val actualColumns = libraryColumns.coerceIn(2, availableColumns.last())
-    val gridState = rememberLazyGridState()
+    val gridPositions = rememberSaveableStateHolder()
 
     val isRtlLayout = LocalLayoutDirection.current == LayoutDirection.Rtl
     val targetRtlRotation = when {
@@ -280,6 +351,13 @@ fun LibraryScreen(
 
     val horizontalSpacing = if (actualColumns >= 4) 12.dp else 16.dp
     val verticalSpacing = if (actualColumns >= 4) 14.dp else 18.dp
+
+    if (jellyfinDetail != null) {
+        JellyfinBrowserScreen(viewModel, onBack = { viewModel.closeJellyfinDetail() },
+            onOpenComic = onOpenComic, onOpenLocal = { viewModel.closeJellyfinDetail() },
+            onOpenSettings = onOpenMenu)
+        return
+    }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Surface(
@@ -444,9 +522,35 @@ fun LibraryScreen(
             }
         }
 
-        Box(Modifier.fillMaxWidth().weight(1f)) {
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = catalogueState?.refreshing == true,
+            onRefresh = { if (viewModel.hasJellyfinConfig) catalogue?.refresh() },
+            modifier = Modifier.fillMaxWidth().weight(1f),
+        ) {
             Box(Modifier.matchParentSize().halftone(LeafSecondary, alpha = 0.05f))
 
+            val gridKey = listOf(viewModel.jellyfinBrowsePositionKey(null), currentFilter.name,
+                searchQuery, downloadedOnly.toString(), remoteSeries.orEmpty(), catalogueState?.collection?.id.orEmpty())
+                .joinToString(":") { "${it.length}:$it" }
+            gridPositions.SaveableStateProvider(gridKey) {
+            // One constraint read for the screen, never one subcomposition per cover.
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+            val gridWidth = this.maxWidth
+            val remoteCoverWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) {
+                net.digitalbc.leafreader.data.library.CoverImageDecoder.widthBucket(
+                    ((gridWidth - 36.dp - horizontalSpacing * (actualColumns - 1)) / actualColumns).roundToPx())
+            }
+            val gridState = rememberLazyGridState()
+            LaunchedEffect(gridState, catalogueState?.library?.id, catalogueState?.collection?.id,
+                catalogueState?.search, catalogueState?.entries?.size, catalogueState?.loading, catalogueState?.error) {
+                if (remoteMode && !downloadedOnly && catalogueState?.hasMore == true &&
+                    !catalogueState.loading && catalogueState.error == null) {
+                    androidx.compose.runtime.snapshotFlow {
+                        val info = gridState.layoutInfo
+                        (info.visibleItemsInfo.lastOrNull()?.index ?: -1) >= info.totalItemsCount - 8
+                    }.distinctUntilChanged().collect { nearEnd -> if (nearEnd) catalogue?.load(more = true) }
+                }
+            }
             LazyVerticalGrid(
                 columns = GridCells.Fixed(actualColumns),
                 state = gridState,
@@ -464,7 +568,8 @@ fun LibraryScreen(
                         if (isEditMode) {
                             OchreBadge("${selectedComicIds.size} SELECTED")
                         } else if (searchQuery.isNotBlank()) {
-                            OchreBadge("FOUND ${comics.size} ${if (comics.size == 1) "COMIC" else "COMICS"}")
+                            if (remoteMode) OchreBadge("FOUND ${catalogueState?.entries?.size ?: 0} LOADED")
+                            else OchreBadge("FOUND ${comics.size} ${if (comics.size == 1) "COMIC" else "COMICS"}")
                         } else {
                             OchreBadge("YOUR LIBRARY")
                         }
@@ -472,7 +577,7 @@ fun LibraryScreen(
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (!isEditMode && comics.isNotEmpty()) {
+                            if (!isEditMode && comics.isNotEmpty() && !remoteMode) {
                                 Box(
                                     modifier = Modifier
                                         .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
@@ -670,7 +775,10 @@ fun LibraryScreen(
                                         .selectable(
                                             selected = isSelected,
                                             role = Role.Tab,
-                                            onClick = { viewModel.setLibraryFilter(filter) },
+                                            onClick = {
+                                                remoteSeries = null
+                                                viewModel.setLibraryFilter(filter)
+                                            },
                                         )
                                         .semantics {
                                             selected = isSelected
@@ -698,7 +806,57 @@ fun LibraryScreen(
                     }
                 }
 
-                if (libraryItems.isEmpty()) {
+                catalogueState?.launchFailure?.let { failure ->
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        JellyfinLaunchNotice(failure = failure, retrying = catalogueState.loading || catalogueState.indexing,
+                            showingDownloads = launchFallback,
+                            onRetry = { catalogue?.retryConnection() }, onSettings = onOpenMenu)
+                    }
+                }
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        androidx.compose.material3.FilterChip(
+                            selected = downloadedOnly,
+                            enabled = !launchFallback || catalogueState?.canBrowseSaved == true,
+                            onClick = {
+                                if (launchFallback) catalogue?.browseSavedCatalogue()
+                                else viewModel.downloadedOnly.value = !downloadedOnly
+                            },
+                            label = { Text("Downloaded") }, modifier = Modifier.heightIn(min = 48.dp))
+                        if (remoteMode) {
+                            Text(catalogueState?.library?.name?.let { if (searchQuery.isBlank()) "Jellyfin · $it" else "Search · $it" } ?: "Jellyfin",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(12.dp))
+                        }
+                    }
+                }
+                if (remoteMode && catalogueState != null) {
+                    mainCatalogueGrid(
+                        state = if (downloadedOnly && (catalogueState.view != JellyfinCatalogueView.LISTS || catalogueState.collection != null)) catalogueState.copy(
+                            entries = catalogueState.entries.filter { it.type.equals("BoxSet", true) || it.item.id in jellyfinBrowser.downloadedItemIds },
+                            seriesGroups = catalogueState.downloadedSeriesGroups,
+                            hasMore = false, loading = false) else catalogueState,
+                        columns = actualColumns,
+                        accountScope = catalogue?.positionScope.orEmpty(),
+                        onLongClick = { entry ->
+                            viewModel.captureRemoteIdentity(entry.item)?.let { remoteListSelection = RemoteListSelection(entry, it) }
+                        },
+                        selectedSeries = remoteSeries,
+                        downloadedIds = jellyfinBrowser.downloadedItemIds,
+                        onSeries = { remoteSeries = it },
+                        onBack = { if (remoteSeries != null) remoteSeries = null else catalogue?.closeCollection() },
+                        onItem = { viewModel.openJellyfinDetail(it) },
+                        onCollection = { catalogue?.openCollection(it) },
+                        onLibrary = { catalogue?.chooseLibrary(it) },
+                        onRetry = { catalogue?.retryView() },
+                        onMore = { catalogue?.load(more = true) },
+                        loadCover = { viewModel.loadJellyfinCover(it, remoteCoverWidthPx) },
+                        coverWidthPx = remoteCoverWidthPx,
+                    )
+                }
+
+                if (displayedLocalItems.isEmpty() && !remoteMode) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         if (searchQuery.isNotBlank()) {
                             Column(
@@ -738,7 +896,8 @@ fun LibraryScreen(
                             }
                         } else {
                             Text(
-                                "No comics yet. Tap LOAD COMIC to add a CBZ, CBR, or PDF.",
+                                if (downloadedOnly) "No readable downloads yet. Import a comic or download one from Jellyfin."
+                                else "No comics yet. Tap LOAD COMIC to add a CBZ, CBR, or PDF.",
                                 fontFamily = Archivo,
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -748,7 +907,10 @@ fun LibraryScreen(
                     }
                 }
 
-                items(libraryItems, key = { item ->
+                if (remoteMode && currentFilter == LibraryFilter.READING_LISTS) {
+                    item(span = { GridItemSpan(maxLineSpan) }) { Text("Leaf lists") }
+                }
+                items(displayedLocalItems, key = { item ->
                     when (item) {
                         is LibraryItem.SingleComic -> "comic-${item.comic.id}"
                         is LibraryItem.SeriesStack -> "series-${item.seriesName}-${item.volume.orEmpty()}"
@@ -820,6 +982,8 @@ fun LibraryScreen(
                         )
                     }
                 }
+            }
+            }
             }
 
             if (!isEditMode && !importing) {
@@ -1030,6 +1194,9 @@ fun LibraryScreen(
                             .clickable {
                                 showSourceDialog = false
                                 if (viewModel.hasJellyfinConfig) {
+                                    viewModel.downloadedOnly.value = false
+                                    remoteSeries = null
+                                    viewModel.setLibraryFilter(LibraryFilter.ALL)
                                     onOpenJellyfin()
                                 } else {
                                     viewModel.showMessage("Configure your Jellyfin server in Menu first.")
@@ -1794,22 +1961,29 @@ fun LibraryScreen(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ComicCard(
-    comic: ComicEntity,
+internal fun ComicCard(
+    comic: ComicEntity? = null,
     columns: Int = 2,
     isEditMode: Boolean = false,
     isSelected: Boolean = false,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    remote: JellyfinCatalogueEntry? = null,
+    remoteTitle: String? = null,
+    remoteSubtitle: String? = null,
+    loadRemoteCover: (suspend (JellyfinItem) -> Bitmap?)? = null,
+    remoteCoverWidthPx: Int = 400,
 ) {
-    val pct = if (comic.pageCount > 0) ((comic.lastPage + 1f) / comic.pageCount).coerceIn(0f, 1f) else 0f
-    val started = comic.lastPage > 0
+    require((comic == null) != (remote == null))
+    val title = comic?.title ?: remoteTitle ?: remote!!.item.name
+    val pct = if (comic != null && comic.pageCount > 0) ((comic.lastPage + 1f) / comic.pageCount).coerceIn(0f, 1f) else 0f
+    val started = (comic?.lastPage ?: 0) > 0
     val borderWidth = if (columns >= 4) 2.dp else 3.dp
     val shadowOffset = if (columns >= 4) 3.dp else 5.dp
     val progressHeight = if (columns >= 4) 5.dp else 7.dp
 
-    val fileSize = remember(comic.filePath) {
-        runCatching { File(comic.filePath).length() }.getOrDefault(0L)
+    val fileSize = remember(comic?.filePath) {
+        comic?.filePath?.let { runCatching { File(it).length() }.getOrDefault(0L) } ?: 0L
     }
     val sizeText = formatFileSize(fileSize)
 
@@ -1827,11 +2001,17 @@ private fun ComicCard(
                     shape = RoundedCornerShape(4.dp),
                 ),
         ) {
-            val cover = rememberCover(comic.coverPath)
-            if (cover != null) {
-                Image(cover, comic.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            val cover = rememberCover(comic?.coverPath)
+            val remoteBitmap by produceState<Bitmap?>(null, remote?.item?.id, remote?.item?.imageTag, LocalRemoteCoverOffline.current, remoteCoverWidthPx) {
+                val loaded = remote?.item?.let { loadRemoteCover?.invoke(it) }
+                if (loaded != null || value == null) value = loaded
+            }
+            if (remoteBitmap != null) {
+                Image(remoteBitmap!!.asImageBitmap(), title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            } else if (cover != null) {
+                Image(cover, title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             } else {
-                GeneratedCover(comic.title, columns = columns)
+                GeneratedCover(title, columns = columns)
             }
 
             if (isEditMode) {
@@ -1856,14 +2036,14 @@ private fun ComicCard(
                 }
             }
 
-            if (!isEditMode) {
+            if (!isEditMode && (comic != null || remote?.played == true)) {
                 Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(progressHeight).background(MaterialTheme.colorScheme.surface)) {
-                    Box(Modifier.fillMaxWidth(pct).fillMaxHeight().background(Ochre))
+                    Box(Modifier.fillMaxWidth(if (remote?.played == true) 1f else pct).fillMaxHeight().background(Ochre))
                 }
             }
         }
         Text(
-            comic.title.uppercase(),
+            title.uppercase(),
             fontFamily = Archivo,
             fontWeight = FontWeight.ExtraBold,
             fontSize = if (columns >= 5) 10.sp else if (columns >= 4) 11.sp else 12.sp,
@@ -1873,8 +2053,8 @@ private fun ComicCard(
             modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp),
         )
         Text(
-            if (started) "${(pct * 100).toInt()}% · pg ${comic.lastPage + 1}/${comic.pageCount}${if (sizeText.isNotEmpty()) " · $sizeText" else ""}"
-            else "${comic.pageCount} pages${if (sizeText.isNotEmpty()) " · $sizeText" else ""}",
+            remoteSubtitle ?: if (comic != null && started) "${(pct * 100).toInt()}% · pg ${comic.lastPage + 1}/${comic.pageCount}${if (sizeText.isNotEmpty()) " · $sizeText" else ""}"
+            else if (comic != null) "${comic.pageCount} pages${if (sizeText.isNotEmpty()) " · $sizeText" else ""}" else "Jellyfin",
             fontFamily = Archivo,
             fontWeight = FontWeight.SemiBold,
             fontSize = if (columns >= 4) 8.5.sp else 9.5.sp,
@@ -2410,16 +2590,61 @@ private fun Modifier.onePointerCoverPeel(
     }
 }
 
+private data class StackCover(val id: String, val coverPath: String?, val issueNumber: Float?, val remote: JellyfinItem? = null)
+private data class StackPresentation(
+    val seriesName: String, val volume: String?, val issues: List<StackCover>,
+    val topCoverComic: StackCover, val progressFraction: Float, val subtitle: String,
+    val remote: Boolean = false,
+) {
+    val totalIssues get() = issues.size
+}
+
 @Composable
-private fun ComicStackCard(
-    stack: LibraryItem.SeriesStack,
+private fun stackCover(cover: StackCover?, load: (suspend (JellyfinItem) -> Bitmap?)?, widthPx: Int): ImageBitmap? {
+    val local = rememberCover(cover?.coverPath)
+    val remote by produceState<Bitmap?>(null, cover?.id, cover?.remote?.imageTag, LocalRemoteCoverOffline.current, widthPx) {
+        val loaded = cover?.remote?.let { load?.invoke(it) }
+        if (loaded != null || value == null) value = loaded
+    }
+    return local ?: remote?.asImageBitmap()
+}
+
+@Composable
+private fun ComicStackCard(stack: LibraryItem.SeriesStack, columns: Int = 2, onClick: () -> Unit) {
+    val covers = remember(stack.issues) { stack.issues.map { StackCover(it.id.toString(), it.coverPath, it.issueNumber) } }
+    CoverStackCard(StackPresentation(stack.seriesName, stack.volume, covers,
+        covers.firstOrNull { it.id == stack.topCoverComic.id.toString() } ?: covers.first(),
+        stack.progressFraction,
+        "${stack.totalIssues} issues ${if (stack.unreadIssues > 0) "· ${stack.unreadIssues} unread" else "· read"}"),
+        columns = columns, onClick = onClick)
+}
+
+@Composable
+internal fun RemoteSeriesStackCard(
+    group: net.digitalbc.leafreader.data.jellyfin.JellyfinSeriesGroup,
+    columns: Int, partial: Boolean, loadCover: suspend (JellyfinItem) -> Bitmap?, coverWidthPx: Int = 400,
+    onClick: () -> Unit,
+) {
+    val covers = remember(group.entries) { group.entries.map { StackCover(it.item.id, null, it.issueNumber?.toFloat(), it.item) } }
+    androidx.compose.runtime.key(group.key) {
+        CoverStackCard(StackPresentation(group.name, null, covers, covers.first(), 0f,
+            "${covers.size} ${if (partial) "loaded comics" else "comics"} · Jellyfin", remote = true),
+            loadRemoteCover = loadCover, remoteCoverWidthPx = coverWidthPx, columns = columns, onClick = onClick)
+    }
+}
+
+@Composable
+private fun CoverStackCard(
+    stack: StackPresentation,
+    loadRemoteCover: (suspend (JellyfinItem) -> Bitmap?)? = null,
+    remoteCoverWidthPx: Int = 400,
     columns: Int = 2,
     onClick: () -> Unit,
 ) {
     val pct = stack.progressFraction
     val borderWidth = if (columns >= 4) 2.dp else 3.dp
     val shadowOffset = if (columns >= 4) 3.dp else 5.dp
-    val progressHeight = if (columns >= 4) 5.dp else 7.dp
+    val progressHeight = if (stack.remote) 0.dp else if (columns >= 4) 5.dp else 7.dp
 
     val initialIndex = remember(stack.issues, stack.topCoverComic) {
         val idx = stack.issues.indexOfFirst { it.id == stack.topCoverComic.id }
@@ -2443,9 +2668,12 @@ private fun ComicStackCard(
     val coroutineScope = rememberCoroutineScope()
     val offsetY = remember { Animatable(0f) }
     var cardHeightPx by remember { mutableFloatStateOf(0f) }
-    val progress = if (cardHeightPx > 0f) (offsetY.value / cardHeightPx).coerceIn(0f, 1f) else 0f
-    val backCoverDimming by animateFloatAsState(
-        targetValue = if (progress >= COVER_PEEL_THRESHOLD_FRACTION) 0f else 1f,
+    val progress = { if (cardHeightPx > 0f) (offsetY.value / cardHeightPx).coerceIn(0f, 1f) else 0f }
+    val peelThresholdReached by remember { androidx.compose.runtime.derivedStateOf {
+        cardHeightPx > 0f && offsetY.value / cardHeightPx >= COVER_PEEL_THRESHOLD_FRACTION
+    } }
+    val backCoverDimming = animateFloatAsState(
+        targetValue = if (peelThresholdReached) 0f else 1f,
         animationSpec = tween(180),
         label = "Back cover dimming",
     )
@@ -2472,13 +2700,13 @@ private fun ComicStackCard(
         ) {
             // Neat Stack Layer 3 (for 3+ issues) - highest top offset
             if (stack.totalIssues >= 3) {
-                val cover3 = rememberCover(layer3Comic?.coverPath)
+                val cover3 = stackCover(layer3Comic, loadRemoteCover, remoteCoverWidthPx)
                 Box(
                     Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                            translationY = lerp((-8).dp.toPx(), (-4).dp.toPx(), progress)
-                            scaleX = lerp(0.93f, 0.96f, progress)
+                            translationY = lerp((-8).dp.toPx(), (-4).dp.toPx(), progress())
+                            scaleX = lerp(0.93f, 0.96f, progress())
                         }
                         .shadow(elevation = shadowOffset * 1.6f, shape = RoundedCornerShape(4.dp), clip = false,
                             ambientColor = Color.Black.copy(alpha = 0.18f), spotColor = Color.Black.copy(alpha = 0.24f))
@@ -2488,19 +2716,19 @@ private fun ComicStackCard(
                     if (cover3 != null) {
                         Image(cover3, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     }
-                    Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.28f * backCoverDimming)))
+                    Box(Modifier.matchParentSize().graphicsLayer { alpha = backCoverDimming.value }.background(Color.Black.copy(alpha = 0.28f)))
                 }
             }
 
             // Neat Stack Layer 2 (for 2+ issues) - middle top offset
             if (stack.totalIssues >= 2) {
-                val cover2 = rememberCover(layer2Comic?.coverPath)
+                val cover2 = stackCover(layer2Comic, loadRemoteCover, remoteCoverWidthPx)
                 Box(
                     Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                            translationY = lerp((-4).dp.toPx(), 0f, progress)
-                            scaleX = lerp(0.96f, 1f, progress)
+                            translationY = lerp((-4).dp.toPx(), 0f, progress())
+                            scaleX = lerp(0.96f, 1f, progress())
                         }
                         .then(
                             if (stack.totalIssues == 2) Modifier.shadow(elevation = shadowOffset * 1.6f, shape = RoundedCornerShape(4.dp), clip = false,
@@ -2509,17 +2737,14 @@ private fun ComicStackCard(
                         )
                         .clip(RoundedCornerShape(4.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .then(
-                            if (progress > 0.5f) Modifier.border(borderWidth, Color.Transparent, RoundedCornerShape(4.dp))
-                            else Modifier
-                        )
+
                 ) {
                     if (cover2 != null) {
                         Image(cover2, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     }
 
                     val layer2IssueNum = if (issueCount > 0) ((topIndex + 1) % issueCount + issueCount) % issueCount + 1 else 2
-                    val layer2BadgeText = layer2Comic?.issueNumber?.let { num ->
+                    val layer2BadgeText = if (stack.remote) "$layer2IssueNum / ${stack.totalIssues}" else layer2Comic?.issueNumber?.let { num ->
                         val numStr = if (num % 1.0f == 0.0f) "${num.toInt()}" else "$num"
                         "ISSUE #$numStr OF ${stack.totalIssues}"
                     } ?: "ISSUE $layer2IssueNum OF ${stack.totalIssues}"
@@ -2547,7 +2772,7 @@ private fun ComicStackCard(
                     Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(progressHeight).background(MaterialTheme.colorScheme.surface)) {
                         Box(Modifier.fillMaxWidth(pct).fillMaxHeight().background(Ochre))
                     }
-                    Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.16f * backCoverDimming)))
+                    Box(Modifier.matchParentSize().graphicsLayer { alpha = backCoverDimming.value }.background(Color.Black.copy(alpha = 0.16f)))
                 }
             }
 
@@ -2557,7 +2782,8 @@ private fun ComicStackCard(
                     .fillMaxSize()
                     .graphicsLayer {
                         translationY = offsetY.value
-                        alpha = if (progress > 0.75f) (1f - (progress - 0.75f) / 0.25f).coerceIn(0f, 1f) else 1f
+                        val fraction = progress()
+                        alpha = if (fraction > 0.75f) (1f - (fraction - 0.75f) / 0.25f).coerceIn(0f, 1f) else 1f
                     }
                     .then(
                         if (stack.totalIssues <= 1) Modifier.shadow(elevation = shadowOffset * 1.6f, shape = RoundedCornerShape(4.dp), clip = false,
@@ -2568,7 +2794,7 @@ private fun ComicStackCard(
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .border(width = borderWidth, color = Color.Transparent, shape = RoundedCornerShape(4.dp)),
             ) {
-                val cover1 = rememberCover(currentTopComic.coverPath)
+                val cover1 = stackCover(currentTopComic, loadRemoteCover, remoteCoverWidthPx)
                 if (cover1 != null) {
                     Image(cover1, stack.seriesName, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 } else {
@@ -2589,7 +2815,7 @@ private fun ComicStackCard(
                         contentAlignment = Alignment.Center,
                 ) {
                     val currentIssueNum = if (issueCount > 0) (topIndex % issueCount + issueCount) % issueCount + 1 else 1
-                    val frontBadgeText = if (stack.totalIssues > 1) {
+                    val frontBadgeText = if (stack.remote) "$currentIssueNum / ${stack.totalIssues}" else if (stack.totalIssues > 1) {
                         currentTopComic.issueNumber?.let { num ->
                             val numStr = if (num % 1.0f == 0.0f) "${num.toInt()}" else "$num"
                             "ISSUE #$numStr OF ${stack.totalIssues}"
@@ -2623,7 +2849,7 @@ private fun ComicStackCard(
             modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp),
         )
         Text(
-            "${stack.totalIssues} issues ${if (stack.unreadIssues > 0) "· ${stack.unreadIssues} unread" else "· read"}",
+            stack.subtitle,
             fontFamily = Archivo,
             fontWeight = FontWeight.SemiBold,
             fontSize = if (columns >= 4) 8.5.sp else 9.5.sp,
@@ -2827,7 +3053,7 @@ private fun ReadingListCard(
             modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp),
         )
         Text(
-            "${item.itemCount} ${if (item.itemCount == 1) "item" else "items"}",
+            "Leaf list · ${item.itemCount} ${if (item.itemCount == 1) "item" else "items"}",
             fontFamily = Archivo,
             fontWeight = FontWeight.SemiBold,
             fontSize = if (columns >= 4) 8.5.sp else 9.5.sp,

@@ -2,6 +2,8 @@ package net.digitalbc.leafreader.ui.nav
 
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
@@ -12,7 +14,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import net.digitalbc.leafreader.ComicReaderApp
-import net.digitalbc.leafreader.ui.library.JellyfinBrowserScreen
+import net.digitalbc.leafreader.ui.library.JellyfinCatalogueViewModel
 import net.digitalbc.leafreader.ui.library.LibraryScreen
 import net.digitalbc.leafreader.ui.library.LibraryViewModel
 import net.digitalbc.leafreader.ui.library.ReadingListDetailScreen
@@ -30,6 +32,7 @@ private object Routes {
     const val MENU = "menu"
     const val SERIES = "series/{seriesName}?volume={volume}"
     const val READING_LIST = "reading_list/{listId}"
+    const val CREATOR = "creator/{name}?id={id}&scope={scope}"
     fun reader(comicId: Long) = "reader/$comicId"
     fun series(seriesName: String, volume: String?) = "series/${Uri.encode(seriesName)}${if (!volume.isNullOrBlank()) "?volume=${Uri.encode(volume)}" else ""}"
     fun readingList(listId: Long) = "reading_list/$listId"
@@ -41,10 +44,38 @@ fun AppNavHost() {
     val app = LocalContext.current.applicationContext as ComicReaderApp
     val libraryVm: LibraryViewModel = viewModel(factory = LibraryViewModel.factory(app))
 
+    val catalogueVm: JellyfinCatalogueViewModel = viewModel(factory = JellyfinCatalogueViewModel.factory(app))
+    val catalogueState by catalogueVm.state.collectAsState()
+    val offlineDownloads = catalogueState.accountScope == catalogueVm.positionScope &&
+        catalogueState.downloadedFallback
+
+    androidx.compose.runtime.CompositionLocalProvider(
+        net.digitalbc.leafreader.ui.library.LocalCreatorNavigation provides { person ->
+            navController.navigate("creator/${Uri.encode(person.name)}?id=${Uri.encode(person.id.orEmpty())}&scope=${Uri.encode(catalogueVm.positionScope)}")
+        },
+    ) {
     NavHost(navController = navController, startDestination = Routes.LIBRARY) {
+        composable(Routes.CREATOR, arguments = listOf(
+            navArgument("name") { type = NavType.StringType },
+            navArgument("id") { type = NavType.StringType; defaultValue = "" },
+            navArgument("scope") { type = NavType.StringType; defaultValue = "" },
+        )) { entry ->
+            val person = net.digitalbc.leafreader.data.jellyfin.JellyfinPerson(
+                entry.arguments?.getString("name").orEmpty(),
+                id = entry.arguments?.getString("id")?.takeIf { it.isNotBlank() })
+            val creatorCatalogue: JellyfinCatalogueViewModel = viewModel(
+                factory = JellyfinCatalogueViewModel.factory(app, person))
+            val creatorLibrary: LibraryViewModel = viewModel(factory = LibraryViewModel.factory(app))
+            net.digitalbc.leafreader.ui.library.CreatorScreen(
+                person, entry.arguments?.getString("scope").orEmpty(),
+                creatorCatalogue, creatorLibrary,
+                onBack = { navController.popBackStack() },
+                onOpenComic = { navController.navigate(Routes.reader(it)) })
+        }
         composable(Routes.LIBRARY) {
             LibraryScreen(
                 viewModel = libraryVm,
+                catalogue = catalogueVm,
                 onOpenComic = { id -> navController.navigate(Routes.reader(id)) },
                 onOpenSeries = { name, vol -> navController.navigate(Routes.series(name, vol)) },
                 onOpenReadingList = { listId -> navController.navigate(Routes.readingList(listId)) },
@@ -54,8 +85,8 @@ fun AppNavHost() {
                     navController.navigate(Routes.DRIVE)
                 },
                 onOpenJellyfin = {
-                    libraryVm.loadJellyfinRoot()
-                    navController.navigate(Routes.JELLYFIN)
+                    libraryVm.setLibraryFilter(net.digitalbc.leafreader.ui.library.LibraryFilter.ALL)
+                    catalogueVm.ensureRetry()
                 },
             )
         }
@@ -68,6 +99,7 @@ fun AppNavHost() {
             val listId = entry.arguments?.getLong("listId") ?: return@composable
             ReadingListDetailScreen(
                 listId = listId,
+                offlineDownloads = offlineDownloads,
                 viewModel = libraryVm,
                 onOpenComic = { id -> navController.navigate(Routes.reader(id)) },
                 onBack = { navController.popBackStack() },
@@ -84,6 +116,7 @@ fun AppNavHost() {
             val volume = entry.arguments?.getString("volume")?.let { Uri.decode(it) }
             SeriesDetailScreen(
                 seriesName = seriesName,
+                offlineDownloads = offlineDownloads,
                 volume = volume,
                 viewModel = libraryVm,
                 onOpenComic = { id -> navController.navigate(Routes.reader(id)) },
@@ -96,13 +129,17 @@ fun AppNavHost() {
                 onBack = { navController.popBackStack() },
             )
         }
+        // Restore older tasks into the main library; this is no longer a separate catalogue destination.
         composable(Routes.JELLYFIN) {
-            JellyfinBrowserScreen(
-                viewModel = libraryVm,
-                onBack = { navController.popBackStack() },
-            )
+            LaunchedEffect(Unit) {
+                navController.navigate(Routes.LIBRARY) {
+                    popUpTo(navController.graph.id)
+                    launchSingleTop = true
+                }
+            }
         }
         composable(Routes.MENU) {
+            val connectedOnEntry = rememberSaveable { libraryVm.hasJellyfinConfig }
             val amoled by app.amoledTheme.collectAsState()
             val themeMode by app.themeMode.collectAsState()
             val launcherIcon by app.launcherIcon.collectAsState()
@@ -127,7 +164,15 @@ fun AppNavHost() {
                 onSetLandscapeSpread = app::setLandscapeSpread,
                 settings = app.settings,
                 repository = app.libraryRepository,
-                onBack = { navController.popBackStack() },
+                onBack = {
+                    if (connectedOnEntry != libraryVm.hasJellyfinConfig) {
+                        if (!libraryVm.hasJellyfinConfig) libraryVm.ensureJellyfinLanding()
+                        navController.navigate(Routes.LIBRARY) {
+                            popUpTo(navController.graph.id)
+                            launchSingleTop = true
+                        }
+                    } else navController.popBackStack()
+                },
             )
         }
         composable(
@@ -156,5 +201,6 @@ fun AppNavHost() {
                 onBack = { navController.popBackStack() },
             )
         }
+    }
     }
 }

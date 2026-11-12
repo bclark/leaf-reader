@@ -1,0 +1,77 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Leaf Android architecture · performance audit</title><style>:root{color-scheme:light;--paper:#fafaf7;--ink:#14191c;--muted:#4a544c;--brand:#1c3a27;--rule:#cbd2c9;--tint:#e9eee6}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 system-ui,-apple-system,sans-serif}main{max-width:1380px;margin:auto;padding:32px}h1{font:400 38px/1.2 Georgia,serif;margin:8px 0 20px}h2{margin:28px 0 12px}p{max-width:90ch}button,select,input{font:inherit}button{padding:10px 16px;border:1px solid var(--brand);border-radius:6px;background:transparent;color:var(--brand);cursor:pointer}button[aria-pressed=true],button[aria-selected=true]{background:var(--brand);color:var(--paper)}button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #795c00;outline-offset:3px}.controls{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.diagram-container{width:100%;max-width:100%;min-width:0;overflow-x:auto}.diagram-container svg{display:block;width:100%;min-width:1280px;background:var(--paper)}svg text{font:14px system-ui,sans-serif;fill:var(--ink)}svg .name{font-size:17px;font-weight:650}svg .tag{font:11px ui-monospace,monospace;fill:var(--muted);letter-spacing:.04em}svg .node rect{fill:var(--paper);stroke:var(--muted);stroke-width:1.2;rx:6}svg .focal rect{fill:var(--tint);stroke:var(--brand);stroke-width:1.8}svg .store rect{fill:#f0f1ec}svg .external rect{stroke-dasharray:5 4}svg .edge-label rect{fill:var(--paper)}svg .edge-label text{font:11px ui-monospace,monospace;text-anchor:middle;fill:var(--muted)}svg .legend{font-size:13px;fill:var(--muted)}.note{padding:16px 20px;border-left:4px solid var(--brand);background:var(--tint)}a{color:var(--brand)}@media(max-width:600px){main{padding:20px}h1{font-size:30px}}@media print{.controls{display:none}.diagram-container{overflow:visible}.diagram-container svg{min-width:0}main{padding:0}}</style></head><body><main><p>LEAF / ANDROID ENGINEERING / 12 NOVEMBER 2026</p><h1>Keep Main small. Reuse expensive work.</h1><p>Architecture / doc-wide1280×720 / eight responsibility nodes per view. Scope: catalogue, cover delivery and reader inputs. Sync/import internals are preserved and omitted for clarity.</p><p class="note">Earlier debug candidate898a8e1b was installed/checksum verified on S25. Compact scrolling/detail/Back/peel checks pass; Series frame delays persist. Next investigation: target-size stack artwork/cache churn and animation/rendering attribution, preserving these boundaries. No isolated optimization A/B gain is established. <a href="local/android-performance-20261112/device-followup/README.md">Device measurements and limits</a>.</p><p class="note">Latest cover follow-up: main-grid requests derive from parent constraints and64px size buckets; CoverImageDecoder bounds remote/retained thumbnails, and ViewModel cover authentication runs on IO. Local system-trace counters observe cache/image work only during profiling. Installed optimized candidate faafa4a2…d1849ffd passes compact scroll/detail/Back/peel checks; remaining measure/layout stalls and cache churn require repeated measurement. Reader inputs and the cache budget remain unchanged. <a href="local/android-performance-20261112/cover-followup/README.md">Implementation and mixed measurement results</a>.</p><h2>Audit baseline source</h2><p>Source review is separate from runtime captures of the installed7131ce31 debug build. Concurrent UI work is preserved.</p><div class="diagram-container"><svg viewBox="0 0 1280 720" role="img" aria-labelledby="leaf-current-title leaf-current-desc">
+<title id="leaf-current-title">Leaf Android data flow and performance boundaries</title>
+<desc id="leaf-current-desc">UI events enter ViewModels, shared rules prepare rows, repositories access private local and remote sources, and bounded image and page pipelines supply artwork.</desc>
+<defs><marker id="current-arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8Z" fill="#4a544c"/></marker></defs>
+<g fill="none" stroke="#4a544c" stroke-width="1.5" marker-end="url(#current-arr)">
+<path d="M288 128 H464"/><path d="M464 176 H288" stroke-dasharray="5 4"/>
+<path d="M736 128 H880"/><path d="M880 176 H736" stroke-dasharray="5 4"/>
+<path d="M560 208 V304"/><path d="M656 304 V208" stroke-dasharray="5 4"/>
+<path d="M736 344 H880"/>
+<path d="M560 416 V512"/><path d="M656 512 V416" stroke-dasharray="5 4"/>
+<path d="M1040 416 V512"/>
+<path d="M736 384 H808 Q816 384 816 392 V472 Q816 480 824 480 H952 Q960 480 960 488 V512"/>
+<path d="M160 208 V304"/>
+</g>
+<g class="edge-label">
+<rect x="344" y="100" width="76" height="20"/><text x="382" y="114">EVENTS</text>
+<rect x="320" y="188" width="120" height="20"/><text x="380" y="202">STATEFLOW</text>
+<rect x="760" y="100" width="100" height="20"/><text x="810" y="114">PROJECT</text>
+<rect x="760" y="188" width="100" height="20"/><text x="810" y="202">ROWS</text>
+<rect x="464" y="248" width="84" height="20"/><text x="506" y="262">REQUEST</text>
+<rect x="668" y="248" width="100" height="20"/><text x="718" y="262">FLOW / RESULT</text>
+<rect x="760" y="316" width="100" height="20"/><text x="810" y="330">ARTWORK</text>
+<rect x="464" y="452" width="84" height="20"/><text x="506" y="466">IO</text>
+<rect x="668" y="452" width="84" height="20"/><text x="710" y="466">FLOW</text>
+<rect x="1052" y="452" width="100" height="20"/><text x="1102" y="466">HTTP</text>
+<rect x="836" y="448" width="88" height="20"/><text x="880" y="462">METADATA</text>
+<rect x="176" y="248" width="120" height="20"/><text x="236" y="262">READER</text>
+</g>
+<g class="node"><rect x="32" y="96" width="256" height="112"/><text class="tag" x="56" y="120">UI · MAIN</text><text class="name" x="56" y="148">Compose screens</text><text x="56" y="172">Library / detail / creator</text><text x="56" y="192">Observe state · emit events</text></g>
+<g class="node focal"><rect x="464" y="96" width="272" height="112"/><text class="tag" x="488" y="120">UDF · MAIN</text><text class="name" x="488" y="148">ViewModels</text><text x="488" y="172">StateFlow · jobs · generation</text><text x="488" y="192">Account / query isolation</text></g>
+<g class="node"><rect x="880" y="96" width="328" height="112"/><text class="tag" x="904" y="120" >DOMAIN · MAIN CALLER</text><text class="name" x="904" y="148">Shared rules + row projection</text><text x="904" y="172">Series / order / index policy</text><text x="904" y="192" >Repeated list/map work in UI path</text></g>
+<g class="node"><rect x="32" y="304" width="256" height="112"/><text class="tag" x="56" y="328">READER · IO</text><text class="name" x="56" y="356">PageLoader</text><text x="56" y="380">Archive mutex · byte LRU</text><text x="56" y="400">Shared framing / offline files</text></g>
+<g class="node"><rect x="464" y="304" width="272" height="112"/><text class="tag" x="488" y="328">DATA · IO</text><text class="name" x="488" y="356">LibraryRepository</text><text x="488" y="380">Metadata / import / progress</text><text x="488" y="400">Private, transactional writes</text></g>
+<g class="node focal"><rect x="880" y="304" width="328" height="112"/><text class="tag" x="904" y="328">IMAGE · IO / HTTP CALLBACK</text><text class="name" x="904" y="356" >Cover loaders</text><text x="904" y="380" >Local: 200 entries · remote: uncached</text><text x="904" y="400" >No HTTP/disk remote image tier</text></g>
+<g class="node store"><rect x="464" y="512" width="272" height="112"/><text class="tag" x="488" y="536">PRIVATE LOCAL SOURCES</text><text class="name" x="488" y="564">Room / files / preferences</text><text x="488" y="588">Scoped snapshots + outbox</text><text x="488" y="608">Prefs · DataStore deferred</text></g>
+<g class="node external"><rect x="880" y="512" width="328" height="112"/><text class="tag" x="904" y="536">OWNER-CONFIGURED REMOTE</text><text class="name" x="904" y="564">Jellyfin / shared OkHttp client</text><text x="904" y="588">Redirect / LAN / cancellation guards</text><text x="904" y="608">Metadata + covers · archives on demand</text></g>
+<text class="legend" x="32" y="668">Solid: calls/events · dashed: results/state · green: optimization focus · all boxes are scoped responsibilities, not proposed modules.</text>
+<text class="legend" x="32" y="692">Reader accesses retained archives through PageLoader; SMB/local import and durable sync paths remain unchanged and are omitted for clarity.</text>
+</svg></div><h2>Implemented backend changes</h2><p class="note">Default-dispatched row projection, scoped cover-memory/in-flight reuse and shared browse-time file validation are implemented. Strict remote-copy Read checks remain. Functional/work-count verification is separate from frame-time benchmarking.</p><div class="diagram-container"><svg viewBox="0 0 1280 720" role="img" aria-labelledby="leaf-target-title leaf-target-desc">
+<title id="leaf-target-title">Leaf Android data flow and performance boundaries</title>
+<desc id="leaf-target-desc">UI events enter ViewModels, shared rules prepare rows, repositories access private local and remote sources, and bounded image and page pipelines supply artwork.</desc>
+<defs><marker id="target-arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8Z" fill="#4a544c"/></marker></defs>
+<g fill="none" stroke="#4a544c" stroke-width="1.5" marker-end="url(#target-arr)">
+<path d="M288 128 H464"/><path d="M464 176 H288" stroke-dasharray="5 4"/>
+<path d="M736 128 H880"/><path d="M880 176 H736" stroke-dasharray="5 4"/>
+<path d="M560 208 V304"/><path d="M656 304 V208" stroke-dasharray="5 4"/>
+<path d="M736 344 H880"/>
+<path d="M560 416 V512"/><path d="M656 512 V416" stroke-dasharray="5 4"/>
+<path d="M1040 416 V512"/>
+<path d="M736 384 H808 Q816 384 816 392 V472 Q816 480 824 480 H952 Q960 480 960 488 V512"/>
+<path d="M160 208 V304"/>
+</g>
+<g class="edge-label">
+<rect x="344" y="100" width="76" height="20"/><text x="382" y="114">EVENTS</text>
+<rect x="320" y="188" width="120" height="20"/><text x="380" y="202">STATEFLOW</text>
+<rect x="760" y="100" width="100" height="20"/><text x="810" y="114">PROJECT</text>
+<rect x="760" y="188" width="100" height="20"/><text x="810" y="202">ROWS</text>
+<rect x="464" y="248" width="84" height="20"/><text x="506" y="262">REQUEST</text>
+<rect x="668" y="248" width="100" height="20"/><text x="718" y="262">FLOW / RESULT</text>
+<rect x="760" y="316" width="100" height="20"/><text x="810" y="330">ARTWORK</text>
+<rect x="464" y="452" width="84" height="20"/><text x="506" y="466">IO</text>
+<rect x="668" y="452" width="84" height="20"/><text x="710" y="466">FLOW</text>
+<rect x="1052" y="452" width="100" height="20"/><text x="1102" y="466">HTTP</text>
+<rect x="836" y="448" width="88" height="20"/><text x="880" y="462">METADATA</text>
+<rect x="176" y="248" width="120" height="20"/><text x="236" y="262">READER</text>
+</g>
+<g class="node"><rect x="32" y="96" width="256" height="112"/><text class="tag" x="56" y="120">UI · MAIN</text><text class="name" x="56" y="148">Compose screens</text><text x="56" y="172">Library / detail / creator</text><text x="56" y="192">Observe state · emit events</text></g>
+<g class="node focal"><rect x="464" y="96" width="272" height="112"/><text class="tag" x="488" y="120">UDF · MAIN</text><text class="name" x="488" y="148">ViewModels</text><text x="488" y="172">StateFlow · jobs · generation</text><text x="488" y="192">Account / query isolation</text></g>
+<g class="node"><rect x="880" y="96" width="328" height="112"/><text class="tag" x="904" y="120" >DOMAIN · DEFAULT</text><text class="name" x="904" y="148">Catalogue / library projection</text><text x="904" y="172">Series / order / index policy</text><text x="904" y="192" >One projection per input revision</text></g>
+<g class="node"><rect x="32" y="304" width="256" height="112"/><text class="tag" x="56" y="328">READER · IO</text><text class="name" x="56" y="356">PageLoader</text><text x="56" y="380">Archive mutex · byte LRU</text><text x="56" y="400">Shared framing / offline files</text></g>
+<g class="node"><rect x="464" y="304" width="272" height="112"/><text class="tag" x="488" y="328">DATA · IO</text><text class="name" x="488" y="356">LibraryRepository</text><text x="488" y="380">Metadata / import / progress</text><text x="488" y="400">Private, transactional writes</text></g>
+<g class="node focal"><rect x="880" y="304" width="328" height="112"/><text class="tag" x="904" y="328">IMAGE · IO / HTTP CALLBACK</text><text class="name" x="904" y="356" >CoverBitmapCache · implemented</text><text x="904" y="380" >Remote byte LRU + shared flights</text><text x="904" y="400" >Local cache unchanged · disk deferred</text></g>
+<g class="node store"><rect x="464" y="512" width="272" height="112"/><text class="tag" x="488" y="536">PRIVATE LOCAL SOURCES</text><text class="name" x="488" y="564">Room + availability</text><text x="488" y="588">ComicFileAvailability · IO</text><text x="488" y="608">Strict Read · cached browse checks</text></g>
+<g class="node external"><rect x="880" y="512" width="328" height="112"/><text class="tag" x="904" y="536">OWNER-CONFIGURED REMOTE</text><text class="name" x="904" y="564">Jellyfin / shared OkHttp client</text><text x="904" y="588">Redirect / LAN / cancellation guards</text><text x="904" y="608">Metadata + covers · archives on demand</text></g>
+<text class="legend" x="32" y="668">Solid: calls/events · dashed: results/state · green: optimization focus · all boxes are scoped responsibilities, not proposed modules.</text>
+<text class="legend" x="32" y="692">Reader accesses retained archives through PageLoader; SMB/local import and durable sync paths remain unchanged and are omitted for clarity.</text>
+</svg></div><p>StateFlow, manual constructor injection, Room, SharedPreferences and shared OkHttp remain the foundation. PagingData, Hilt and DataStore are not installed by this plan. Remote artwork uses a byte LRU capped at32MiB with scoped keys, shared flights and session/content invalidation. Browse availability reuses file fingerprints; Read forces validation. Disk/HTTP caching remains deferred and the local-only thumbnail cache is unchanged. Reader pages remain serialized and byte-budgeted.</p><p>/design-diagram was unavailable; equivalent hand-authored inline SVG follows diagram-design architecture conventions. Existing Leaf forest colors and offline system/Georgia font fallbacks are used; exact Anton/Archivo typography is not claimed. Assumption: existing Leaf branding applies. No installed skill profile was modified.</p><p><a href="ANDROID_PERFORMANCE_AUDIT_20261112.html">Interactive performance report</a> · <a href="local/android-performance-20261112/implementation/README.md">Implementation evidence</a></p></main></body></html>

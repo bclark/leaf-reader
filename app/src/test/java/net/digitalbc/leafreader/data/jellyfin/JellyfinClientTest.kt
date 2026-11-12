@@ -1,6 +1,9 @@
 package net.digitalbc.leafreader.data.jellyfin
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -43,6 +46,99 @@ class JellyfinClientTest {
     }
 
     private fun baseUrl(): String = server.url("/").toString().trimEnd('/')
+
+    @Test
+    fun creatorQueryRetainsStructuredPeopleAndScopedPagination() = runBlocking {
+        val person = JellyfinPerson("A. Example", "Writer", id = "abc")
+        server.enqueue(MockResponse().setBody("""{"Items":[{"Id":"deep","Name":"Unloaded title",
+            "Type":"Book","Container":"cbz","People":[{"Id":"abc","Name":"A. Example","Type":"Writer"},
+            {"Name":"B. Example","Role":"Letterer"}]}],"StartIndex":30,"TotalRecordCount":31}"""))
+        val page = client.getCatalogue(JellyfinServerConfig(baseUrl(), true),
+            JellyfinAuth("token", "user", "server", "Reader"),
+            JellyfinCatalogueQuery("books", startIndex = 30, creator = person))
+        val request = server.takeRequest()
+        assertEquals("abc", request.requestUrl!!.queryParameter("PersonIds"))
+        assertEquals("books", request.requestUrl!!.queryParameter("ParentId"))
+        assertNull(request.requestUrl!!.queryParameter("SearchTerm"))
+        assertEquals(person, page.entries.single().people.first())
+        assertEquals("Letterer", page.entries.single().people.last().role)
+        val details = JellyfinItemDetails(JellyfinItemIdentity("server", "user", "deep"),
+            page.entries.single().item, people = page.entries.single().people,
+            overview = "Verified synopsis", genres = listOf("Adventure"))
+        val saved = JellyfinSnapshots.details(JellyfinSnapshots.details(details), details.identity)
+        assertEquals(details.people, saved.people)
+        assertEquals(details.overview, saved.overview)
+        assertTrue(saved.fromCache)
+        assertFalse(JellyfinSnapshots.details(details).contains("token"))
+    }
+
+    @Test
+    fun folderFallbackRequiresRealFolderAndSelectedLibraryAncestry() = runBlocking {
+        val config = JellyfinServerConfig(baseUrl() + "/proxy", true)
+        val auth = JellyfinAuth("token", "user", "server", "Reader")
+        server.enqueue(MockResponse().setBody("""{"Id":"run","Name":"Hellboy in Hell","IsFolder":true}"""))
+        server.enqueue(MockResponse().setBody("""[{"Id":"franchise"},{"Id":"books"}]"""))
+        val folder = client.getCatalogueFolder(config, auth, "books", "run")!!
+        assertEquals("Hellboy in Hell", folder.name)
+        assertEquals("books", folder.libraryId)
+        val detail = server.takeRequest()
+        assertEquals("GET", detail.method)
+        assertTrue(detail.getHeader("Authorization")!!.contains("token"))
+        assertTrue(server.takeRequest().path!!.startsWith("/proxy/Items/run/Ancestors"))
+        server.enqueue(MockResponse().setBody("""{"Id":"run","Name":"Same name","IsFolder":true}"""))
+        server.enqueue(MockResponse().setBody("""[{"Id":"another-library"}]"""))
+        assertNull(client.getCatalogueFolder(config, auth, "books", "run"))
+        server.enqueue(MockResponse().setResponseCode(403))
+        assertNull(client.getCatalogueFolder(config, auth, "books", "denied"))
+        assertNull(client.getCatalogueFolder(config, auth, "books", "books"))
+    }
+
+    @Test
+    fun cataloguePagingPreservesUnknownStateAndRejectsStalledPages() = runBlocking {
+        val auth = JellyfinAuth("token", "user", "server", "Reader")
+        val config = JellyfinServerConfig(baseUrl() + "/proxy", true)
+        server.enqueue(MockResponse().setBody("""{"Items":[
+            {"Id":"unknown","Name":"Unknown","Type":"Book","Container":"cbz"},
+            {"Id":"unread","Name":"Unread","Type":"Book","Container":"cbz","UserData":{"Played":false}}
+        ],"StartIndex":100,"TotalRecordCount":250}"""))
+        val page = client.getCatalogue(config, auth, JellyfinCatalogueQuery("books", startIndex = 100))
+        assertEquals(102, page.nextIndex)
+        assertTrue(page.hasMore)
+        assertNull(page.entries.first().played)
+        assertEquals(false, page.entries.last().played)
+        val request = server.takeRequest()
+        assertTrue(request.path!!.startsWith("/proxy/Items?"))
+        assertEquals("books", request.requestUrl!!.queryParameter("ParentId"))
+        assertEquals("true", request.requestUrl!!.queryParameter("Recursive"))
+        assertTrue(request.getHeader("Authorization")!!.contains("token"))
+        server.enqueue(MockResponse().setBody("""{"Items":[],"StartIndex":102,"TotalRecordCount":250}"""))
+        try {
+            client.getCatalogue(config, auth, JellyfinCatalogueQuery("books", startIndex = 102))
+            fail("Empty intermediate page must not silently complete")
+        } catch (error: JellyfinException) { assertEquals(JellyfinFailureKind.PARSE_ERROR, error.kind) }
+    }
+
+    @Test
+    fun collectionMembersRequireBookTypeAndMatchingLibraryAncestry() = runBlocking {
+        val config = JellyfinServerConfig(baseUrl(), true)
+        val auth = JellyfinAuth("token", "user", "server", "Reader")
+        server.enqueue(MockResponse().setBody("""{"Items":[
+            {"Id":"inside","Type":"Book","Container":"cbz"},
+            {"Id":"outside","Type":"Book","Container":"pdf"},
+            {"Id":"movie","Type":"Movie","Container":"mkv"}
+        ],"TotalRecordCount":3}"""))
+        server.enqueue(MockResponse().setBody("""[{"Id":"folder"},{"Id":"books"}]"""))
+        server.enqueue(MockResponse().setBody("""[{"Id":"other-library"}]"""))
+        val page = client.getCatalogue(config, auth,
+            JellyfinCatalogueQuery("books", JellyfinCatalogueView.LISTS, "collection"))
+        assertEquals(listOf("inside"), page.entries.map { it.item.id })
+        assertEquals(3, page.nextIndex)
+        assertFalse(page.hasMore)
+        assertEquals("collection", server.takeRequest().requestUrl!!.queryParameter("ParentId"))
+        assertTrue(server.takeRequest().path!!.startsWith("/Items/inside/Ancestors"))
+        assertTrue(server.takeRequest().path!!.startsWith("/Items/outside/Ancestors"))
+        assertEquals(3, server.requestCount)
+    }
 
     @Test
     fun authenticateSuccess() = runBlocking {
@@ -152,6 +248,101 @@ class JellyfinClientTest {
     }
 
     @Test
+    fun detailFetchUsesAuthenticatedMetadataOnlyRequestAndPreservesAvailableFields() = runBlocking {
+        server.enqueue(MockResponse().setBody("""
+            {"Id":"item2","Name":"King Spawn - Vol. 01","Type":"Book",
+             "Overview":"A synopsis.","SeriesName":"King Spawn","ProductionYear":2021,
+             "IndexNumber":1,"ParentIndexNumber":2,"Etag":"metadata-version",
+             "MediaSources":[{"Container":"pdf","Size":123456,"Path":"/private/comics/book.pdf"}],
+             "ImageTags":{"Primary":"cover-tag"},
+             "People":[{"Name":"Writer Name","Type":"Writer"},{"Name":"Artist Name","Role":"Pencils"},{}],
+             "Genres":["Comics",null," "],
+             "UserData":{"PlaybackPositionTicks":110000,"Played":false,
+                 "PlayedPercentage":12.5,"LastPlayedDate":"2026-11-10T12:00:00Z"}}
+        """.trimIndent()))
+        val result = client.getItemDetails(
+            JellyfinServerConfig(baseUrl(), true), JellyfinAuth("tok", "usr", "srv", "reader"), "item2",
+        )
+        assertEquals(JellyfinItemIdentity("srv", "usr", "item2"), result.identity)
+        assertEquals("King Spawn - Vol. 01", result.item.name)
+        assertEquals("pdf", result.item.container)
+        assertEquals(123456L, result.item.sizeBytes)
+        assertEquals("cover-tag", result.item.imageTag)
+        assertEquals(110000L, result.item.playbackPositionTicks)
+        assertEquals("A synopsis.", result.overview)
+        assertEquals(1, result.indexNumber)
+        assertEquals(2, result.parentIndexNumber)
+        assertEquals(listOf(JellyfinPerson("Writer Name", "Writer"), JellyfinPerson("Artist Name", role = "Pencils")), result.people)
+        assertEquals(listOf("Comics"), result.genres)
+        assertEquals(12.5, result.playedPercentage)
+        assertEquals("2026-11-10T12:00:00Z", result.lastPlayedDate)
+        assertEquals("metadata-version", result.etag)
+        val request = server.takeRequest()
+        assertEquals("GET", request.method)
+        assertEquals("/Items/item2?UserId=usr", request.path)
+        assertTrue(request.getHeader("Authorization")!!.contains("tok"))
+        assertEquals(1, server.requestCount)
+        assertTrue(testDir.listFiles().orEmpty().isEmpty())
+    }
+
+    @Test
+    fun detailsHandleNullMetadataWithoutInventingProgressOrCreators() = runBlocking {
+        server.enqueue(MockResponse().setBody("""
+            {"Id":"item","Name":"Minimal.cbz","Container":"cbz","Overview":null,
+             "ProductionYear":null,"IndexNumber":null,"People":null,"Genres":null,
+             "ImageTags":{"Primary":null},"UserData":{"PlayedPercentage":101,"LastPlayedDate":null}}
+        """.trimIndent()))
+        val result = client.getItemDetails(
+            JellyfinServerConfig(baseUrl(), true), JellyfinAuth("tok", "usr", "srv", "reader"), "item",
+        )
+        assertNull(result.overview)
+        assertNull(result.indexNumber)
+        assertNull(result.item.productionYear)
+        assertNull(result.item.imageTag)
+        assertNull(result.playedPercentage)
+        assertNull(result.lastPlayedDate)
+        assertTrue(result.people.isEmpty())
+        assertTrue(result.genres.isEmpty())
+    }
+
+    @Test
+    fun detailErrorsKeepAuthenticationAndNotFoundDistinctFromBadMetadata() = runBlocking {
+        val config = JellyfinServerConfig(baseUrl(), true)
+        val auth = JellyfinAuth("tok", "usr", "srv", "reader")
+        for ((response, expected) in listOf(
+            MockResponse().setResponseCode(401) to JellyfinFailureKind.AUTHENTICATION,
+            MockResponse().setResponseCode(404) to JellyfinFailureKind.NOT_FOUND,
+            MockResponse().setBody("not json") to JellyfinFailureKind.PARSE_ERROR,
+            MockResponse().setBody("""{"Id":"wrong","Name":"Wrong book"}""") to JellyfinFailureKind.PARSE_ERROR,
+        )) {
+            server.enqueue(response)
+            val error = runCatching { client.getItemDetails(config, auth, "item") }.exceptionOrNull()
+            assertTrue(error is JellyfinException)
+            assertEquals(expected, (error as JellyfinException).kind)
+        }
+    }
+
+    @Test
+    fun listingAndDetailsShareNullSafeMediaSourceParsing() = runBlocking {
+        server.enqueue(MockResponse().setBody("""
+            {"Items":[{"Id":"item","Name":"Comic","Container":null,"Path":null,
+            "ParentId":null,"SeriesName":null,"ProductionYear":null,
+            "MediaSources":[{"Container":"cbz","Size":500,"Path":"/comics/book.cbz"}]}],
+            "TotalRecordCount":1}
+        """.trimIndent()))
+        val item = client.getItems(
+            JellyfinServerConfig(baseUrl(), true), JellyfinAuth("tok", "usr", "srv", "reader"), "folder",
+        ).items.single()
+        assertEquals("cbz", item.container)
+        assertEquals(500L, item.sizeBytes)
+        assertEquals("/comics/book.cbz", item.path)
+        assertEquals("folder", item.parentId)
+        assertNull(item.seriesName)
+        assertNull(item.productionYear)
+        assertTrue(item.isImportable)
+    }
+
+    @Test
     fun downloadToFileSuccess() = runBlocking {
         val payload = "Simulated comic payload content 123456789".toByteArray()
         server.enqueue(
@@ -231,6 +422,27 @@ class JellyfinClientTest {
             fail("Expected CancellationException")
         } catch (e: CancellationException) {
             assertFalse("Part file must be removed when cancelled", partFile.exists())
+        }
+    }
+
+    @Test
+    fun leavingCatalogueCancelsAnUnresponsiveCoverRequest() = runBlocking {
+        server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.NO_RESPONSE))
+        val job = launch(Dispatchers.IO) {
+            client.loadCoverBitmap(
+                JellyfinServerConfig(baseUrl(), allowInsecureHttp = true),
+                JellyfinAuth("token", "user", "server", "Reader"), "comic",
+            )
+        }
+        try {
+            val request = server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS)
+            assertNotNull(request)
+            assertTrue(request!!.path!!.startsWith("/Items/comic/Images/Primary"))
+            job.cancel()
+            withTimeout(5_000) { job.join() }
+            assertTrue(job.isCancelled)
+        } finally {
+            job.cancel()
         }
     }
 

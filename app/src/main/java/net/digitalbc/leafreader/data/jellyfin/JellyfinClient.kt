@@ -1,12 +1,13 @@
 package net.digitalbc.leafreader.data.jellyfin
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.util.Log
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.Call
@@ -160,43 +161,167 @@ class JellyfinClient(
                 val itemsArray = json.optJSONArray("Items") ?: return@executeRequest JellyfinItemsResult(emptyList(), total, startIndex)
                 val items = mutableListOf<JellyfinItem>()
                 for (i in 0 until itemsArray.length()) {
-                    val obj = itemsArray.getJSONObject(i)
-                    val type = obj.optString("Type", "")
-                    val isFolder = obj.optBoolean("IsFolder", false) || type.equals("Folder", ignoreCase = true)
-                    val imageTags = obj.optJSONObject("ImageTags")
-                    val primaryTag = imageTags?.optString("Primary", null)
-
-                    val containerVal = if (obj.has("Container")) obj.getString("Container").ifBlank { null } else null
-                    val pathVal = if (obj.has("Path")) obj.getString("Path").ifBlank { null } else null
-                    val parentVal = if (obj.has("ParentId")) obj.getString("ParentId").ifBlank { null } else parentId
-                    val seriesVal = if (obj.has("SeriesName")) obj.getString("SeriesName").ifBlank { null } else null
-
-                    val userData = obj.optJSONObject("UserData")
-                    val playbackTicks = userData?.optLong("PlaybackPositionTicks", 0L) ?: 0L
-                    val played = userData?.optBoolean("Played", false) ?: false
-
-                    items.add(
-                        JellyfinItem(
-                            id = obj.getString("Id"),
-                            name = obj.optString("Name", "Untitled"),
-                            isFolder = isFolder,
-                            container = containerVal,
-                            sizeBytes = obj.optLong("Size", 0L),
-                            imageTag = primaryTag,
-                            path = pathVal,
-                            parentId = parentVal,
-                            seriesName = seriesVal,
-                            productionYear = if (obj.has("ProductionYear")) obj.getInt("ProductionYear") else null,
-                            playbackPositionTicks = playbackTicks,
-                            played = played,
-                        )
-                    )
+                    items.add(parseItem(itemsArray.getJSONObject(i), parentId))
                 }
                 JellyfinItemsResult(items = items, totalRecordCount = total, startIndex = startIndex)
             } catch (e: Exception) {
                 throw JellyfinException(JellyfinFailureKind.PARSE_ERROR, "Failed to parse library items", e)
             }
         }
+    }
+
+    /** Paginated metadata only. Unknown reading state must not become unread. */
+    suspend fun getCatalogue(
+        config: JellyfinServerConfig, auth: JellyfinAuth, query: JellyfinCatalogueQuery,
+    ): JellyfinCataloguePage = withContext(Dispatchers.IO) {
+        val request = authorizedRequestBuilder(query.url(config.baseUrl, auth.userId), auth).get().build()
+        val page = executeRequest(request) { response ->
+            if (!response.isSuccessful) mapHttpError(response.code, "Failed to load catalogue")
+            try {
+                val json = JSONObject(response.body?.string().orEmpty())
+                val array = json.getJSONArray("Items")
+                val entries = buildList {
+                    for (i in 0 until array.length()) {
+                        val obj = array.getJSONObject(i)
+                        val data = obj.optJSONObject("UserData")
+                        add(JellyfinCatalogueEntry(parseItem(obj),
+                            obj.optString("Type", ""),
+                            if (data == null || data.isNull("Played")) null else data.getBoolean("Played"),
+                            seriesId = obj.textOrNull("SeriesId")?.takeUnless { it.replace("-", "").all { c -> c == '0' } },
+                            volumeNumber = if (obj.isNull("ParentIndexNumber")) null else obj.getInt("ParentIndexNumber"),
+                            issueNumber = if (obj.isNull("IndexNumber")) null else obj.getDouble("IndexNumber"),
+                            people = parsePeople(obj)))
+                    }
+                }
+                val total = json.getInt("TotalRecordCount")
+                val start = json.optInt("StartIndex", query.startIndex)
+                require(start == query.startIndex && total >= 0 && entries.size <= query.limit)
+                val next = start + entries.size
+                require(entries.isNotEmpty() || next >= total) { "Server returned an empty page before the end" }
+                JellyfinCataloguePage(entries, next, total, next < total)
+            } catch (error: Exception) {
+                throw JellyfinException(JellyfinFailureKind.PARSE_ERROR, "Invalid catalogue page", error)
+            }
+        }
+        val visible = JellyfinCatalogueLogic.visible(page.entries,
+            if (query.collectionId != null) JellyfinCatalogueView.ALL else query.view)
+        val scoped = if (query.collectionId == null) visible else visible.filter { it.item.isImportable }.filter { entry ->
+            val ancestors = authorizedRequestBuilder(
+                JellyfinCatalogueQuery.ancestorsUrl(config.baseUrl, auth.userId, entry.item.id), auth,
+            ).get().build()
+            executeRequest(ancestors) { response ->
+                if (!response.isSuccessful) mapHttpError(response.code, "Cannot verify collection membership")
+                try {
+                    val array = org.json.JSONArray(response.body?.string().orEmpty())
+                    (0 until array.length()).any {
+                        array.getJSONObject(it).getString("Id").equals(query.libraryId, true)
+                    }
+                } catch (error: Exception) {
+                    throw JellyfinException(JellyfinFailureKind.PARSE_ERROR, "Invalid collection ancestry", error)
+                }
+            }
+        }
+        page.copy(entries = scoped)
+    }
+
+    /** Folder fallback is admitted only after authenticated selected-library ancestry validation. */
+    suspend fun getCatalogueFolder(
+        config: JellyfinServerConfig, auth: JellyfinAuth, libraryId: String, folderId: String,
+    ): JellyfinFolderIdentity? = withContext(Dispatchers.IO) {
+        if (folderId == libraryId) return@withContext null
+        val folderRequest = authorizedRequestBuilder(
+            JellyfinEndpoints.itemDetails(config.baseUrl, auth.userId, folderId), auth).get().build()
+        val folder = executeRequest(folderRequest) { response ->
+            if (response.code in listOf(403, 404)) return@executeRequest null
+            if (!response.isSuccessful) mapHttpError(response.code, "Cannot verify catalogue folder")
+            val obj = JSONObject(response.body?.string().orEmpty())
+            if (!obj.optString("Id").equals(folderId, true) || !obj.optBoolean("IsFolder", false)) null
+            else obj.textOrNull("Name")
+        } ?: return@withContext null
+        val ancestorsRequest = authorizedRequestBuilder(
+            JellyfinCatalogueQuery.ancestorsUrl(config.baseUrl, auth.userId, folderId), auth).get().build()
+        val belongs = executeRequest(ancestorsRequest) { response ->
+            if (response.code in listOf(403, 404)) return@executeRequest false
+            if (!response.isSuccessful) mapHttpError(response.code, "Cannot verify catalogue folder scope")
+            val array = org.json.JSONArray(response.body?.string().orEmpty())
+            (0 until array.length()).any { array.getJSONObject(it).optString("Id").equals(libraryId, true) }
+        }
+        if (belongs) JellyfinFolderIdentity(folderId, folder, libraryId) else null
+    }
+
+    /** Fetches metadata only; never downloads an archive or reports reading progress. */
+    suspend fun getItemDetails(
+        config: JellyfinServerConfig,
+        auth: JellyfinAuth,
+        itemId: String,
+    ): JellyfinItemDetails = withContext(Dispatchers.IO) {
+        val request = authorizedRequestBuilder(
+            JellyfinEndpoints.itemDetails(config.baseUrl, auth.userId, itemId), auth,
+        ).get().build()
+        executeRequest(request) { response ->
+            if (!response.isSuccessful) mapHttpError(response.code, "Failed to load comic details")
+            try {
+                val obj = JSONObject(response.body?.string().orEmpty())
+                val item = parseItem(obj)
+                require(item.id.equals(itemId, ignoreCase = true)) { "Unexpected detail item" }
+                val genres = obj.optJSONArray("Genres")
+                val userData = obj.optJSONObject("UserData")
+                JellyfinItemDetails(
+                    identity = JellyfinItemIdentity(auth.serverId, auth.userId, item.id),
+                    item = item,
+                    overview = obj.textOrNull("Overview"),
+                    people = parsePeople(obj),
+                    genres = buildList {
+                        for (i in 0 until (genres?.length() ?: 0)) {
+                            if (genres?.isNull(i) == false) {
+                                genres.optString(i).trim().takeIf { it.isNotEmpty() }?.let { add(it) }
+                            }
+                        }
+                    },
+                    indexNumber = if (obj.isNull("IndexNumber")) null else obj.getInt("IndexNumber"),
+                    parentIndexNumber = if (obj.isNull("ParentIndexNumber")) null else obj.getInt("ParentIndexNumber"),
+                    etag = obj.textOrNull("Etag"),
+                    playedPercentage = userData?.optDouble("PlayedPercentage")
+                        ?.takeIf { it.isFinite() && it in 0.0..100.0 },
+                    lastPlayedDate = userData?.textOrNull("LastPlayedDate"),
+                )
+            } catch (e: Exception) {
+                throw JellyfinException(JellyfinFailureKind.PARSE_ERROR, "Failed to parse comic details", e)
+            }
+        }
+    }
+
+    private fun parsePeople(obj: JSONObject): List<JellyfinPerson> = buildList {
+        val people = obj.optJSONArray("People") ?: return@buildList
+        for (i in 0 until people.length()) {
+            val person = people.optJSONObject(i) ?: continue
+            val name = person.textOrNull("Name") ?: continue
+            add(JellyfinPerson(name, person.textOrNull("Type"), person.textOrNull("Role"), person.textOrNull("Id")))
+        }
+    }
+
+    private fun JSONObject.textOrNull(key: String): String? =
+        if (isNull(key)) null else optString(key).trim().takeIf { it.isNotEmpty() }
+
+    private fun parseItem(obj: JSONObject, parentId: String? = null): JellyfinItem {
+        val source = obj.optJSONArray("MediaSources")?.optJSONObject(0)
+        val userData = obj.optJSONObject("UserData")
+        return JellyfinItem(
+            id = obj.getString("Id"),
+            name = obj.textOrNull("Name") ?: "Untitled",
+            isFolder = obj.optBoolean("IsFolder", false) ||
+                obj.optString("Type").equals("Folder", ignoreCase = true),
+            container = obj.textOrNull("Container") ?: source?.textOrNull("Container"),
+            sizeBytes = obj.optLong("Size", 0L).takeIf { it > 0L }
+                ?: (source?.optLong("Size", 0L) ?: 0L).coerceAtLeast(0L),
+            imageTag = obj.optJSONObject("ImageTags")?.textOrNull("Primary"),
+            path = obj.textOrNull("Path") ?: source?.textOrNull("Path"),
+            parentId = obj.textOrNull("ParentId") ?: parentId,
+            seriesName = obj.textOrNull("SeriesName"),
+            productionYear = if (obj.isNull("ProductionYear")) null else obj.getInt("ProductionYear"),
+            playbackPositionTicks = userData?.optLong("PlaybackPositionTicks", 0L) ?: 0L,
+            played = userData?.optBoolean("Played", false) ?: false,
+        )
     }
 
     suspend fun downloadToFile(
@@ -213,6 +338,10 @@ class JellyfinClient(
         val request = authorizedRequestBuilder(url, auth).get().build()
 
         val call = okHttpClient.newCall(request)
+        // Also interrupt a blocked headers/body read, not just the next copy-loop iteration.
+        val cancellation = launch(start = CoroutineStart.UNDISPATCHED) {
+            try { awaitCancellation() } finally { call.cancel() }
+        }
         try {
             val response = call.execute()
             response.use { res ->
@@ -282,6 +411,8 @@ class JellyfinClient(
             if (t is CancellationException) throw t
             if (t is JellyfinException) throw t
             throw mapNetworkException(t)
+        } finally {
+            cancellation.cancel()
         }
     }
 
@@ -301,13 +432,18 @@ class JellyfinClient(
         val request = authorizedRequestBuilder(url, auth).get().build()
 
         try {
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-                val bytes = response.body?.bytes() ?: return@withContext null
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            net.digitalbc.leafreader.data.library.CoverPerformanceTrace.event("network")
+            executeRequest(request) { response ->
+                if (!response.isSuccessful) return@executeRequest null
+                val bytes = response.body?.bytes() ?: return@executeRequest null
+                net.digitalbc.leafreader.data.library.CoverPerformanceTrace.decode {
+                    net.digitalbc.leafreader.data.library.CoverImageDecoder.decode(bytes, maxWidth)
+                }.also { net.digitalbc.leafreader.data.library.CoverPerformanceTrace.decoded(maxWidth, it) }
             }
-        } catch (e: Exception) {
-            Log.d(TAG, "Failed to load cover for item $itemId: ${e.message}")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            net.digitalbc.leafreader.data.library.CoverPerformanceTrace.event("failed")
             null
         }
     }
@@ -501,7 +637,4 @@ class JellyfinClient(
         }
     }
 
-    companion object {
-        private const val TAG = "JellyfinClient"
-    }
 }

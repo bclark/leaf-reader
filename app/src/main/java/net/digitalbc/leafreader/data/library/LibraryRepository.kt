@@ -14,7 +14,6 @@ import net.digitalbc.leafreader.data.archive.ComicFormat
 import net.digitalbc.leafreader.data.archive.ComicMetadata
 import net.digitalbc.leafreader.data.archive.ComicMetadataParser
 import net.digitalbc.leafreader.data.archive.UnsupportedComicException
-import net.digitalbc.leafreader.data.backup.BackupComic
 import net.digitalbc.leafreader.data.backup.BackupConflictStrategy
 import net.digitalbc.leafreader.data.backup.BackupManager
 import net.digitalbc.leafreader.data.backup.BackupPreview
@@ -33,6 +32,8 @@ import net.digitalbc.leafreader.data.jellyfin.JellyfinAuth
 import net.digitalbc.leafreader.data.jellyfin.JellyfinClient
 import net.digitalbc.leafreader.data.jellyfin.JellyfinCredentialStore
 import net.digitalbc.leafreader.data.jellyfin.JellyfinItem
+import net.digitalbc.leafreader.data.jellyfin.JellyfinItemDetails
+import net.digitalbc.leafreader.data.jellyfin.JellyfinItemIdentity
 import net.digitalbc.leafreader.data.jellyfin.JellyfinItemsResult
 import net.digitalbc.leafreader.data.jellyfin.JellyfinProgress
 import net.digitalbc.leafreader.data.jellyfin.JellyfinServerConfig
@@ -55,6 +56,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -82,7 +86,12 @@ class LibraryRepository(
     val jellyfinClient: JellyfinClient = JellyfinClient(settings.jellyfinDeviceId),
     val jellyfinCredentialStore: JellyfinCredentialStore = JellyfinCredentialStore(context),
     val jellyfinSyncScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    val observationScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
+    private val backupRestoreMutex = db?.backupRestoreMutex ?: Mutex()
+    private val metadataMutex = Mutex()
+    private val fileAvailability = ComicFileAvailability()
+    private val jellyfinCoverCache = CoverBitmapCache(jellyfinSyncScope)
     private val progressSyncJobs = ConcurrentHashMap<Long, Job>()
     private val activeSessionJobs = ConcurrentHashMap.newKeySet<Job>()
     private val sessionGeneration = AtomicLong(0L)
@@ -97,6 +106,14 @@ class LibraryRepository(
     }
 
     val comics: Flow<List<ComicEntity>> = dao.observeAll()
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val readableComics by lazy {
+        comics.mapLatest { rows ->
+            fileAvailability.retain(rows.map { it.id }.toSet())
+            rows.filter { fileAvailability.isReadable(it) }
+        }.stateIn(observationScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    }
 
     val readingLists: Flow<List<ReadingListEntity>> =
         readingListDao?.observeAll() ?: emptyFlow()
@@ -126,8 +143,65 @@ class LibraryRepository(
         readingListDao?.deleteList(id)
     }
 
-    suspend fun addComicToReadingList(listId: Long, comicId: Long, sortOrder: Int = 0) = withContext(Dispatchers.IO) {
-        readingListDao?.insertItem(ReadingListItemEntity(listId, comicId, sortOrder))
+    suspend fun addComicToReadingList(listId: Long, comicId: Long, sortOrder: Int = -1) = withContext(Dispatchers.IO) {
+        val listDao = readingListDao ?: return@withContext
+        val comic = dao.getById(comicId) ?: return@withContext
+        val link = remoteComicLinkDao?.findByComicId(comicId)
+        if (link?.provider == "jellyfin") {
+            addRemoteToReadingList(listId,
+                net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueEntry(
+                    JellyfinItem(link.itemId, comic.title, false, container = comic.format.lowercase(),
+                        seriesName = comic.series), "Book", null),
+                net.digitalbc.leafreader.data.jellyfin.JellyfinItemIdentity(link.serverId, link.userId, link.itemId))
+        } else {
+            val items = listDao.getAllItems().filter { it.listId == listId }
+            if (items.none { it.comicId == comicId }) listDao.insertItem(ReadingListItemEntity(
+                listId, comicId, if (sortOrder >= 0) sortOrder else (items.maxOfOrNull { it.sortOrder } ?: -1) + 1,
+                title = comic.title))
+        }
+    }
+
+    suspend fun addRemoteToReadingList(
+        listId: Long, entry: net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueEntry,
+        identity: net.digitalbc.leafreader.data.jellyfin.JellyfinItemIdentity,
+        libraryId: String? = null,
+    ) = withContext(Dispatchers.IO) {
+        require(identity.itemId == entry.item.id && !entry.item.isFolder)
+        val listDao = readingListDao ?: return@withContext
+        val key = net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.reference(identity.serverId, identity.userId, identity.itemId)
+        suspend fun add() {
+            require(listDao.getById(listId) != null) { "Reading list no longer exists" }
+            val items = listDao.getAllItems().filter { it.listId == listId }
+            if (items.any { it.referenceKey == key }) return
+            val link = remoteComicLinkDao?.findLink("jellyfin", identity.serverId, identity.userId, identity.itemId)
+            val old = link?.let { found -> items.firstOrNull { it.comicId == found.comicId } }
+            old?.let { listDao.removeItem(listId, it.comicId) }
+            listDao.insertItem(ReadingListItemEntity(listId, link?.comicId ?: 0,
+                old?.sortOrder ?: ((items.maxOfOrNull { it.sortOrder } ?: -1) + 1),
+                addedAt = old?.addedAt ?: System.currentTimeMillis(), referenceKey = key,
+                serverId = identity.serverId, userId = identity.userId, itemId = identity.itemId,
+                libraryId = libraryId, title = entry.item.name,
+                snapshot = net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.encode(entry)))
+        }
+        if (db != null) db.withTransaction { add() } else add()
+    }
+
+    fun observeListReferences(listId: Long): Flow<List<ReadingListItemEntity>> =
+        allReadingListItems.map { rows -> rows.filter { it.listId == listId }
+            .sortedWith(compareBy<ReadingListItemEntity> { it.sortOrder }.thenBy { it.addedAt }.thenBy { it.referenceKey }) }
+
+    suspend fun editListReference(listId: Long, key: String, direction: Int? = null) = withContext(Dispatchers.IO) {
+        val listDao = readingListDao ?: return@withContext
+        suspend fun edit() {
+            val items = listDao.getAllItems().filter { it.listId == listId }.sortedBy { it.sortOrder }.toMutableList()
+            val index = items.indexOfFirst { it.referenceKey == key }
+            if (index < 0) return
+            val member = items.removeAt(index)
+            if (direction != null) items.add((index + direction).coerceIn(0, items.size), member)
+            listDao.clearItems(listId)
+            items.forEachIndexed { order, item -> listDao.insertItem(item.copy(sortOrder = order)) }
+        }
+        if (db != null) db.withTransaction { edit() } else edit()
     }
 
     suspend fun removeComicFromReadingList(listId: Long, comicId: Long) = withContext(Dispatchers.IO) {
@@ -140,18 +214,12 @@ class LibraryRepository(
 
     suspend fun moveReadingListItem(listId: Long, comicId: Long, direction: Int) = withContext(Dispatchers.IO) {
         val items = readingListDao?.getAllItems()?.filter { it.listId == listId }?.sortedBy { it.sortOrder } ?: return@withContext
-        val currentIndex = items.indexOfFirst { it.comicId == comicId }
-        if (currentIndex == -1) return@withContext
-        val newIndex = (currentIndex + direction).coerceIn(0, items.size - 1)
-        if (newIndex == currentIndex) return@withContext
-        val mutable = items.map { it.comicId }.toMutableList()
-        mutable.removeAt(currentIndex)
-        mutable.add(newIndex, comicId)
-        readingListDao.reorderItems(listId, mutable)
+        val item = items.firstOrNull { it.comicId == comicId } ?: return@withContext
+        editListReference(listId, item.referenceKey, direction)
     }
 
     suspend fun updateComicMetadata(id: Long, series: String?, volume: String?, issueNumber: Float?) = withContext(Dispatchers.IO) {
-        dao.updateMetadata(id, series, volume, issueNumber)
+        metadataMutex.withLock { dao.updateMetadata(id, series, volume, issueNumber) }
     }
 
     suspend fun backfillMetadataIfNeeded() = withContext(Dispatchers.IO) {
@@ -176,7 +244,14 @@ class LibraryRepository(
                 }
             }
             if (meta.series != null || meta.issueNumber != null || meta.volume != null) {
-                dao.updateMetadata(comic.id, meta.series, meta.volume, meta.issueNumber)
+                metadataMutex.withLock {
+                    val current = dao.getById(comic.id)
+                    // Archive inspection may finish after the user has grouped this comic.
+                    if (current != null && current.series == comic.series && current.volume == comic.volume &&
+                        current.issueNumber == comic.issueNumber) {
+                        dao.updateMetadata(comic.id, meta.series, meta.volume, meta.issueNumber)
+                    }
+                }
             }
         }
     }
@@ -450,26 +525,36 @@ class LibraryRepository(
         jsonString: String,
         strategy: BackupConflictStrategy = BackupConflictStrategy.MOST_RECENT,
     ): Result<Int> = withContext(NonCancellable + Dispatchers.IO) {
-        val payload = BackupManager.parseAndValidate(jsonString).getOrElse { return@withContext Result.failure(it) }
+        try { backupRestoreMutex.withLock { applyBackupLocked(jsonString, strategy) } }
+        finally { fileAvailability.invalidate(); jellyfinCoverCache.clear() }
+    }
+
+    /** Startup must complete this before readers or preference controls become available. */
+    suspend fun recoverPendingBackupPreferences(): Result<Unit> = withContext(NonCancellable + Dispatchers.IO) {
+        backupRestoreMutex.withLock {
+            runCatching { finishPendingBackupPreferences() }
+        }
+    }
+
+    private suspend fun finishPendingBackupPreferences() {
+        val pendingDao = db?.pendingBackupPreferencesDao() ?: return
+        val pending = pendingDao.get() ?: return
+        settings.restoreBackupPreferences(pending.settings)
+        // If killed before this delete, replaying the same preference write is harmless.
+        pendingDao.clear()
+    }
+
+    private suspend fun applyBackupLocked(
+        jsonString: String,
+        strategy: BackupConflictStrategy,
+    ): Result<Int> {
+        val payload = BackupManager.parseAndValidate(jsonString).getOrElse { return Result.failure(it) }
 
         suspend fun executeApply(): Int {
-            payload.settings?.let { s ->
-                settings.defaultRightToLeft = s.defaultRightToLeft
-                settings.amoledTheme = s.amoledTheme
-                settings.pageSlideEnabled = s.pageSlideEnabled
-                settings.pageFitMode = runCatching {
-                    net.digitalbc.leafreader.ui.reader.PageFitMode.valueOf(s.pageFitMode)
-                }.getOrDefault(net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_PAGE)
-                settings.portraitSpread = s.portraitSpread
-                settings.landscapeSpread = s.landscapeSpread
-                settings.libraryColumns = s.libraryColumns
-            }
-
             val currentComics = dao.getAll()
             var updatedCount = 0
 
-            for (backup in payload.comics) {
-                val matched = BackupManager.findMatchingComic(backup, currentComics) ?: continue
+            for ((backup, matched) in BackupManager.matchComics(payload.comics, currentComics)) {
                 val shouldUpdate = when (strategy) {
                     BackupConflictStrategy.OVERWRITE -> true
                     BackupConflictStrategy.KEEP_LOCAL -> false
@@ -496,14 +581,18 @@ class LibraryRepository(
                             )
                         )
                     for (item in backupList.items) {
-                        val dummy = BackupComic(
-                            title = item.comicTitle,
-                            series = item.series,
-                            issueNumber = item.issueNumber,
-                            format = "",
-                            pageCount = 0,
-                        )
-                        val target = BackupManager.findMatchingComic(dummy, currentComics) ?: continue
+                        if (item.serverId != null && item.userId != null && item.itemId != null) {
+                            val key = net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.reference(item.serverId, item.userId, item.itemId)
+                            val existing = readingListDao.getAllItems().firstOrNull { it.listId == listId && it.referenceKey == key }
+                            if (existing == null) {
+                                val linked = remoteComicLinkDao?.findLink("jellyfin", item.serverId, item.userId, item.itemId)
+                                readingListDao.insertItem(ReadingListItemEntity(listId, linked?.comicId ?: 0, item.sortOrder,
+                                    referenceKey = key, serverId = item.serverId, userId = item.userId, itemId = item.itemId,
+                                    libraryId = item.libraryId, title = item.comicTitle, snapshot = item.remoteSnapshot))
+                            }
+                            continue
+                        }
+                        val target = BackupManager.findMatchingListComic(item, currentComics) ?: continue
                         readingListDao.insertItem(
                             ReadingListItemEntity(
                                 listId = listId,
@@ -514,15 +603,24 @@ class LibraryRepository(
                     }
                 }
             }
+            payload.settings?.let {
+                db?.pendingBackupPreferencesDao()?.save(
+                    net.digitalbc.leafreader.data.db.PendingBackupPreferences(settings = it)
+                )
+            }
             return updatedCount
         }
 
-        try {
+        return try {
+            // Do not let a newer restore replace an unfinished preference write.
+            finishPendingBackupPreferences()
             val result = if (db != null) {
                 db.withTransaction { executeApply() }
             } else {
                 executeApply()
             }
+            if (db != null) finishPendingBackupPreferences()
+            else payload.settings?.let { settings.restoreBackupPreferences(it) }
             Result.success(result)
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
@@ -650,6 +748,7 @@ class LibraryRepository(
             settings.jellyfinServerId = auth.serverId
             settings.jellyfinServerName = auth.serverName.orEmpty()
             sessionGeneration.incrementAndGet()
+            jellyfinCoverCache.clear()
             progressSyncJobs.values.forEach { it.cancel() }
             progressSyncJobs.clear()
             activeSessionJobs.forEach { it.cancel() }
@@ -667,6 +766,7 @@ class LibraryRepository(
 
     suspend fun disconnectJellyfin(): Unit = withContext(Dispatchers.IO) {
         sessionGeneration.incrementAndGet()
+        jellyfinCoverCache.clear()
         progressSyncJobs.values.forEach { it.cancel() }
         progressSyncJobs.clear()
         activeSessionJobs.forEach { it.cancel() }
@@ -676,18 +776,32 @@ class LibraryRepository(
         settings.clearJellyfinConfig()
     }
 
-    suspend fun listJellyfinViews(): Result<List<JellyfinView>> = withContext(Dispatchers.IO) {
+    suspend fun listJellyfinViews(): Result<List<JellyfinView>> = loadJellyfinViews(allowCached = true)
+
+    /** Launch must distinguish a reachable server from saved metadata. */
+    suspend fun listJellyfinViewsForLaunch(): Result<List<JellyfinView>> = loadJellyfinViews(allowCached = false)
+
+    private suspend fun loadJellyfinViews(allowCached: Boolean): Result<List<JellyfinView>> = withContext(Dispatchers.IO) {
         val auth = jellyfinCredentialStore.loadAuth()
-            ?: return@withContext Result.failure(IllegalStateException("Not logged in to Jellyfin"))
+            ?: return@withContext Result.failure(net.digitalbc.leafreader.data.jellyfin.JellyfinException(
+                net.digitalbc.leafreader.data.jellyfin.JellyfinFailureKind.AUTHENTICATION, "Sign in to Jellyfin"))
         val serverUrl = settings.jellyfinServerUrl
         if (serverUrl.isBlank()) return@withContext Result.failure(IllegalStateException("No server configured"))
 
         try {
             val config = JellyfinServerConfig(serverUrl, settings.jellyfinAllowInsecureHttp)
-            Result.success(jellyfinClient.getViews(config, auth))
+            val views = jellyfinClient.getViews(config, auth)
+            saveMetadata(auth, serverUrl, "views", net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.views(views))
+            if (auth != jellyfinCredentialStore.loadAuth() || serverUrl != settings.jellyfinServerUrl)
+                throw CancellationException("Jellyfin account changed")
+            Result.success(views)
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
-            Result.failure(t)
+            val cached = if (allowCached && canUseMetadataCache(t) && auth == jellyfinCredentialStore.loadAuth() &&
+                serverUrl == settings.jellyfinServerUrl)
+                db?.jellyfinMetadataCacheDao()?.get(auth.serverId, auth.userId, serverUrl, "views") else null
+            cached?.let { runCatching { net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.views(it) } }
+                ?: Result.failure(t)
         }
     }
 
@@ -695,6 +809,7 @@ class LibraryRepository(
         parentId: String?,
         startIndex: Int = 0,
         limit: Int = 100,
+        syncReadingProgress: Boolean = true,
     ): Result<JellyfinItemsResult> = withContext(Dispatchers.IO) {
         val auth = jellyfinCredentialStore.loadAuth()
             ?: return@withContext Result.failure(IllegalStateException("Not logged in to Jellyfin"))
@@ -704,13 +819,15 @@ class LibraryRepository(
         try {
             val config = JellyfinServerConfig(serverUrl, settings.jellyfinAllowInsecureHttp)
             val result = jellyfinClient.getItems(config, auth, parentId, startIndex, limit)
-            for (item in result.items) {
-                if (!item.isFolder) {
-                    reconcileItemProgressFromRemote(item)
+            if (syncReadingProgress) {
+                for (item in result.items) {
+                    if (!item.isFolder) {
+                        reconcileItemProgressFromRemote(item)
+                    }
                 }
+                val bulkJob = jellyfinSyncScope.launch { flushJellyfinOutbox(config, auth) }
+                trackSessionJob(bulkJob)
             }
-            val bulkJob = jellyfinSyncScope.launch { flushJellyfinOutbox(config, auth) }
-            trackSessionJob(bulkJob)
             Result.success(result)
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
@@ -718,21 +835,246 @@ class LibraryRepository(
         }
     }
 
-    fun observeDownloadedJellyfinItemIds(): Flow<Set<String>> {
-        val auth = jellyfinCredentialStore.loadAuth() ?: return emptyFlow()
-        val dao = remoteComicLinkDao ?: return emptyFlow()
-        return dao.observeLinksForUser("jellyfin", auth.serverId, auth.userId)
-            .map { links -> links.map { it.itemId }.toSet() }
+    /** Catalogue reads never reconcile progress, flush pending writes or download files. */
+    suspend fun listJellyfinCatalogue(
+        query: net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueQuery,
+    ): Result<net.digitalbc.leafreader.data.jellyfin.JellyfinCataloguePage> = withContext(Dispatchers.IO) {
+        val generation = sessionGeneration.get()
+        val auth = jellyfinCredentialStore.loadAuth()
+            ?: return@withContext Result.failure(IllegalStateException("Sign in to Jellyfin"))
+        val url = settings.jellyfinServerUrl
+        try {
+            val config = JellyfinServerConfig(url, settings.jellyfinAllowInsecureHttp)
+            val page = jellyfinClient.getCatalogue(config, auth, query)
+            saveMetadata(auth, url, query.url(url, auth.userId), net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.page(page))
+            if (generation != sessionGeneration.get() || auth != jellyfinCredentialStore.loadAuth() ||
+                url != settings.jellyfinServerUrl) throw CancellationException("Jellyfin account changed")
+            Result.success(page)
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            val cached = if (canUseMetadataCache(error) && generation == sessionGeneration.get() &&
+                auth == jellyfinCredentialStore.loadAuth() && url == settings.jellyfinServerUrl)
+                db?.jellyfinMetadataCacheDao()?.get(auth.serverId, auth.userId, url, query.url(url, auth.userId)) else null
+            cached?.let { runCatching { net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.page(it) } }
+                ?: Result.failure(error)
+        }
     }
+
+    suspend fun cachedJellyfinCatalogue(query: net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueQuery):
+        net.digitalbc.leafreader.data.jellyfin.JellyfinCataloguePage? = withContext(Dispatchers.IO) {
+        val auth = jellyfinCredentialStore.loadAuth() ?: return@withContext null
+        val url = settings.jellyfinServerUrl
+        val payload = db?.jellyfinMetadataCacheDao()?.get(auth.serverId, auth.userId, url, query.url(url, auth.userId))
+            ?: return@withContext null
+        if (auth != jellyfinCredentialStore.loadAuth() || url != settings.jellyfinServerUrl) return@withContext null
+        runCatching { net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.page(payload) }.getOrNull()
+    }
+
+    suspend fun cachedJellyfinLibraries(): List<JellyfinView> = withContext(Dispatchers.IO) {
+        val auth = jellyfinCredentialStore.loadAuth() ?: return@withContext emptyList()
+        val url = settings.jellyfinServerUrl
+        val payload = db?.jellyfinMetadataCacheDao()?.get(auth.serverId, auth.userId, url, "views")
+            ?: return@withContext emptyList()
+        if (auth != jellyfinCredentialStore.loadAuth() || url != settings.jellyfinServerUrl)
+            return@withContext emptyList()
+        runCatching { net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.views(payload) }.getOrDefault(emptyList())
+    }
+
+    suspend fun restoreJellyfinCatalogue(): net.digitalbc.leafreader.data.jellyfin.JellyfinSavedCatalogue? =
+        withContext(Dispatchers.IO) {
+            val auth = jellyfinCredentialStore.loadAuth() ?: return@withContext null
+            val url = settings.jellyfinServerUrl
+            val libraries = cachedJellyfinLibraries()
+            val selected = db?.jellyfinMetadataCacheDao()?.get(auth.serverId, auth.userId, url, "selected-library")
+            val library = libraries.firstOrNull { it.id == selected } ?: net.digitalbc.leafreader.data.jellyfin.JellyfinLibraryEntry.automaticLibrary(libraries)
+            val index = library?.let { readJellyfinIndex(it.id) }
+            if (auth != jellyfinCredentialStore.loadAuth() || url != settings.jellyfinServerUrl)
+                return@withContext null
+            net.digitalbc.leafreader.data.jellyfin.JellyfinSavedCatalogue(libraries, library, index)
+        }
+
+    suspend fun readJellyfinIndex(libraryId: String): net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueIndex? =
+        withContext(Dispatchers.IO) {
+            val auth = jellyfinCredentialStore.loadAuth() ?: return@withContext null
+            val url = settings.jellyfinServerUrl
+            val payload = db?.jellyfinMetadataCacheDao()?.get(auth.serverId, auth.userId, url, "index:$libraryId")
+                ?: return@withContext null
+            if (auth != jellyfinCredentialStore.loadAuth() || url != settings.jellyfinServerUrl)
+                return@withContext null
+            runCatching { net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.index(payload) }.getOrNull()
+        }
+
+    suspend fun writeJellyfinIndex(libraryId: String, index: net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueIndex,
+        expectedScope: List<String>) = withContext(Dispatchers.IO) {
+        val auth = jellyfinCredentialStore.loadAuth() ?: throw CancellationException("Jellyfin disconnected")
+        val url = settings.jellyfinServerUrl
+        if (expectedScope != listOf(url, auth.serverId, auth.userId)) throw CancellationException("Jellyfin account changed")
+        // A whole snapshot replaces one private Room row atomically. No comic/list tables are modified.
+        val database = db ?: return@withContext
+        database.withTransaction {
+            database.jellyfinMetadataCacheDao().put(net.digitalbc.leafreader.data.db.JellyfinMetadataCache(
+                auth.serverId, auth.userId, url, "index:$libraryId",
+                net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.index(index)))
+            database.jellyfinMetadataCacheDao().put(net.digitalbc.leafreader.data.db.JellyfinMetadataCache(
+                auth.serverId, auth.userId, url, "selected-library", libraryId))
+        }
+    }
+
+    suspend fun resolveJellyfinFolder(libraryId: String, parentId: String): net.digitalbc.leafreader.data.jellyfin.JellyfinFolderIdentity? =
+        withContext(Dispatchers.IO) {
+            val auth = jellyfinCredentialStore.loadAuth() ?: return@withContext null
+            val url = settings.jellyfinServerUrl
+            val folder = jellyfinClient.getCatalogueFolder(
+                JellyfinServerConfig(url, settings.jellyfinAllowInsecureHttp), auth, libraryId, parentId)
+            if (auth != jellyfinCredentialStore.loadAuth() || url != settings.jellyfinServerUrl)
+                throw CancellationException("Jellyfin account changed")
+            folder
+        }
+
+    private fun canUseMetadataCache(error: Throwable): Boolean {
+        if (error is net.digitalbc.leafreader.data.jellyfin.JellyfinException &&
+            error.kind in setOf(net.digitalbc.leafreader.data.jellyfin.JellyfinFailureKind.AUTHENTICATION,
+                net.digitalbc.leafreader.data.jellyfin.JellyfinFailureKind.ACCESS_DENIED))
+            jellyfinCoverCache.clear()
+        return when (error) {
+        is net.digitalbc.leafreader.data.jellyfin.JellyfinException -> error.kind in setOf(
+            net.digitalbc.leafreader.data.jellyfin.JellyfinFailureKind.UNAVAILABLE,
+            net.digitalbc.leafreader.data.jellyfin.JellyfinFailureKind.SERVER_ERROR,
+            net.digitalbc.leafreader.data.jellyfin.JellyfinFailureKind.TIMEOUT,
+            net.digitalbc.leafreader.data.jellyfin.JellyfinFailureKind.IO)
+        is java.io.IOException -> true
+        else -> false
+        }
+    }
+
+    private suspend fun saveMetadata(auth: JellyfinAuth, url: String, key: String, payload: String) {
+        if (auth != jellyfinCredentialStore.loadAuth() || url != settings.jellyfinServerUrl) return
+        try {
+            db?.jellyfinMetadataCacheDao()?.put(net.digitalbc.leafreader.data.db.JellyfinMetadataCache(
+                auth.serverId, auth.userId, url, key, payload))
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: java.lang.Exception) { /* Reading can continue if metadata caching has no storage. */ }
+    }
+
+    /** Detail reads never reconcile progress or flush the outbox. */
+    suspend fun getJellyfinItemDetails(identity: JellyfinItemIdentity): Result<JellyfinItemDetails> =
+        withContext(Dispatchers.IO) {
+            val generation = sessionGeneration.get()
+            val auth = jellyfinCredentialStore.loadAuth()
+                ?: return@withContext Result.failure(IllegalStateException("Not logged in to Jellyfin"))
+            if (identity.serverId != auth.serverId || identity.userId != auth.userId) {
+                return@withContext Result.failure(IllegalStateException("Jellyfin account has changed"))
+            }
+            val serverUrl = settings.jellyfinServerUrl
+            if (serverUrl.isBlank()) {
+                return@withContext Result.failure(IllegalStateException("No server configured"))
+            }
+            try {
+                val config = JellyfinServerConfig(serverUrl, settings.jellyfinAllowInsecureHttp)
+                val details = jellyfinClient.getItemDetails(config, auth, identity.itemId)
+                val currentAuth = jellyfinCredentialStore.loadAuth()
+                if (generation != sessionGeneration.get() ||
+                    currentAuth != auth || settings.jellyfinServerUrl != serverUrl
+                ) {
+                    throw CancellationException("Jellyfin account changed while loading details")
+                }
+                saveMetadata(auth, serverUrl, "detail:${identity.itemId}",
+                    net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.details(details))
+                if (generation != sessionGeneration.get() || auth != jellyfinCredentialStore.loadAuth() ||
+                    settings.jellyfinServerUrl != serverUrl) throw CancellationException("Jellyfin account changed")
+                Result.success(details)
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                if (canUseMetadataCache(t) && generation == sessionGeneration.get() &&
+                    auth == jellyfinCredentialStore.loadAuth() && serverUrl == settings.jellyfinServerUrl) {
+                    val payload = db?.jellyfinMetadataCacheDao()?.get(
+                        auth.serverId, auth.userId, serverUrl, "detail:${identity.itemId}")
+                    if (generation != sessionGeneration.get() || auth != jellyfinCredentialStore.loadAuth() ||
+                        settings.jellyfinServerUrl != serverUrl) throw CancellationException("Jellyfin account changed")
+                    val saved = payload?.let { runCatching {
+                        net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.details(it, identity)
+                    }.getOrNull() }
+                    if (saved != null) return@withContext Result.success(saved)
+                    val entry = restoreJellyfinCatalogue()?.index?.entries?.firstOrNull { it.item.id == identity.itemId }
+                    if (generation != sessionGeneration.get() || auth != jellyfinCredentialStore.loadAuth() ||
+                        settings.jellyfinServerUrl != serverUrl) throw CancellationException("Jellyfin account changed")
+                    if (entry != null) return@withContext Result.success(JellyfinItemDetails(
+                        identity, entry.item, people = entry.people, fromCache = true))
+                }
+                Result.failure(t)
+            }
+        }
+
+    fun observeDownloadedJellyfinCopies(): Flow<Map<String, ComicEntity>> {
+        val auth = jellyfinCredentialStore.loadAuth() ?: return emptyFlow()
+        val linkDao = remoteComicLinkDao ?: return emptyFlow()
+        return kotlinx.coroutines.flow.combine(
+            linkDao.observeLinksForUser("jellyfin", auth.serverId, auth.userId), comics,
+        ) { links, rows ->
+            withContext(Dispatchers.IO) {
+                val byId = rows.associateBy { it.id }
+                links.mapNotNull { link ->
+                    byId[link.comicId]?.takeIf { fileAvailability.isReadable(it) }
+                        ?.let { link.itemId to it }
+                }.toMap()
+            }
+        }
+    }
+
+    fun observeDownloadedJellyfinItemIds(): Flow<Set<String>> =
+        observeDownloadedJellyfinCopies().map { it.keys }
 
     suspend fun loadJellyfinCoverBitmap(itemId: String, imageTag: String?, maxWidth: Int = 400): Bitmap? =
         withContext(Dispatchers.IO) {
             val auth = jellyfinCredentialStore.loadAuth() ?: return@withContext null
             val serverUrl = settings.jellyfinServerUrl
-            if (serverUrl.isBlank()) return@withContext null
-            val config = runCatching { JellyfinServerConfig(serverUrl, settings.jellyfinAllowInsecureHttp) }.getOrNull()
-                ?: return@withContext null
-            jellyfinClient.loadCoverBitmap(config, auth, itemId, imageTag, maxWidth)
+            val generation = sessionGeneration.get()
+            fun current() = generation == sessionGeneration.get() &&
+                auth == jellyfinCredentialStore.loadAuth() && serverUrl == settings.jellyfinServerUrl
+            val key = CoverBitmapCache.Key(serverUrl, auth.serverId, auth.userId, generation,
+                itemId, imageTag, maxWidth)
+            val bitmap = jellyfinCoverCache.get(key) {
+                val linked = remoteComicLinkDao?.findLink("jellyfin", auth.serverId, auth.userId, itemId)
+                val localCover = linked?.let { dao.getById(it.comicId)?.coverPath }
+                val local = localCover?.let {
+                    CoverPerformanceTrace.event("retained")
+                    runCatching { CoverPerformanceTrace.decode { CoverImageDecoder.decodeFile(it, maxWidth) } }.getOrNull()
+                        .also { bitmap -> CoverPerformanceTrace.decoded(maxWidth, bitmap) }
+                }
+                if (!current()) throw CancellationException("Jellyfin account changed")
+                val loaded = local ?: if (serverUrl.isNotBlank()) {
+                    val config = runCatching {
+                        JellyfinServerConfig(serverUrl, settings.jellyfinAllowInsecureHttp)
+                    }.getOrNull()
+                    config?.let { jellyfinClient.loadCoverBitmap(it, auth, itemId, imageTag, maxWidth) }
+                } else null
+                if (!current()) throw CancellationException("Jellyfin account changed")
+                loaded
+            }
+            if (current()) bitmap else null
+        }
+
+    /** Checks a retained copy without credentials, network traffic or progress reconciliation. */
+    suspend fun getReadableJellyfinComic(identity: JellyfinItemIdentity): Result<ComicEntity?> =
+        withContext(Dispatchers.IO) {
+            try {
+                val link = remoteComicLinkDao?.findLink(
+                    "jellyfin", identity.serverId, identity.userId, identity.itemId,
+                ) ?: return@withContext Result.success(null)
+                val comic = dao.getById(link.comicId)
+                    ?: throw java.io.IOException("Downloaded comic record is unavailable")
+                val file = File(comic.filePath)
+                if (!file.isFile || file.length() == 0L) {
+                    throw java.io.IOException("Downloaded comic file is unavailable")
+                }
+                if (!fileAvailability.isReadable(comic, force = true))
+                    throw java.io.IOException("Downloaded comic cannot be opened")
+                Result.success(comic)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Result.failure(error)
+            }
         }
 
     suspend fun importJellyfinComic(
@@ -779,7 +1121,11 @@ class LibraryRepository(
         val comicsDir = File(context.filesDir, "comics").apply { mkdirs() }
         val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
         val ext = item.fileExtension
-        val title = item.name.substringBeforeLast('.', item.name)
+        val title = if (item.name.endsWith(".$ext", ignoreCase = true)) {
+            item.name.dropLast(ext.length + 1)
+        } else {
+            item.name
+        }
         val partFile = File(comicsDir, "$token.part")
         val dest = File(comicsDir, "$token.$ext")
 
@@ -827,6 +1173,7 @@ class LibraryRepository(
             if (result.isSuccess) {
                 val comicId = result.getOrThrow()
                 try {
+                    suspend fun linkAndAttach() {
                     remoteComicLinkDao?.insert(
                         RemoteComicLinkEntity(
                             comicId = comicId,
@@ -841,6 +1188,10 @@ class LibraryRepository(
                         )
                     )
 
+                    readingListDao?.getAllItems()?.filter {
+                        it.serverId == auth.serverId && it.userId == auth.userId && it.itemId == item.id
+                    }?.forEach { readingListDao.insertItem(it.copy(comicId = comicId)) }
+
                     // Seed initial progress from Jellyfin if remote position or played status exists
                     val importedComic = dao.getById(comicId)
                     if (importedComic != null && (item.playbackPositionTicks > 0L || item.played)) {
@@ -853,6 +1204,9 @@ class LibraryRepository(
                             dao.updateProgress(comicId, initialPage, 0, System.currentTimeMillis())
                         }
                     }
+                    }
+                    if (db != null) db.withTransaction { linkAndAttach() } else linkAndAttach()
+                    jellyfinCoverCache.clear()
                 } catch (linkEx: Throwable) {
                     // Complete rollback: remove comic from DB, remove cover, remove downloaded file
                     dao.delete(comicId)
@@ -938,14 +1292,25 @@ class LibraryRepository(
                 source = source,
             ),
         )
+        fileAvailability.invalidate()
+        jellyfinCoverCache.clear()
         return Result.success(id)
     }
 
     suspend fun deleteComic(id: Long) = withContext(Dispatchers.IO) {
         val comic = dao.getById(id) ?: return@withContext
+        readingListDao?.getAllItems()?.filter { it.comicId == id && it.itemId != null }?.forEach {
+            val snapshot = it.snapshot ?: net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.encode(
+                net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueEntry(
+                    JellyfinItem(it.itemId!!, comic.title, false, container = comic.format.lowercase(),
+                        seriesName = comic.series), "Book", null))
+            readingListDao.insertItem(it.copy(comicId = 0, snapshot = snapshot, title = comic.title))
+        }
         runCatching { File(comic.filePath).delete() }
         comic.coverPath?.let { runCatching { File(it).delete() } }
         dao.delete(id)
+        fileAvailability.invalidate()
+        jellyfinCoverCache.clear()
     }
 
     private fun saveCover(pageBytes: ByteArray, dest: File): Boolean {

@@ -2,6 +2,7 @@ package net.digitalbc.leafreader.data.backup
 
 import android.content.Context
 import androidx.room.Room
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import net.digitalbc.leafreader.data.db.AppDatabase
 import net.digitalbc.leafreader.data.db.ComicEntity
@@ -42,6 +43,39 @@ class BackupManagerTest {
     @After
     fun tearDown() {
         db.close()
+    }
+
+    @Test
+    fun remoteMembersRoundTripWithoutDownloadsAndPreserveScopedIdentityAndOrder() = runBlocking {
+        val list = repository.createReadingList("Remote reading order")
+        val entry = net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueEntry(
+            net.digitalbc.leafreader.data.jellyfin.JellyfinItem("remote", "Comic", false,
+                container = "cbz", path = "/server/private/book.cbz"), "Book", null, "run", 1, 2.0)
+        val identity = net.digitalbc.leafreader.data.jellyfin.JellyfinItemIdentity("srv", "user", "remote")
+        repository.addRemoteToReadingList(list, entry, identity, "library")
+        val original = db.readingListDao().getAllItems().single()
+        val json = repository.exportBackup()
+        assertFalse(json.contains("/server/private"))
+        assertFalse(json.contains("accessToken"))
+        assertEquals(0, repository.previewBackup(json).getOrThrow().skippedReadingListItemsCount)
+        val parsed = BackupManager.parseAndValidate(json).getOrThrow().readingLists.single().items.single()
+        assertEquals("srv", parsed.serverId)
+        assertEquals("user", parsed.userId)
+        assertEquals("remote", parsed.itemId)
+        repository.deleteReadingList(list)
+        repository.applyBackup(json, BackupConflictStrategy.KEEP_LOCAL).getOrThrow()
+        val restored = db.readingListDao().getAllItems().single()
+        assertEquals(original.referenceKey, restored.referenceKey)
+        assertEquals(original.sortOrder, restored.sortOrder)
+        assertEquals(0L, restored.comicId)
+        assertTrue(db.comicDao().getAll().isEmpty())
+
+        val root = org.json.JSONObject(json)
+        val member = root.getJSONArray("readingLists").getJSONObject(0).getJSONArray("items").getJSONObject(0)
+        member.remove("userId")
+        assertTrue(BackupManager.parseAndValidate(root.toString()).isFailure)
+        member.put("userId", "user").put("itemId", "mismatch")
+        assertTrue(BackupManager.parseAndValidate(root.toString()).isFailure)
     }
 
     @Test
@@ -359,6 +393,289 @@ class BackupManagerTest {
 
         val clamped = db.comicDao().getById(1)
         assertEquals(4, clamped!!.lastPage) // Coerced to pageCount - 1 (5 - 1 = 4)
+    }
+
+    @Test
+    fun duplicateTitlesAndPageCountsPreserveBothComicsAndSkipAmbiguousListItems() = runBlocking {
+        val first = ComicEntity(
+            id = 1, title = "Blue Book - Vol", filePath = "/comics/first.pdf",
+            coverPath = null, format = "PDF", pageCount = 140,
+            lastPage = 139, lastSlot = 2, rightToLeft = true,
+            dateAdded = 1000L, lastOpened = 2000L,
+        )
+        val second = first.copy(
+            id = 2, filePath = "/comics/second.pdf", lastPage = 138,
+            lastSlot = 0, rightToLeft = false, dateAdded = 3000L, lastOpened = 4000L,
+        )
+        val unique = first.copy(
+            id = 3, title = "Unique", filePath = "/comics/unique.pdf", pageCount = 20,
+            lastPage = 5,
+        )
+        listOf(first, second, unique).forEach { db.comicDao().insert(it) }
+        val listId = db.readingListDao().insertList(ReadingListEntity(name = "Favorites"))
+        db.readingListDao().insertItem(ReadingListItemEntity(listId, first.id, 0))
+        db.readingListDao().insertItem(ReadingListItemEntity(listId, unique.id, 1))
+        val json = repository.exportBackup()
+        db.readingListDao().clearItems(listId)
+
+        val preview = repository.previewBackup(json).getOrThrow()
+        assertEquals(1, preview.matchingComicsCount)
+        assertEquals(1, preview.skippedReadingListItemsCount)
+        for (strategy in BackupConflictStrategy.entries) {
+            repository.applyBackup(json, strategy).getOrThrow()
+            assertEquals(first, db.comicDao().getById(first.id))
+            assertEquals(second, db.comicDao().getById(second.id))
+        }
+        assertEquals(listOf(unique.id), db.readingListDao().getAllItems().map { it.comicId })
+    }
+
+    @Test
+    fun collidingBackupRecordsAreAllSkippedRegardlessOfOrder() = runBlocking {
+        val comic = ComicEntity(
+            id = 1, title = "Unique", filePath = "/comics/unique.cbz",
+            coverPath = null, format = "CBZ", pageCount = 20,
+            lastPage = 3, lastSlot = 2, dateAdded = 1000L, lastOpened = 2000L,
+        )
+        db.comicDao().insert(comic)
+        val root = org.json.JSONObject(repository.exportBackup())
+        val original = root.getJSONArray("comics").getJSONObject(0)
+        val collision = org.json.JSONObject(original.toString())
+            .put("title", "UNIQUE").put("pageCount", 99).put("lastPage", 15)
+            .put("lastOpened", 9000L).put("rightToLeft", true)
+        for (records in listOf(listOf(original, collision), listOf(collision, original))) {
+            val json = root.put("comics", org.json.JSONArray(records)).toString()
+            assertEquals(0, repository.previewBackup(json).getOrThrow().matchingComicsCount)
+            for (strategy in BackupConflictStrategy.entries) {
+                assertEquals(0, repository.applyBackup(json, strategy).getOrThrow())
+                assertEquals(comic, db.comicDao().getById(comic.id))
+            }
+        }
+    }
+
+    @Test
+    fun matchingFallsBackOnlyToUniqueCandidates() {
+        val first = ComicEntity(
+            id = 1, title = "Same", filePath = "/first.cbz", coverPath = null,
+            format = "CBZ", pageCount = 20, series = "Series", volume = "1",
+            issueNumber = 1f, dateAdded = 1000L, lastOpened = 2000L,
+        )
+        val second = first.copy(id = 2, filePath = "/second.cbz", pageCount = 30)
+        val backup = BackupComic(title = "same", format = "CBZ", pageCount = 20)
+        assertEquals(first, BackupManager.findMatchingComic(backup, listOf(first, second)))
+        assertNull(BackupManager.findMatchingComic(backup.copy(pageCount = 99), listOf(first, second)))
+        assertNull(BackupManager.findMatchingComic(backup, listOf(first, second.copy(pageCount = 20))))
+        val renamed = backup.copy(title = "Renamed", series = "Series", volume = "1", issueNumber = 1f)
+        assertEquals(first, BackupManager.findMatchingComic(renamed, listOf(first)))
+        assertNull(BackupManager.findMatchingComic(renamed, listOf(first, second)))
+        assertNull(BackupManager.findMatchingComic(renamed.copy(volume = "2"), listOf(first)))
+        assertEquals(first, BackupManager.findMatchingListComic(
+            BackupReadingListItem(comicTitle = "Same"), listOf(first),
+        ))
+        assertNull(BackupManager.findMatchingListComic(
+            BackupReadingListItem(comicTitle = "Same"), listOf(first, second),
+        ))
+    }
+
+    @Test
+    fun failedRestoreRollsBackProgressListsAndPreferencesAndCanBeRetriedAfterReopen() = runBlocking {
+        val databaseName = "backup-recovery-${java.util.UUID.randomUUID()}"
+        db.close()
+        fun openDatabase() {
+            db = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
+                .allowMainThreadQueries().build()
+            settings = AppSettings(context.getSharedPreferences("test_settings", Context.MODE_PRIVATE))
+            repository = LibraryRepository(context, db.comicDao(), settings, db.readingListDao(), db)
+        }
+        openDatabase()
+        try {
+            val comic = ComicEntity(
+                id = 1, title = "Recovery", filePath = "/comics/recovery.cbz",
+                coverPath = null, format = "CBZ", pageCount = 20,
+                lastPage = 2, lastSlot = 1, dateAdded = 1000L, lastOpened = 2000L,
+            )
+            db.comicDao().insert(comic)
+            val existingList = ReadingListEntity(id = 1, name = "Existing", createdAt = 100L, updatedAt = 100L)
+            db.readingListDao().insertList(existingList)
+            val existingItem = ReadingListItemEntity(1, 1, 0, addedAt = 100L)
+            db.readingListDao().insertItem(existingItem)
+            val baselineSettings = BackupManager.parseAndValidate(repository.exportBackup()).getOrThrow().settings
+            val root = org.json.JSONObject(repository.exportBackup())
+            root.getJSONObject("settings").put("libraryColumns", 6).put("amoledTheme", true)
+            root.getJSONArray("comics").getJSONObject(0)
+                .put("lastPage", 15).put("lastSlot", 3).put("lastOpened", 9000L).put("rightToLeft", true)
+            root.getJSONArray("readingLists").put(org.json.JSONObject(
+                """{"name":"Restored","createdAt":500,"items":[{"comicTitle":"Recovery","sortOrder":0}]}"""
+            ))
+            val json = root.toString()
+            // Fail after progress and the new list have been written inside the transaction.
+            db.openHelper.writableDatabase.execSQL(
+                "CREATE TRIGGER reject_restore BEFORE INSERT ON reading_list_items " +
+                    "WHEN NEW.listId != 1 BEGIN SELECT RAISE(ABORT, 'injected restore failure'); END"
+            )
+            assertTrue(repository.applyBackup(json, BackupConflictStrategy.OVERWRITE).isFailure)
+            db.close()
+            openDatabase()
+            assertEquals(comic, db.comicDao().getById(1))
+            assertEquals(listOf(existingList), db.readingListDao().getAllLists())
+            assertEquals(listOf(existingItem), db.readingListDao().getAllItems())
+            assertEquals(baselineSettings, BackupManager.parseAndValidate(repository.exportBackup()).getOrThrow().settings)
+
+            db.openHelper.writableDatabase.execSQL("DROP TRIGGER reject_restore")
+            assertEquals(1, repository.applyBackup(json, BackupConflictStrategy.OVERWRITE).getOrThrow())
+            db.close()
+            openDatabase()
+            assertEquals(15, db.comicDao().getById(1)!!.lastPage)
+            assertEquals(3, db.comicDao().getById(1)!!.lastSlot)
+            assertTrue(db.comicDao().getById(1)!!.rightToLeft)
+            assertEquals(setOf("Existing", "Restored"), db.readingListDao().getAllLists().map { it.name }.toSet())
+            assertEquals(2, db.readingListDao().getAllItems().size)
+            assertEquals(6, settings.libraryColumns)
+            assertTrue(settings.amoledTheme)
+        } finally {
+            db.close()
+            context.deleteDatabase(databaseName)
+        }
+    }
+
+    @Test
+    fun missingComicsAreSkippedWithoutCreatingFilesOrPhantomRows() = runBlocking {
+        val comic = ComicEntity(
+            id = 1, title = "Indexed but missing archive",
+            filePath = java.io.File(context.filesDir, "absent-archive.cbz").absolutePath,
+            coverPath = null, format = "CBZ", pageCount = 20,
+            lastPage = 2, dateAdded = 1000L, lastOpened = 2000L,
+        )
+        assertFalse(java.io.File(comic.filePath).exists())
+        db.comicDao().insert(comic)
+        val json = """
+            {"version":1,"comics":[
+                {"title":"Indexed but missing archive","pageCount":20,"lastPage":8,"lastOpened":9000},
+                {"title":"Not imported on this device","pageCount":30,"lastPage":12}
+            ],"readingLists":[{"name":"Portable","createdAt":100,"items":[
+                {"comicTitle":"Indexed but missing archive","sortOrder":0},
+                {"comicTitle":"Not imported on this device","sortOrder":1}
+            ]}]}
+        """.trimIndent()
+        val preview = repository.previewBackup(json).getOrThrow()
+        assertEquals(1, preview.matchingComicsCount)
+        assertEquals(1, preview.skippedReadingListItemsCount)
+        assertEquals(1, repository.applyBackup(json, BackupConflictStrategy.OVERWRITE).getOrThrow())
+        assertEquals(1, db.comicDao().getAll().size)
+        assertEquals(8, db.comicDao().getById(1)!!.lastPage)
+        assertEquals(comic.filePath, db.comicDao().getById(1)!!.filePath)
+        assertFalse(java.io.File(comic.filePath).exists())
+        assertEquals(listOf(1L), db.readingListDao().getAllItems().map { it.comicId })
+    }
+
+    @Test
+    fun cancellingCallerDuringRestoreStillFinishesTheTransactionAndPreferences() = runBlocking {
+        val databaseName = "backup-cancellation-${java.util.UUID.randomUUID()}"
+        val reachedUpdate = java.util.concurrent.CountDownLatch(1)
+        val releaseUpdate = java.util.concurrent.CountDownLatch(1)
+        val holdOnce = java.util.concurrent.atomic.AtomicBoolean(true)
+        db.close()
+        db = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
+            .allowMainThreadQueries()
+            .setQueryCallback(object : androidx.room.RoomDatabase.QueryCallback {
+                override fun onQuery(sqlQuery: String, bindArgs: List<Any?>) {
+                    if (sqlQuery.startsWith("UPDATE comics SET lastPage") && holdOnce.compareAndSet(true, false)) {
+                        reachedUpdate.countDown()
+                        check(releaseUpdate.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                    }
+                }
+            }, java.util.concurrent.Executor { it.run() })
+            .build()
+        repository = LibraryRepository(context, db.comicDao(), settings, db.readingListDao(), db)
+        var restore: kotlinx.coroutines.Job? = null
+        try {
+            val first = ComicEntity(
+                id = 1, title = "First", filePath = "/comics/first.cbz", coverPath = null,
+                format = "CBZ", pageCount = 20, lastPage = 2, dateAdded = 1000L, lastOpened = 2000L,
+            )
+            db.comicDao().insert(first)
+            db.comicDao().insert(first.copy(id = 2, title = "Second", filePath = "/comics/second.cbz"))
+            val json = """
+                {"version":1,"settings":{"libraryColumns":6,"amoledTheme":true},
+                "comics":[
+                    {"title":"First","pageCount":20,"lastPage":12,"lastOpened":9000},
+                    {"title":"Second","pageCount":20,"lastPage":15,"lastOpened":9000}
+                ],"readingLists":[{"name":"Restored","createdAt":100,"items":[
+                    {"comicTitle":"First","sortOrder":0},{"comicTitle":"Second","sortOrder":1}
+                ]}]}
+            """.trimIndent()
+            val operation = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                repository.applyBackup(json, BackupConflictStrategy.OVERWRITE).getOrThrow()
+            }
+            restore = operation
+            assertTrue("Restore must reach its first write", reachedUpdate.await(10, java.util.concurrent.TimeUnit.SECONDS))
+            operation.cancel()
+            releaseUpdate.countDown()
+            kotlinx.coroutines.withTimeout(10_000) { operation.join() }
+            db.close()
+            db = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
+                .allowMainThreadQueries().build()
+            settings = AppSettings(context.getSharedPreferences("test_settings", Context.MODE_PRIVATE))
+            assertEquals(12, db.comicDao().getById(1)!!.lastPage)
+            assertEquals(15, db.comicDao().getById(2)!!.lastPage)
+            assertEquals(listOf("Restored"), db.readingListDao().getAllLists().map { it.name })
+            assertEquals(listOf(1L, 2L), db.readingListDao().getAllItems().sortedBy { it.sortOrder }.map { it.comicId })
+            assertEquals(6, settings.libraryColumns)
+            assertTrue(settings.amoledTheme)
+        } finally {
+            releaseUpdate.countDown()
+            restore?.join()
+            db.close()
+            context.deleteDatabase(databaseName)
+        }
+    }
+
+    @Test
+    fun preferenceSaveFailureReportsPartialRestoreAndAllowsRetry() = runBlocking {
+        val prefs = context.getSharedPreferences("test_settings", Context.MODE_PRIVATE)
+        val failingPrefs = object : android.content.SharedPreferences by prefs {
+            override fun edit(): android.content.SharedPreferences.Editor {
+                val editor = prefs.edit()
+                return object : android.content.SharedPreferences.Editor by editor {
+                    override fun putBoolean(key: String, value: Boolean) = apply { editor.putBoolean(key, value) }
+                    override fun putInt(key: String, value: Int) = apply { editor.putInt(key, value) }
+                    override fun putString(key: String, value: String?) = apply { editor.putString(key, value) }
+                    override fun commit(): Boolean = false
+                }
+            }
+        }
+        val comic = ComicEntity(
+            id = 1, title = "Retry", filePath = "/comics/retry.cbz", coverPath = null,
+            format = "CBZ", pageCount = 20, lastPage = 2, dateAdded = 1000L, lastOpened = 2000L,
+        )
+        db.comicDao().insert(comic)
+        val json = """
+            {"version":1,"settings":{"libraryColumns":6},
+             "comics":[{"title":"Retry","pageCount":20,"lastPage":12,"lastOpened":9000}]}
+        """.trimIndent()
+        val failingRepository = LibraryRepository(
+            context, db.comicDao(), AppSettings(failingPrefs), db.readingListDao(), db,
+        )
+        val failure = failingRepository.applyBackup(json, BackupConflictStrategy.OVERWRITE)
+        assertTrue(failure.isFailure)
+        assertTrue(failure.exceptionOrNull()!!.message!!.contains("Library restored, but preferences could not be saved"))
+        assertEquals(12, db.comicDao().getById(1)!!.lastPage)
+        assertEquals(2, settings.libraryColumns)
+        repository.applyBackup(json, BackupConflictStrategy.OVERWRITE).getOrThrow()
+        assertEquals(6, settings.libraryColumns)
+        assertEquals(12, db.comicDao().getById(1)!!.lastPage)
+    }
+
+    @Test
+    fun truncatedBackupDoesNotApplyEvenItsValidSettingsPrefix() = runBlocking {
+        settings.libraryColumns = 3
+        val before = BackupManager.parseAndValidate(repository.exportBackup()).getOrThrow()
+        val truncated = """{"version":1,"settings":{"libraryColumns":6},"comics":["""
+        assertTrue(repository.previewBackup(truncated).isFailure)
+        assertTrue(repository.applyBackup(truncated, BackupConflictStrategy.OVERWRITE).isFailure)
+        val after = BackupManager.parseAndValidate(repository.exportBackup()).getOrThrow()
+        assertEquals(before.settings, after.settings)
+        assertEquals(before.comics, after.comics)
+        assertEquals(before.readingLists, after.readingLists)
     }
 
     @Test

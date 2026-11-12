@@ -1,8 +1,30 @@
 package net.digitalbc.leafreader.data.library
 
 import androidx.room.Room
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.withTimeout
+import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.OkHttpClient
+import okhttp3.EventListener
+import okhttp3.Call
+import org.json.JSONObject
+import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.test.resetMain
 import net.digitalbc.leafreader.data.db.AppDatabase
 import net.digitalbc.leafreader.data.db.ComicDao
 import net.digitalbc.leafreader.data.db.JellyfinSyncOutboxDao
@@ -12,7 +34,9 @@ import net.digitalbc.leafreader.data.jellyfin.JellyfinAuth
 import net.digitalbc.leafreader.data.jellyfin.JellyfinClient
 import net.digitalbc.leafreader.data.jellyfin.JellyfinCredentialStore
 import net.digitalbc.leafreader.data.jellyfin.JellyfinItem
-import net.digitalbc.leafreader.data.jellyfin.JellyfinServerConfig
+import net.digitalbc.leafreader.data.jellyfin.JellyfinItemIdentity
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
 import net.digitalbc.leafreader.data.settings.AppSettings
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -80,9 +104,206 @@ class LibraryRepositoryJellyfinTest {
 
     @After
     fun tearDown() {
+        repository.jellyfinSyncScope.coroutineContext[Job]?.cancel()
+        runBlocking {
+            repository.observationScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
+        }
         server.shutdown()
         db.close()
+        RuntimeEnvironment.getApplication().deleteDatabase("sync-durability.db")
         credStore.clear()
+    }
+
+    private suspend fun clearModels(store: androidx.lifecycle.ViewModelStore) {
+        val jobs = store.keys().mapNotNull { store[it]?.viewModelScope?.coroutineContext?.get(Job) }
+        store.clear()
+        jobs.forEach { it.join() }
+    }
+
+    @Test
+    fun remoteListMembershipNeedsNoDownloadAndKeepsOrderAcrossRemovalAndAccountSwitch() = runBlocking {
+        val identity = JellyfinItemIdentity("srv", "u", "remote")
+        val item = JellyfinItem("remote", "Private comic", false, container = "cbz")
+        val entry = net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueEntry(item, "Book", null)
+        val list = repository.createReadingList("Mixed list")
+        val local = retainedComic(identity.copy(itemId = "other"))
+        repository.addComicToReadingList(list, local.id)
+        repository.addRemoteToReadingList(list, entry, identity, "books")
+        repository.addRemoteToReadingList(list, entry, identity, "books")
+        assertEquals(0, server.requestCount)
+        val before = repository.observeListReferences(list).first()
+        assertEquals(listOf(0, 1), before.map { it.sortOrder })
+        assertEquals(2, before.size)
+        assertEquals(0L, before.last().comicId)
+        repository.editListReference(list, before.last().referenceKey, -1)
+        assertEquals(identity.itemId, repository.observeListReferences(list).first().first().itemId)
+
+        credStore.saveAuth(JellyfinAuth("token", "u", "srv", "Reader"))
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        server.enqueue(MockResponse().setBody(okio.Buffer().write(createValidCbzBytes())))
+        val downloaded = repository.importJellyfinComic(item).getOrThrow()
+        val attached = repository.observeListReferences(list).first().first()
+        assertEquals(downloaded, attached.comicId)
+        assertEquals(before.last().referenceKey, attached.referenceKey)
+        repository.addComicToReadingList(list, downloaded)
+        assertEquals(2, repository.observeListReferences(list).first().size)
+        repository.deleteComic(downloaded)
+        val removed = repository.observeListReferences(list).first().first()
+        assertEquals(0L, removed.comicId)
+        assertEquals(attached.referenceKey, removed.referenceKey)
+        assertEquals(0, removed.sortOrder)
+        assertNotNull(removed.snapshot)
+
+        Dispatchers.setMain(kotlinx.coroutines.test.UnconfinedTestDispatcher())
+        val store = androidx.lifecycle.ViewModelStore()
+        try {
+            val vm = net.digitalbc.leafreader.ui.library.LibraryViewModel(repository, settings)
+            store.put("lists", vm)
+            assertNotNull(vm.observeListMembers(list).first().first().remote)
+            credStore.saveAuth(JellyfinAuth("other-token", "other", "srv", "Other"))
+            val unavailable = vm.observeListMembers(list).first().first()
+            assertNull(unavailable.remote)
+            assertNull(unavailable.comic)
+            assertEquals(removed.referenceKey, unavailable.reference.referenceKey)
+        } finally { clearModels(store); Dispatchers.resetMain() }
+    }
+
+    @Test
+    fun invalidSavedCoverAddressRemainsANonFatalPlaceholder() = runBlocking {
+        credStore.saveAuth(JellyfinAuth("token", "u", "srv", "Reader"))
+        settings.jellyfinServerUrl = "not-a-server-url"
+        assertNull(repository.loadJellyfinCoverBitmap("cover", "tag"))
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun remoteCoverReentryAndConcurrentCardsUseOneRequestButReconnectInvalidatesIt() = runBlocking {
+        fun configure() {
+            credStore.saveAuth(JellyfinAuth("token", "u", "srv", "Reader"))
+            settings.jellyfinServerUrl = baseUrl()
+            settings.jellyfinAllowInsecureHttp = true
+        }
+        val png = java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(createValidCbzBytes())).use {
+            it.nextEntry; it.readBytes()
+        }
+        fun response() = MockResponse().setBody(okio.Buffer().write(png))
+        configure()
+        server.enqueue(response())
+        val results = (1..8).map { async { repository.loadJellyfinCoverBitmap("cover", "tag") } }
+            .map { it.await() }
+        assertNotNull(results.first())
+        assertTrue(results.all { it === results.first() })
+        assertTrue(repository.loadJellyfinCoverBitmap("cover", "tag") === results.first())
+        assertEquals(1, server.requestCount)
+        repository.disconnectJellyfin()
+        configure()
+        server.enqueue(response())
+        assertNotNull(repository.loadJellyfinCoverBitmap("cover", "tag"))
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun readerStillRejectsCorruptionAfterAvailabilityWasWarmed() = runBlocking {
+        val identity = JellyfinItemIdentity("srv", "u", "warm-integrity")
+        val comic = retainedComic(identity)
+        withTimeout(3000) { repository.readableComics.first { rows -> rows.any { it.id == comic.id } } }
+        val file = File(comic.filePath)
+        val length = file.length().toInt()
+        file.writeBytes(ByteArray(length))
+        assertTrue(repository.getReadableJellyfinComic(identity).isFailure)
+    }
+
+    @Test
+    fun retainedComicCoverUsesLocalImageWithoutAConnection() = runBlocking {
+        val identity = JellyfinItemIdentity("srv", "u", "retained-cover")
+        val comic = retainedComic(identity)
+        val cover = File(RuntimeEnvironment.getApplication().cacheDir, "retained-cover.png")
+        val png = java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(createValidCbzBytes())).use {
+            it.nextEntry
+            it.readBytes()
+        }
+        cover.writeBytes(png)
+        db.openHelper.writableDatabase.execSQL("UPDATE comics SET coverPath=? WHERE id=?",
+            arrayOf(cover.absolutePath, comic.id))
+        credStore.saveAuth(JellyfinAuth("token", "u", "srv", "Reader"))
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        val bitmap = withTimeout(3000) { repository.loadJellyfinCoverBitmap(identity.itemId, null) }
+        assertNotNull(bitmap)
+        assertEquals(0, server.requestCount)
+        assertEquals(comic.lastPage, comicDao.getById(comic.id)?.lastPage)
+        cover.delete()
+        Unit
+    }
+
+    @Test
+    fun catalogueIndexRoundTripsScopedFolderMetadataAndNeverDeletesRetainedFilesOrLists() = runBlocking {
+        val auth = JellyfinAuth("token", "u", "srv", "Reader")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        server.enqueue(MockResponse().setBody("""{"Items":[{"Id":"books","Name":"Comics","CollectionType":"books"}]}"""))
+        settings.jellyfinAllowInsecureHttp = true
+        repository.listJellyfinViews().getOrThrow()
+        val comic = retainedComic(JellyfinItemIdentity("srv", "u", "retained"))
+        val list = repository.createReadingList("Preserved")
+        repository.addComicToReadingList(list, comic.id)
+        val entry = net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueEntry(
+            JellyfinItem("item", "Vol. 01", false, container = "cbz", parentId = "folder"),
+            "Book", null, folder = net.digitalbc.leafreader.data.jellyfin.JellyfinFolderIdentity("folder", "A run", "books"))
+        val index = net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueIndex(listOf(entry), true, 1, 1, 10, 10)
+        repository.writeJellyfinIndex("books", index, listOf(baseUrl(), "srv", "u"))
+        assertEquals(index, repository.readJellyfinIndex("books"))
+        val restored = repository.restoreJellyfinCatalogue()!!
+        assertEquals("books", restored.library?.id)
+        assertEquals(index, restored.index)
+        repository.writeJellyfinIndex("books", index.copy(entries = emptyList(), total = 0, scanned = 0),
+            listOf(baseUrl(), "srv", "u"))
+        assertNotNull(comicDao.getById(comic.id))
+        assertTrue(File(comic.filePath).isFile)
+        assertEquals(1, repository.observeListReferences(list).first().size)
+        credStore.saveAuth(auth.copy(userId = "other"))
+        assertNull(repository.readJellyfinIndex("books"))
+        assertTrue(repository.cachedJellyfinLibraries().isEmpty())
+    }
+
+    @Test
+    fun launchDiscoveryDoesNotHideConnectionFailureBehindCachedLibraries() = runBlocking {
+        credStore.saveAuth(JellyfinAuth("token", "u", "srv", "Reader"))
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        server.enqueue(MockResponse().setBody("""{"Items":[{"Id":"books","Name":"Comics","CollectionType":"books"}]}"""))
+        assertEquals("books", repository.listJellyfinViews().getOrThrow().single().id)
+        server.enqueue(MockResponse().setResponseCode(503))
+        val launch = repository.listJellyfinViewsForLaunch()
+        assertTrue(launch.isFailure)
+        assertEquals(net.digitalbc.leafreader.data.jellyfin.JellyfinFailureKind.SERVER_ERROR,
+            (launch.exceptionOrNull() as net.digitalbc.leafreader.data.jellyfin.JellyfinException).kind)
+        server.enqueue(MockResponse().setResponseCode(503))
+        assertEquals("books", repository.listJellyfinViews().getOrThrow().single().id)
+        assertTrue(comicDao.getAll().isEmpty())
+        assertTrue(outboxDao.getPendingForUser("srv", "u").isEmpty())
+        assertNotNull(credStore.loadAuth())
+        assertEquals(baseUrl(), settings.jellyfinServerUrl)
+    }
+
+    @Test
+    fun savedCatalogueWorksOnTransportFailureButNeverOnDeniedAuthentication() = runBlocking {
+        credStore.saveAuth(JellyfinAuth("token", "u", "srv", "Reader"))
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        val query = net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueQuery("books")
+        server.enqueue(MockResponse().setBody("""{"Items":[{"Id":"remote","Name":"Comic","Type":"Book","Container":"cbz"}],"TotalRecordCount":1}"""))
+        assertFalse(repository.listJellyfinCatalogue(query).getOrThrow().fromCache)
+        assertEquals("remote", repository.cachedJellyfinCatalogue(query)?.entries?.single()?.item?.id)
+        server.enqueue(MockResponse().setResponseCode(503))
+        assertTrue(repository.listJellyfinCatalogue(query).getOrThrow().fromCache)
+        server.enqueue(MockResponse().setResponseCode(401))
+        assertTrue(repository.listJellyfinCatalogue(query).isFailure)
+        credStore.saveAuth(JellyfinAuth("other", "other-user", "srv", "Other"))
+        assertNull(repository.cachedJellyfinCatalogue(query))
+        assertTrue(comicDao.getAll().isEmpty())
+        assertTrue(outboxDao.getPendingForUser("srv", "u").isEmpty())
     }
 
     private fun baseUrl(): String = server.url("/").toString().trimEnd('/')
@@ -108,6 +329,85 @@ class LibraryRepositoryJellyfinTest {
             }
         }
         return baos.toByteArray()
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun readOnDemandPublishesOnceOnlyAfterValidatedImport() = runBlocking {
+        kotlinx.coroutines.Dispatchers.setMain(kotlinx.coroutines.test.UnconfinedTestDispatcher())
+        val store = androidx.lifecycle.ViewModelStore()
+        try {
+            val auth = JellyfinAuth("token", "user", "server", "Reader")
+            credStore.saveAuth(auth)
+            settings.jellyfinServerUrl = baseUrl()
+            settings.jellyfinAllowInsecureHttp = true
+            val item = JellyfinItem("read-on-demand", "Fixture.cbz", false, container = "cbz")
+            val identity = JellyfinItemIdentity(auth.serverId, auth.userId, item.id)
+            val vm = net.digitalbc.leafreader.ui.library.LibraryViewModel(repository, settings,
+                loadJellyfinDetails = { Result.success(net.digitalbc.leafreader.data.jellyfin.JellyfinItemDetails(identity, item)) })
+            store.put("read", vm)
+            vm.openJellyfinDetail(item)
+            withTimeout(5000) { vm.jellyfinDetail.first { it?.loading == false && !it.checkingLocal } }
+            server.enqueue(MockResponse().setBody(okio.Buffer().write(createValidCbzBytes(3))))
+            vm.downloadJellyfinDetail(openWhenReady = true)
+            val ready = withTimeout(10000) { vm.jellyfinDetail.first { it?.readyComicId != null } }!!
+            val comic = comicDao.getById(ready.readyComicId!!)!!
+            assertEquals(3, comic.pageCount)
+            assertTrue(File(comic.filePath).isFile)
+            assertEquals(comic.id, vm.consumeJellyfinRead())
+            assertNull(vm.consumeJellyfinRead())
+            assertEquals("/Items/read-on-demand/Download", server.takeRequest().path)
+            assertEquals(1, server.requestCount)
+        } finally { clearModels(store); kotlinx.coroutines.Dispatchers.resetMain() }
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun cancelledReadOnDemandPublishesNoComicOrNavigation() = runBlocking {
+        kotlinx.coroutines.Dispatchers.setMain(kotlinx.coroutines.test.UnconfinedTestDispatcher())
+        val store = androidx.lifecycle.ViewModelStore()
+        try {
+            val auth = JellyfinAuth("token", "user", "server", "Reader")
+            credStore.saveAuth(auth)
+            settings.jellyfinServerUrl = baseUrl()
+            settings.jellyfinAllowInsecureHttp = true
+            val item = JellyfinItem("cancel-read", "Fixture.cbz", false, container = "cbz")
+            val identity = JellyfinItemIdentity(auth.serverId, auth.userId, item.id)
+            val vm = net.digitalbc.leafreader.ui.library.LibraryViewModel(repository, settings,
+                loadJellyfinDetails = { Result.success(net.digitalbc.leafreader.data.jellyfin.JellyfinItemDetails(identity, item)) })
+            store.put("read", vm)
+            vm.openJellyfinDetail(item)
+            withTimeout(5000) { vm.jellyfinDetail.first { it?.loading == false && !it.checkingLocal } }
+            server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.NO_RESPONSE))
+            vm.downloadJellyfinDetail(openWhenReady = true)
+            withTimeout(5000) { vm.importing.first { it } }
+            assertNotNull(server.takeRequest(5, TimeUnit.SECONDS))
+            vm.cancelImport()
+            withTimeout(5000) { vm.importing.first { !it } }
+            assertNull(vm.consumeJellyfinRead())
+            assertNull(linkDao.findLink("jellyfin", "server", "user", item.id))
+        } finally { clearModels(store); kotlinx.coroutines.Dispatchers.resetMain() }
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun downloadedMarkersRestartForTheCurrentAccount() = runBlocking {
+        Dispatchers.setMain(kotlinx.coroutines.test.UnconfinedTestDispatcher())
+        val store = androidx.lifecycle.ViewModelStore()
+        try {
+            credStore.saveAuth(JellyfinAuth("token", "first", "server", "Reader"))
+            retainedComic(JellyfinItemIdentity("server", "first", "first-item"))
+            retainedComic(JellyfinItemIdentity("server", "second", "second-item"))
+            val vm = net.digitalbc.leafreader.ui.library.LibraryViewModel(repository, settings)
+            store.put("library", vm)
+            withTimeout(5000) { vm.jellyfinBrowser.first { it.downloadedItemIds == setOf("first-item") } }
+            credStore.saveAuth(JellyfinAuth("token-2", "second", "server", "Reader"))
+            vm.refreshDownloadedJellyfinItems()
+            withTimeout(5000) { vm.jellyfinBrowser.first { it.downloadedItemIds == setOf("second-item") } }
+            credStore.clear()
+            vm.refreshDownloadedJellyfinItems()
+            assertTrue(vm.jellyfinBrowser.value.downloadedItemIds.isEmpty())
+        } finally { clearModels(store); Dispatchers.resetMain() }
     }
 
     @Test
@@ -139,6 +439,154 @@ class LibraryRepositoryJellyfinTest {
         repository.disconnectJellyfin()
         assertFalse(settings.hasJellyfinConfig)
         assertNull(repository.getJellyfinAuth())
+    }
+
+    @Test
+    fun emptyLocalLibraryCanBrowseRemoteCoversWithoutImportingComics() = runBlocking {
+        credStore.saveAuth(JellyfinAuth("token", "user", "server", "Reader"))
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        server.enqueue(MockResponse().setBody("""{"Items":[
+            {"Id":"remote","Name":"Remote comic","Type":"Book","Container":"cbz","ImageTags":{"Primary":"cover"}}
+        ],"TotalRecordCount":1}"""))
+        val page = repository.listJellyfinCatalogue(
+            net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueQuery("books")).getOrThrow()
+        assertEquals("remote", page.entries.single().item.id)
+        assertEquals("cover", page.entries.single().item.imageTag)
+        assertTrue(repository.comics.first().isEmpty())
+        assertNull(linkDao.findLink("jellyfin", "server", "user", "remote"))
+        assertTrue(outboxDao.getPendingForUser("server", "user").isEmpty())
+        val request = server.takeRequest()
+        assertEquals("GET", request.method)
+        assertTrue(request.path!!.startsWith("/Items?"))
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun detailReadIsScopedAndDoesNotDownloadOrWriteProgress() = runBlocking {
+        credStore.saveAuth(JellyfinAuth("tok-1", "u-1", "srv-1", "Bryan"))
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        server.enqueue(MockResponse().setBody("""{"Id":"item","Name":"Comic","Overview":"Summary"}"""))
+
+        val identity = JellyfinItemIdentity("srv-1", "u-1", "item")
+        val details = repository.getJellyfinItemDetails(identity).getOrThrow()
+
+        assertEquals(identity, details.identity)
+        assertEquals("Summary", details.overview)
+        assertEquals("/Items/item?UserId=u-1", server.takeRequest().path)
+        assertEquals(1, server.requestCount)
+        assertTrue(repository.getJellyfinItemDetails(identity.copy(userId = "other")).isFailure)
+        assertTrue(repository.getJellyfinItemDetails(identity.copy(serverId = "other")).isFailure)
+        assertEquals(1, server.requestCount)
+        assertTrue(linkDao.getLinksForUser("jellyfin", "srv-1", "u-1").isEmpty())
+        assertTrue(outboxDao.getPendingForUser("srv-1", "u-1").isEmpty())
+    }
+
+    @Test
+    fun disconnectDiscardsInFlightDetails() = runBlocking {
+        credStore.saveAuth(JellyfinAuth("tok-1", "u-1", "srv-1", "Bryan"))
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        val requested = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requested.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                return MockResponse().setBody("""{"Id":"item","Name":"Comic"}""")
+            }
+        }
+        val result = async(Dispatchers.IO) {
+            runCatching {
+                repository.getJellyfinItemDetails(JellyfinItemIdentity("srv-1", "u-1", "item"))
+            }
+        }
+        try {
+            assertTrue(requested.await(5, TimeUnit.SECONDS))
+            repository.disconnectJellyfin()
+        } finally {
+            release.countDown()
+        }
+        assertTrue(withTimeout(5_000) { result.await() }.exceptionOrNull() is CancellationException)
+        assertNull(repository.getJellyfinAuth())
+    }
+
+    private suspend fun retainedComic(identity: JellyfinItemIdentity): net.digitalbc.leafreader.data.db.ComicEntity {
+        val file = File(RuntimeEnvironment.getApplication().cacheDir, "retained-${java.util.UUID.randomUUID()}.cbz")
+        file.writeBytes(createValidCbzBytes(3))
+        val id = comicDao.insert(net.digitalbc.leafreader.data.db.ComicEntity(
+            title = "Retained comic", filePath = file.absolutePath, coverPath = null,
+            format = "cbz", pageCount = 3, lastPage = 1, lastSlot = 2,
+            dateAdded = 10L, lastOpened = 20L, source = "jellyfin",
+        ))
+        linkDao.insert(net.digitalbc.leafreader.data.db.RemoteComicLinkEntity(
+            comicId = id, provider = "jellyfin", serverId = identity.serverId,
+            userId = identity.userId, itemId = identity.itemId, downloadedAt = 10L,
+        ))
+        return comicDao.getById(id)!!
+    }
+
+    @Test
+    fun automaticCatalogueFetchDoesNotApplyRemoteProgressOrFlushPendingEdits() = runBlocking {
+        val identity = JellyfinItemIdentity("server", "user", "item")
+        val original = retainedComic(identity)
+        credStore.saveAuth(JellyfinAuth("token", identity.userId, identity.serverId, "Reader"))
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        outboxDao.upsert(JellyfinSyncOutboxEntity(
+            comicId = original.id, serverId = identity.serverId, userId = identity.userId,
+            itemId = identity.itemId, pageIndex = 1, markPlayed = false, revision = 5L,
+        ))
+        val pending = outboxDao.getPendingForComic(original.id)
+        server.enqueue(MockResponse().setBody(
+            """{"Items":[{"Id":"item","Name":"Comic","UserData":{"PlaybackPositionTicks":20000,"Played":true}}],"TotalRecordCount":1}"""
+        ))
+
+        // If this path accidentally launches the existing flush, let it complete rather than
+        // racing the assertions against a background job.
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(204))
+        val result = repository.listJellyfinItems("books", syncReadingProgress = false).getOrThrow()
+        repository.jellyfinSyncScope.coroutineContext[Job]?.children?.toList()?.forEach { it.join() }
+
+        assertEquals(1, result.items.size)
+        assertTrue(result.items.single().played)
+        assertEquals("GET", server.takeRequest().method)
+        assertEquals(1, server.requestCount)
+        assertEquals(original, comicDao.getById(original.id))
+        assertEquals(pending, outboxDao.getPendingForComic(original.id))
+    }
+
+    @Test
+    fun retainedComicOpensWithoutCredentialsOrNetworkAndPreservesProgress() = runBlocking {
+        val identity = JellyfinItemIdentity("server", "user", "item")
+        val original = retainedComic(identity)
+        assertNull(credStore.loadAuth())
+        assertEquals(original, repository.getReadableJellyfinComic(identity).getOrThrow())
+        assertNull(repository.getReadableJellyfinComic(identity.copy(userId = "other")).getOrThrow())
+        assertNull(repository.getReadableJellyfinComic(identity.copy(serverId = "other")).getOrThrow())
+        assertEquals(original, comicDao.getById(original.id))
+        assertTrue(outboxDao.getPendingForUser("server", "user").isEmpty())
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun unusableRetainedCopiesFailWithoutRemovingFilesRecordsOrProgress() = runBlocking {
+        for ((index, content) in listOf(byteArrayOf(), "corrupt zip".toByteArray(), createValidCbzBytes(1)).withIndex()) {
+            val identity = JellyfinItemIdentity("server", "user", "item-$index")
+            val original = retainedComic(identity)
+            val file = File(original.filePath)
+            file.writeBytes(content)
+            assertTrue(repository.getReadableJellyfinComic(identity).isFailure)
+            assertTrue(file.exists())
+            assertEquals(original, comicDao.getById(original.id))
+            assertNotNull(linkDao.findLink("jellyfin", "server", "user", identity.itemId))
+            file.delete()
+            assertTrue(repository.getReadableJellyfinComic(identity).isFailure)
+            assertEquals(original, comicDao.getById(original.id))
+        }
+        assertEquals(0, server.requestCount)
     }
 
     @Test
@@ -194,6 +642,30 @@ class LibraryRepositoryJellyfinTest {
         val repeatResult = repository.importJellyfinComic(item)
         assertTrue(repeatResult.isSuccess)
         assertEquals(comicId, repeatResult.getOrNull())
+    }
+
+    @Test
+    fun importPreservesDottedDisplayNamesAndStripsOnlyTheFileExtension() = runBlocking {
+        credStore.saveAuth(JellyfinAuth("tok", "u", "srv", "Bryan"))
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        val bytes = createValidCbzBytes()
+        val cases = listOf(
+            "King Spawn - Vol. 01" to "King Spawn - Vol. 01",
+            "King Spawn - Vol. 01.cbz" to "King Spawn - Vol. 01",
+            "King Spawn - Vol. 01.CBZ" to "King Spawn - Vol. 01",
+            "Dr. Strange" to "Dr. Strange",
+        )
+        for ((index, names) in cases.withIndex()) {
+            val (name, expectedTitle) = names
+            server.enqueue(MockResponse().setBody(okio.Buffer().write(bytes)))
+            val item = JellyfinItem(
+                id = "dotted-title-$index", name = name, isFolder = false, container = "cbz",
+            )
+            val comicId = repository.importJellyfinComic(item).getOrThrow()
+            assertEquals(name, expectedTitle, comicDao.getById(comicId)?.title)
+            assertEquals(name, linkDao.findByComicId(comicId)?.remoteName)
+        }
     }
 
     @Test
@@ -354,7 +826,7 @@ class LibraryRepositoryJellyfinTest {
         assertEquals("/Sessions/Playing/Progress", recorded.path)
         assertEquals("POST", recorded.method)
         val bodyStr = recorded.body.readUtf8()
-        val json = org.json.JSONObject(bodyStr)
+        val json = JSONObject(bodyStr)
         assertEquals("sync-item-1", json.getString("ItemId"))
         assertEquals(40000L, json.getLong("PositionTicks"))
     }
@@ -807,236 +1279,326 @@ class LibraryRepositoryJellyfinTest {
     }
 
     @Test
-    fun disconnectJellyfinCancelsInFlightBulkFlush() = runBlocking {
-        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
-        credStore.saveAuth(auth)
-        settings.jellyfinServerUrl = baseUrl()
-        settings.jellyfinAllowInsecureHttp = true
-        settings.jellyfinUserId = "u"
-
-        // Insert two comics and pending outbox entries
-        val comic1 = comicDao.insert(
-            net.digitalbc.leafreader.data.db.ComicEntity(
-                title = "Bulk Comic 1",
-                filePath = "/c1.cbz",
-                coverPath = null,
-                format = "CBZ",
-                pageCount = 10,
-                dateAdded = 1000L,
-                lastOpened = 1000L,
-            )
-        )
-        val comic2 = comicDao.insert(
-            net.digitalbc.leafreader.data.db.ComicEntity(
-                title = "Bulk Comic 2",
-                filePath = "/c2.cbz",
-                coverPath = null,
-                format = "CBZ",
-                pageCount = 10,
-                dateAdded = 1000L,
-                lastOpened = 1000L,
-            )
-        )
-
-        outboxDao.upsert(
-            JellyfinSyncOutboxEntity(
-                comicId = comic1,
-                serverId = "srv",
-                userId = "u",
-                itemId = "bulk-item-1",
-                pageIndex = 5,
-            )
-        )
-        outboxDao.upsert(
-            JellyfinSyncOutboxEntity(
-                comicId = comic2,
-                serverId = "srv",
-                userId = "u",
-                itemId = "bulk-item-2",
-                pageIndex = 10,
-            )
-        )
-
-        // First request is held / delayed
-        server.enqueue(
-            MockResponse()
-                .setResponseCode(204)
-                .setHeadersDelay(1000, TimeUnit.MILLISECONDS)
-        )
-
-        // Launch bulk flush in repository's jellyfinSyncScope
-        val config = JellyfinServerConfig(baseUrl(), true)
-        val flushJob = repository.jellyfinSyncScope.launch {
-            repository.flushJellyfinOutbox(config, auth)
-        }
-
-        // Wait briefly for first call to begin, then disconnect
-        kotlinx.coroutines.delay(200L)
-        repository.disconnectJellyfin()
-
-        flushJob.join()
-
-        // Consume first request
-        val req1 = server.takeRequest(5, TimeUnit.SECONDS)
-        assertNotNull(req1)
-
-        // Second request must NOT have been sent because session was disconnected and cancelled
-        val req2 = server.takeRequest(300, TimeUnit.MILLISECONDS)
-        assertNull("Second request in bulk flush must be cancelled on disconnect", req2)
+    fun disconnectCancelsBrowseTriggeredFlushAndKeepsPendingIntent() = runBlocking {
+        verifySessionCancellation(switchAccount = false, reconnect = false)
     }
 
     @Test
-    fun inFlightFlushDoesNotDeleteNewerSaveProgressOrLoseExplicitUnread() = runBlocking {
-        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
-        credStore.saveAuth(auth)
-        settings.jellyfinServerUrl = baseUrl()
-        settings.jellyfinAllowInsecureHttp = true
-        settings.jellyfinUserId = "u"
-
-        val comic = comicDao.insert(
-            net.digitalbc.leafreader.data.db.ComicEntity(
-                title = "Race Comic",
-                filePath = "/race.cbz",
-                coverPath = null,
-                format = "CBZ",
-                pageCount = 10,
-                dateAdded = 1000L,
-                lastOpened = 1000L,
-            )
-        )
-        linkDao.insert(
-            net.digitalbc.leafreader.data.db.RemoteComicLinkEntity(
-                comicId = comic,
-                provider = "jellyfin",
-                serverId = "srv",
-                userId = "u",
-                itemId = "race-item-1",
-                parentId = "root",
-                downloadedAt = 1000L,
-            )
-        )
-
-        // Initial save: page 4, revision 1
-        repository.saveProgress(comic, page = 4, slot = 0)
-        val initialOutbox = outboxDao.getPendingForComic(comic)
-        assertNotNull(initialOutbox)
-        assertEquals(4, initialOutbox?.pageIndex)
-        assertEquals(1L, initialOutbox?.revision)
-
-        // Enqueue delayed response for the first progress report
-        server.enqueue(
-            MockResponse()
-                .setResponseCode(204)
-                .setHeadersDelay(400, TimeUnit.MILLISECONDS)
-        )
-
-        // Launch flush in background
-        val config = JellyfinServerConfig(baseUrl(), true)
-        val flushJob = repository.jellyfinSyncScope.launch {
-            repository.flushJellyfinOutbox(config, auth)
-        }
-
-        // Wait briefly for flush to pick up revision 1 and start sending
-        kotlinx.coroutines.delay(100L)
-
-        // While request is in-flight, user saves page 0 with explicit unread
-        repository.saveProgress(comic, page = 0, slot = 0, explicitPlayed = false)
-        val midOutbox = outboxDao.getPendingForComic(comic)
-        assertNotNull(midOutbox)
-        assertEquals(0, midOutbox?.pageIndex)
-        assertEquals(false, midOutbox?.markPlayed)
-        assertEquals("Monotonic revision must increment on newer save", 2L, midOutbox?.revision)
-
-        // Wait for first flush to finish
-        flushJob.join()
-
-        // Verify the newer outbox row was NOT deleted by the older flush!
-        val preservedOutbox = outboxDao.getPendingForComic(comic)
-        assertNotNull("Outbox must NOT be deleted by stale in-flight response", preservedOutbox)
-        assertEquals(0, preservedOutbox?.pageIndex)
-        assertEquals(false, preservedOutbox?.markPlayed)
-        assertEquals(2L, preservedOutbox?.revision)
-
-        // Server consumes first progress request (page 4)
-        val req1 = server.takeRequest(5, TimeUnit.SECONDS)
-        assertNotNull(req1)
-        assertEquals("/Sessions/Playing/Progress", req1?.path)
-
-        // Enqueue responses for the second flush (progress for page 0 + unmark played)
-        server.enqueue(MockResponse().setResponseCode(204))
-        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
-
-        // Flush outbox again
-        repository.flushJellyfinOutbox(config, auth)
-
-        // Verify outbox entry is now deleted after successfully sending revision 2
-        assertNull("Outbox must be deleted after successfully syncing latest revision", outboxDao.getPendingForComic(comic))
-
-        // Verify server received page 0 progress and PlayedItems DELETE
-        val req2 = server.takeRequest(5, TimeUnit.SECONDS)
-        assertNotNull(req2)
-        assertEquals("/Sessions/Playing/Progress", req2?.path)
-
-        val req3 = server.takeRequest(5, TimeUnit.SECONDS)
-        assertNotNull(req3)
-        assertEquals("/Users/u/PlayedItems/race-item-1", req3?.path)
-        assertEquals("DELETE", req3?.method)
+    fun accountSwitchCancelsReconnectFlushAndIsolatesBothAccounts() = runBlocking {
+        verifySessionCancellation(switchAccount = true, reconnect = true)
     }
 
     @Test
-    fun concurrentFlushesForSameComicAreSerialized() = runBlocking {
-        val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
-        credStore.saveAuth(auth)
-        settings.jellyfinServerUrl = baseUrl()
-        settings.jellyfinAllowInsecureHttp = true
-        settings.jellyfinUserId = "u"
+    fun inFlightFlushPreservesNewerPageSave() = runBlocking {
+        verifyHeldSave(page = 6, played = null)
+    }
 
-        val comic = comicDao.insert(
-            net.digitalbc.leafreader.data.db.ComicEntity(
-                title = "Serialized Comic",
-                filePath = "/serialized.cbz",
-                coverPath = null,
-                format = "CBZ",
-                pageCount = 10,
-                dateAdded = 1000L,
-                lastOpened = 1000L,
-            )
-        )
-        linkDao.insert(
-            net.digitalbc.leafreader.data.db.RemoteComicLinkEntity(
-                comicId = comic,
-                provider = "jellyfin",
-                serverId = "srv",
-                userId = "u",
-                itemId = "ser-item-1",
-                parentId = "root",
-                downloadedAt = 1000L,
-            )
-        )
+    @Test
+    fun inFlightFlushPreservesExplicitRead() = runBlocking {
+        verifyHeldSave(page = 9, played = true)
+    }
 
-        repository.saveProgress(comic, page = 3, slot = 0)
+    @Test
+    fun inFlightFlushPreservesExplicitUnread() = runBlocking {
+        verifyHeldSave(page = 0, played = false)
+    }
 
-        // Enqueue one response
-        server.enqueue(MockResponse().setResponseCode(204))
+    private suspend fun verifyHeldSave(page: Int, played: Boolean?) {
+        val held = HeldProgress()
+        configureSync(held)
+        val comic = linkedComic("race-item")
+        saveOffline(comic, 4)
+        val initial = outboxDao.getPendingForComic(comic)!!
+        val flush = repository.jellyfinSyncScope.launch { repository.flushJellyfinOutbox() }
+        try {
+            withTimeout(5000) { held.started.await() }
+            saveOffline(comic, page, played)
+            val newer = outboxDao.getPendingForComic(comic)!!
+            assertEquals(initial.id, newer.id)
+            assertEquals(initial.revision + 1, newer.revision)
+            held.release.countDown()
+            withTimeout(5000) { flush.join() }
+            assertEquals(newer, outboxDao.getPendingForComic(comic))
 
-        val config = JellyfinServerConfig(baseUrl(), true)
-
-        // Launch bulk flush and per-comic debounce flush concurrently
-        val job1 = repository.jellyfinSyncScope.launch {
-            repository.flushJellyfinOutbox(config, auth)
+            repository.flushJellyfinOutbox()
+            assertNull(outboxDao.getPendingForComic(comic))
+            assertProgress(takeRequest(), "race-item", 4)
+            assertProgress(takeRequest(), "race-item", page)
+            if (played != null) assertPlayed(takeRequest(), "race-item", "u", played)
+            assertEquals(page * 10_000L, held.position.get())
+            assertEquals(played, held.played.get())
+            assertEquals(if (played == null) 2 else 3, server.requestCount)
+        } finally {
+            held.release.countDown()
+            flush.cancel()
         }
-        val job2 = repository.triggerJellyfinProgressSync(comic, page = 3, debounceMs = 0L)
+    }
 
-        job1.join()
-        job2?.join()
+    @Test
+    fun concurrentBulkAndPerComicFlushesSerializeAtHeldRequest() = runBlocking {
+        val held = HeldProgress()
+        configureSync(held)
+        val comic = linkedComic("serialized-item")
+        saveOffline(comic, 3)
+        val snapshot = outboxDao.getPendingForComic(comic)!!
+        val lookups = AtomicInteger()
+        val observedDao = object : JellyfinSyncOutboxDao by outboxDao {
+            override suspend fun getPendingForComic(comicId: Long): JellyfinSyncOutboxEntity? {
+                // Make the per-comic preflight lookup synchronous, so Unconfined runs to the mutex.
+                if (lookups.incrementAndGet() == 2) return snapshot
+                return outboxDao.getPendingForComic(comicId)
+            }
+        }
+        repository.jellyfinSyncScope.coroutineContext[Job]?.cancel()
+        repository = newRepository(held.client, outbox = observedDao,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
+        val bulk = repository.jellyfinSyncScope.launch { repository.flushJellyfinOutbox() }
+        var perComic: Job? = null
+        try {
+            withTimeout(5000) { held.started.await() }
+            perComic = repository.triggerJellyfinProgressSync(comic, 3, debounceMs = 0)
+            assertTrue(perComic!!.isActive)
+            assertEquals("Per-comic flush must wait before its locked re-read", 2, lookups.get())
+            held.release.countDown()
+            withTimeout(5000) { bulk.join(); perComic.join() }
+            assertNull(outboxDao.getPendingForComic(comic))
+            assertProgress(takeRequest(), "serialized-item", 3)
+            assertEquals("Only one send may acknowledge the shared pending row", 1, server.requestCount)
+        } finally {
+            held.release.countDown()
+            bulk.cancel()
+            perComic?.cancel()
+        }
+    }
 
-        // Outbox must be cleaned up
+    private suspend fun verifySessionCancellation(switchAccount: Boolean, reconnect: Boolean) {
+        val held = HeldProgress()
+        configureSync(held)
+        val comic = linkedComic("old-item")
+        val secondComic = linkedComic("old-second-item")
+        saveOffline(comic, 4, false)
+        saveOffline(secondComic, 5, true)
+        val oldPending = outboxDao.getPendingForUser("srv", "u")
+
+        try {
+            if (reconnect) {
+                assertTrue(repository.connectJellyfin(baseUrl(), true, "Bryan", "test-password").isSuccess)
+                assertEquals("/Users/AuthenticateByName", takeRequest().path)
+            } else {
+                assertTrue(repository.listJellyfinItems(parentId = null).isSuccess)
+                assertTrue(takeRequest().path!!.contains("/Items"))
+            }
+            withTimeout(5000) { held.started.await() }
+
+            if (switchAccount) {
+                val otherComic = linkedComic("new-item", user = "other")
+                outboxDao.upsert(JellyfinSyncOutboxEntity(
+                    comicId = otherComic, serverId = "srv", userId = "other",
+                    itemId = "new-item", pageIndex = 2, markPlayed = true,
+                ))
+                held.loginUser = "other"
+                assertTrue(repository.connectJellyfin(baseUrl(), true, "Other", "test-password").isSuccess)
+                assertProgress(takeRequest(), "old-item", 4)
+                assertEquals("/Users/AuthenticateByName", takeRequest().path)
+                withTimeout(5000) { held.cancelled.await() }
+                // Explicit flush also waits for the reconnect flush through the same mutex.
+                repository.flushJellyfinOutbox()
+                assertProgress(takeRequest(), "new-item", 2, token = "token-other")
+                assertPlayed(takeRequest(), "new-item", "other", true)
+                assertEquals("other", repository.getJellyfinAuth()?.userId)
+                assertEquals(0, outboxDao.countPendingForUser("srv", "other"))
+            } else {
+                repository.disconnectJellyfin()
+                withTimeout(5000) { held.cancelled.await() }
+                assertProgress(takeRequest(), "old-item", 4)
+                assertNull(repository.getJellyfinAuth())
+            }
+            assertEquals("Cancellation must retain unsent played intent and both rows", oldPending,
+                outboxDao.getPendingForUser("srv", "u"))
+            assertEquals(if (switchAccount) 5 else 2, server.requestCount)
+        } finally {
+            held.release.countDown()
+        }
+    }
+
+    @Test
+    fun pendingProgressAndUnreadSurviveDatabaseReopenAndFlush() = runBlocking {
+        repository.jellyfinSyncScope.coroutineContext[Job]?.cancel()
+        db.close()
+        val context = RuntimeEnvironment.getApplication()
+        context.deleteDatabase("sync-durability.db")
+        fun openDiskDb() = Room.databaseBuilder(context, AppDatabase::class.java, "sync-durability.db")
+            .allowMainThreadQueries().build()
+        db = openDiskDb()
+        refreshDaos()
+        val held = HeldProgress(hold = false)
+        configureSync(held)
+        val comic = linkedComic("durable-item")
+        saveOffline(comic, 0, false)
+        saveOffline(comic, 2)
+        val pending = outboxDao.getPendingForComic(comic)
+        assertEquals(false, pending?.markPlayed)
+        repository.jellyfinSyncScope.coroutineContext[Job]?.cancel()
+        db.close()
+        db = openDiskDb()
+        refreshDaos()
+        repository = newRepository(held.client)
+        assertEquals(2, comicDao.getById(comic)?.lastPage)
+        assertEquals(pending, outboxDao.getPendingForComic(comic))
+        repository.flushJellyfinOutbox()
+        assertProgress(takeRequest(), "durable-item", 2)
+        assertPlayed(takeRequest(), "durable-item", "u", false)
         assertNull(outboxDao.getPendingForComic(comic))
+    }
 
-        // Exactly one network progress request should have been processed (second one skips because outbox is empty)
-        val req = server.takeRequest(5, TimeUnit.SECONDS)
-        assertNotNull(req)
-        val extra = server.takeRequest(200, TimeUnit.MILLISECONDS)
-        assertNull("Redundant concurrent flush must not send duplicate request", extra)
+    @Test
+    fun failedPlayedStatusRetainsIntentUntilBothRequestsSucceed() = runBlocking {
+        val held = HeldProgress(hold = false)
+        configureSync(held)
+        val comic = linkedComic("retry-item")
+        saveOffline(comic, 0, false)
+        val pending = outboxDao.getPendingForComic(comic)
+        held.failNextPlayed = true
+        repository.flushJellyfinOutbox()
+        assertEquals(pending, outboxDao.getPendingForComic(comic))
+        assertProgress(takeRequest(), "retry-item", 0)
+        assertPlayed(takeRequest(), "retry-item", "u", false)
+        assertNull(held.played.get())
+
+        repository.flushJellyfinOutbox()
+        assertProgress(takeRequest(), "retry-item", 0)
+        assertPlayed(takeRequest(), "retry-item", "u", false)
+        assertEquals(false, held.played.get())
+        assertNull(outboxDao.getPendingForComic(comic))
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
+    fun outboxInsertFailureRollsBackLocalProgressAndSendsNothing() = runBlocking {
+        val held = HeldProgress(hold = false)
+        configureSync(held)
+        val comic = linkedComic("rollback-item")
+        db.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER reject_outbox BEFORE INSERT ON jellyfin_sync_outbox BEGIN SELECT RAISE(ABORT, 'injected outbox failure'); END"
+        )
+        val failure = runCatching { repository.saveProgress(comic, 7, 2, explicitPlayed = true) }.exceptionOrNull()
+        assertNotNull("Injected SQLite failure must propagate", failure)
+        assertEquals(0, comicDao.getById(comic)?.lastPage)
+        assertEquals(0, comicDao.getById(comic)?.lastSlot)
+        assertNull(outboxDao.getPendingForComic(comic))
+        assertEquals(0, server.requestCount)
+    }
+
+    private fun refreshDaos() {
+        comicDao = db.comicDao()
+        linkDao = db.remoteComicLinkDao()
+        outboxDao = db.jellyfinSyncOutboxDao()
+    }
+
+    private fun newRepository(
+        client: JellyfinClient,
+        outbox: JellyfinSyncOutboxDao = outboxDao,
+        scope: CoroutineScope = CoroutineScope(
+            SupervisorJob() + Dispatchers.IO),
+    ) = LibraryRepository(
+        RuntimeEnvironment.getApplication(), comicDao, settings, db.readingListDao(), db,
+        remoteComicLinkDao = linkDao, jellyfinSyncOutboxDao = outbox,
+        jellyfinClient = client, jellyfinCredentialStore = credStore, jellyfinSyncScope = scope,
+    )
+
+    private fun configureSync(held: HeldProgress) {
+        repository.jellyfinSyncScope.coroutineContext[Job]?.cancel()
+        repository = newRepository(held.client)
+        server.dispatcher = held
+        credStore.saveAuth(JellyfinAuth("token-u", "u", "srv", "Bryan"))
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+    }
+
+    private suspend fun linkedComic(item: String, user: String = "u"): Long {
+        val id = comicDao.insert(net.digitalbc.leafreader.data.db.ComicEntity(
+            title = item, filePath = "/$item.cbz", coverPath = null, format = "CBZ",
+            pageCount = 10, dateAdded = 1000, lastOpened = 1000,
+        ))
+        linkDao.insert(net.digitalbc.leafreader.data.db.RemoteComicLinkEntity(
+            comicId = id, provider = "jellyfin", serverId = "srv", userId = user, itemId = item,
+        ))
+        return id
+    }
+
+    private suspend fun saveOffline(comic: Long, page: Int, played: Boolean? = null) {
+        // Persist with no configured endpoint so no debounce can race test-driven flushes.
+        settings.jellyfinServerUrl = ""
+        try {
+            repository.saveProgress(comic, page, 0, explicitPlayed = played)
+        } finally {
+            settings.jellyfinServerUrl = baseUrl()
+        }
+    }
+
+    private fun takeRequest(): RecordedRequest =
+        requireNotNull(server.takeRequest(5, TimeUnit.SECONDS)) { "Expected a Jellyfin request" }
+
+    private fun assertProgress(
+        request: RecordedRequest, item: String, page: Int, token: String = "token-u",
+    ) {
+        assertEquals("POST", request.method)
+        assertEquals("/Sessions/Playing/Progress", request.path)
+        assertTrue(request.getHeader("Authorization")!!.contains(token))
+        val payload = JSONObject(request.body.readUtf8())
+        assertEquals(item, payload.getString("ItemId"))
+        assertEquals(page * 10_000L, payload.getLong("PositionTicks"))
+    }
+
+    private fun assertPlayed(request: RecordedRequest, item: String, user: String, played: Boolean) {
+        assertEquals(if (played) "POST" else "DELETE", request.method)
+        assertEquals("/Users/$user/PlayedItems/$item", request.path)
+    }
+
+    private class HeldProgress(private val hold: Boolean = true) : Dispatcher() {
+        val started = CompletableDeferred<Unit>()
+        val cancelled = CompletableDeferred<Unit>()
+        val release = CountDownLatch(1)
+        val position = AtomicLong(-1)
+        val played = AtomicReference<Boolean?>(null)
+        @Volatile var loginUser = "u"
+        @Volatile var failNextPlayed = false
+        private val first = AtomicBoolean(true)
+        val client = JellyfinClient("sync-test", customHttpClient = OkHttpClient.Builder()
+            .eventListener(object : EventListener() {
+                override fun callFailed(call: Call, ioe: IOException) {
+                    if (call.request().url.encodedPath == "/Sessions/Playing/Progress" && call.isCanceled()) {
+                        cancelled.complete(Unit)
+                    }
+                }
+            }).build())
+
+        override fun dispatch(request: RecordedRequest): MockResponse {
+            val path = request.requestUrl!!.encodedPath
+            if (path == "/Users/AuthenticateByName") {
+                return MockResponse().setBody(
+                    """{"AccessToken":"token-$loginUser","ServerId":"srv","User":{"Id":"$loginUser","Name":"Test"}}"""
+                )
+            }
+            if (request.method == "GET") {
+                return MockResponse().setBody("""{"Items":[],"TotalRecordCount":0,"StartIndex":0}""")
+            }
+            if (path == "/Sessions/Playing/Progress") {
+                if (hold && first.compareAndSet(true, false)) {
+                    started.complete(Unit)
+                    if (!release.await(10, TimeUnit.SECONDS)) return MockResponse().setResponseCode(500)
+                }
+                val json = JSONObject(request.body.clone().readUtf8())
+                position.set(json.getLong("PositionTicks"))
+            } else if (path.contains("/PlayedItems/")) {
+                if (failNextPlayed) {
+                    failNextPlayed = false
+                    return MockResponse().setResponseCode(500)
+                }
+                played.set(request.method == "POST")
+            }
+            return MockResponse().setResponseCode(204)
+        }
     }
 }

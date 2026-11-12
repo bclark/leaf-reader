@@ -128,6 +128,25 @@ class AppSettings internal constructor(private val prefs: android.content.Shared
             .apply()
     }
 
+    /** Called off the main thread, only after the library restore transaction succeeds. */
+    internal fun restoreBackupPreferences(backup: net.digitalbc.leafreader.data.backup.BackupSettings) {
+        val fitMode = runCatching {
+            net.digitalbc.leafreader.ui.reader.PageFitMode.valueOf(backup.pageFitMode)
+        }.getOrDefault(net.digitalbc.leafreader.ui.reader.PageFitMode.FIT_PAGE)
+        val saved = prefs.edit()
+            .putBoolean(KEY_DEFAULT_RTL, backup.defaultRightToLeft)
+            .putBoolean(KEY_AMOLED, backup.amoledTheme)
+            .putBoolean(KEY_PAGE_SLIDE, backup.pageSlideEnabled)
+            .putString(KEY_PAGE_FIT_MODE, fitMode.name)
+            .putBoolean(KEY_PORTRAIT_SPREAD, backup.portraitSpread)
+            .putBoolean(KEY_LANDSCAPE_SPREAD, backup.landscapeSpread)
+            .putInt(KEY_LIBRARY_COLUMNS, backup.libraryColumns)
+            .commit()
+        if (!saved) throw java.io.IOException(
+            "Library restored, but preferences could not be saved. Retry the restore."
+        )
+    }
+
     private companion object {
         fun loadPreferences(context: Context): android.content.SharedPreferences {
             val leafPrefs = context.getSharedPreferences("leaf.settings", Context.MODE_PRIVATE)

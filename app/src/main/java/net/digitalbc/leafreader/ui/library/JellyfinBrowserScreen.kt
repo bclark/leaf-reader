@@ -3,9 +3,18 @@ package net.digitalbc.leafreader.ui.library
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +53,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,6 +68,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import net.digitalbc.leafreader.R
 import net.digitalbc.leafreader.data.jellyfin.JellyfinBrowserState
 import net.digitalbc.leafreader.data.jellyfin.JellyfinFailureKind
@@ -83,8 +96,13 @@ import net.digitalbc.leafreader.ui.theme.PaperWhiteMuted
 fun JellyfinBrowserScreen(
     viewModel: LibraryViewModel,
     onBack: () -> Unit,
+    onOpenComic: (Long) -> Unit,
+    onOpenLocal: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val browser by viewModel.jellyfinBrowser.collectAsStateWithLifecycle()
+    val detail by viewModel.jellyfinDetail.collectAsStateWithLifecycle()
+    val positions = rememberSaveableStateHolder()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
     val importDetail by viewModel.importDetail.collectAsStateWithLifecycle()
@@ -95,10 +113,24 @@ fun JellyfinBrowserScreen(
         onDispose { viewModel.cancelJellyfinBrowse() }
     }
 
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.refreshJellyfinLocalCopy()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(detail?.readyComicId) {
+        viewModel.consumeJellyfinRead()?.let(onOpenComic)
+    }
+
     val selectedCount = browser.selectedItemIds.size
 
-    BackHandler(enabled = !importing) {
-        if (selectedCount > 0) {
+    BackHandler(enabled = !importing && (detail != null || selectedCount > 0 || !browser.isRoot)) {
+        if (detail != null) {
+            viewModel.closeJellyfinDetail()
+        } else if (selectedCount > 0) {
             viewModel.clearJellyfinSelection()
         } else if (!browser.isRoot) {
             viewModel.navigateJellyfinUp()
@@ -114,21 +146,68 @@ fun JellyfinBrowserScreen(
         }
     }
 
+    val cover: @Composable (JellyfinItem, Modifier) -> Unit = { item, modifier ->
+        val loader = remember(viewModel, item.id, item.imageTag) {
+            suspend { viewModel.loadJellyfinCover(item) }
+        }
+        JellyfinCover(item, modifier, loader)
+    }
+
+    detail?.let { state ->
+        val currentItem = state.details?.item ?: state.item
+        val heroBitmap by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(
+            null, viewModel, currentItem.id, currentItem.imageTag, state.details?.fromCache == true) {
+            value = viewModel.loadJellyfinCover(currentItem)
+        }
+        val creatorNavigation = LocalCreatorNavigation.current
+        positions.SaveableStateProvider("detail:${state.identity}") {
+        Box(Modifier.fillMaxSize()) {
+            JellyfinDetailScreen(
+                state = state,
+                onRead = {
+                    if (state.localComic != null) viewModel.refreshJellyfinLocalCopy(openWhenReady = true)
+                    else viewModel.downloadJellyfinDetail(openWhenReady = true)
+                },
+                onCheckCopy = { viewModel.refreshJellyfinLocalCopy() },
+                importing = importing,
+                importProgress = importProgress,
+                importDetail = importDetail,
+                onBack = { viewModel.closeJellyfinDetail() },
+                onRetry = { viewModel.retryJellyfinDetail() },
+                onDownload = { viewModel.downloadJellyfinDetail() },
+                onCancel = { viewModel.cancelImport() },
+                cover = { _, modifier -> JellyfinCoverImage(heroBitmap, modifier) },
+                heroBitmap = heroBitmap,
+                onCreator = creatorNavigation,
+            )
+            SnackbarHost(snackbarHostState, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
+        }
+        }
+        return
+    }
+
+    positions.SaveableStateProvider(viewModel.jellyfinBrowsePositionKey(browser.currentParentId)) {
     JellyfinBrowserScreenContent(
         browser = browser,
+        itemCover = cover,
         importing = importing,
         importProgress = importProgress,
         importDetail = importDetail,
         snackbarHostState = snackbarHostState,
-        onBack = onBack,
+        onBack = {
+            if (!browser.isRoot) viewModel.navigateJellyfinUp() else onBack()
+        },
+        onOpenLocal = onOpenLocal,
+        onOpenLibraries = { viewModel.loadJellyfinRoot() },
+        onOpenSettings = onOpenSettings,
         onClearSelection = { viewModel.clearJellyfinSelection() },
         onSelectAll = { viewModel.selectAllJellyfin() },
         onToggleSelection = { viewModel.toggleJellyfinSelection(it) },
         onItemClick = { item ->
             if (item.isFolder) {
                 viewModel.loadJellyfinFolder(item.id, item.name)
-            } else if (item.isImportable && item.id !in browser.downloadedItemIds) {
-                viewModel.toggleJellyfinSelection(item.id)
+            } else {
+                viewModel.openJellyfinDetail(item)
             }
         },
         onViewClick = { view ->
@@ -143,12 +222,13 @@ fun JellyfinBrowserScreen(
         onCancelImport = { viewModel.cancelImport() },
         onRetry = {
             if (browser.isRoot) {
-                viewModel.loadJellyfinRoot()
+                viewModel.ensureJellyfinLanding(force = true)
             } else {
                 browser.currentParentId?.let { viewModel.loadJellyfinFolder(it, browser.currentTitle) }
             }
         },
     )
+    }
 }
 
 @Composable
@@ -168,6 +248,14 @@ fun JellyfinBrowserScreenContent(
     onCancelImport: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenLocal: () -> Unit = {},
+    onOpenLibraries: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+    folderListState: LazyListState = rememberLazyListState(),
+    libraryListState: LazyListState = rememberLazyListState(),
+    itemCover: @Composable (JellyfinItem, Modifier) -> Unit = { item, coverModifier ->
+        JellyfinCover(item, coverModifier)
+    },
 ) {
     val selectedCount = browser.selectedItemIds.size
     val importableItems = remember(browser.items, browser.downloadedItemIds) {
@@ -232,6 +320,30 @@ fun JellyfinBrowserScreenContent(
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedButton(onClick = onOpenLocal,
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) {
+                Text(stringResource(R.string.library_title), fontFamily = Archivo)
+            }
+            TextButton(onClick = onOpenLibraries, modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) {
+                Text(stringResource(R.string.jellyfin_libraries_action), fontFamily = Archivo)
+            }
+            TextButton(onClick = onOpenSettings, modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) {
+                Text(stringResource(R.string.jellyfin_settings_action), fontFamily = Archivo)
             }
         }
 
@@ -321,6 +433,7 @@ fun JellyfinBrowserScreenContent(
                         JellyfinEmptyStateView(isRoot = true)
                     } else {
                         LazyColumn(
+                            state = libraryListState,
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxSize().padding(top = 8.dp),
                         ) {
@@ -337,6 +450,7 @@ fun JellyfinBrowserScreenContent(
                         JellyfinEmptyStateView(isRoot = false)
                     } else {
                         LazyColumn(
+                            state = folderListState,
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 4.dp),
                         ) {
@@ -349,6 +463,8 @@ fun JellyfinBrowserScreenContent(
                                     isDownloaded = isDownloaded,
                                     isSelected = isSelected,
                                     onClick = { onItemClick(item) },
+                                    onToggleSelection = { onToggleSelection(item.id) },
+                                    cover = itemCover,
                                 )
                             }
                         }
@@ -669,153 +785,58 @@ private fun JellyfinViewRow(
 }
 
 @Composable
-private fun JellyfinItemRow(
+internal fun JellyfinItemRow(
     item: JellyfinItem,
     isDownloaded: Boolean,
     isSelected: Boolean,
     onClick: () -> Unit,
+    onToggleSelection: () -> Unit,
+    cover: @Composable (JellyfinItem, Modifier) -> Unit,
+    showSelection: Boolean = true,
 ) {
-    val shape = RoundedCornerShape(6.dp)
-    val bgColor = if (isSelected) {
-        Ochre.copy(alpha = 0.15f)
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
-    }
-    val borderColor = if (isSelected) Ochre else Color.Transparent
-
-    val isToggleable = !item.isFolder && item.isImportable && !isDownloaded
-    val isButtonClickable = item.isFolder
-
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = 48.dp)
-            .clip(shape)
-            .background(bgColor)
-            .border(1.dp, borderColor, shape)
-            .then(
-                when {
-                    isToggleable -> Modifier.toggleable(
-                        value = isSelected,
-                        role = Role.Checkbox,
-                        onValueChange = { onClick() },
-                    )
-                    isButtonClickable -> Modifier.clickable(
-                        role = Role.Button,
-                        onClick = onClick,
-                    )
-                    else -> Modifier
-                }
-            )
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer
+                else MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Icon(
-            if (item.isFolder) Icons.Default.Folder else Icons.AutoMirrored.Filled.MenuBook,
-            contentDescription = if (item.isFolder) "Folder" else "Comic",
-            tint = if (item.isFolder) Ochre else LeafAccent,
-            modifier = Modifier.size(22.dp),
-        )
-        Spacer(Modifier.size(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                item.name,
-                fontFamily = Archivo,
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        if (item.isFolder) {
+            Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.size(48.dp))
+        } else {
+            cover(item, Modifier.size(width = 48.dp, height = 72.dp))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(item.name, fontFamily = Archivo, fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (!item.isFolder) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = 2.dp),
-                ) {
-                    Text(
-                        item.fileExtension.uppercase(),
-                        fontFamily = Archivo,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.tertiary,
-                    )
-                    if (item.sizeBytes > 0) {
-                        Text(
-                            "•  ${formatFileSize(item.sizeBytes)}",
-                            fontFamily = Archivo,
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    if (item.played) {
-                        Text(
-                            "•  ${stringResource(R.string.jellyfin_badge_read)}",
-                            fontFamily = Archivo,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 10.sp,
-                            color = LeafAccent,
-                        )
-                    } else if (item.playbackPositionTicks > 0L) {
-                        Text(
-                            "•  PAGE ${JellyfinProgress.ticksToPage(item.playbackPositionTicks) + 1}",
-                            fontFamily = Archivo,
-                            fontSize = 10.sp,
-                            color = Ochre,
-                        )
-                    }
+                Text(listOfNotNull(
+                    item.fileExtension.uppercase(),
+                    item.sizeBytes.takeIf { it > 0L }?.let(::formatFileSize),
+                ).joinToString(" · "), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (item.played || item.playbackPositionTicks > 0L) {
+                    Text(stringResource(if (item.played) R.string.jellyfin_read_on_server
+                        else R.string.jellyfin_in_progress_on_server),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (isDownloaded) {
+                    Text(stringResource(R.string.jellyfin_badge_downloaded),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
-
-        if (isDownloaded) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(LeafAccent.copy(alpha = 0.2f))
-                    .padding(horizontal = 6.dp, vertical = 3.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Check,
-                        contentDescription = stringResource(R.string.jellyfin_badge_downloaded),
-                        tint = LeafAccent,
-                        modifier = Modifier.size(12.dp),
-                    )
-                    Text(
-                        stringResource(R.string.jellyfin_badge_downloaded),
-                        fontFamily = Archivo,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 9.sp,
-                        color = LeafAccent,
-                    )
-                }
-            }
-        } else if (item.isImportable) {
-            Box(
-                modifier = Modifier
-                    .size(20.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .border(
-                        1.5.dp,
-                        if (isSelected) Ochre else MaterialTheme.colorScheme.onSurfaceVariant,
-                        RoundedCornerShape(4.dp),
-                    )
-                    .background(if (isSelected) Ochre else Color.Transparent),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (isSelected) {
-                    Icon(
-                        Icons.Default.Check,
-                        contentDescription = "Selected",
-                        tint = Ink,
-                        modifier = Modifier.size(14.dp),
-                    )
-                }
-            }
+        if (showSelection && !item.isFolder && item.isImportable && !isDownloaded) {
+            val label = stringResource(R.string.jellyfin_select_download, item.name)
+            Checkbox(checked = isSelected, onCheckedChange = { onToggleSelection() },
+                modifier = Modifier.size(48.dp).semantics { contentDescription = label })
         }
     }
 }
