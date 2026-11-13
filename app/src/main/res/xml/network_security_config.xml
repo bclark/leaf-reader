@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Network security configuration for Leaf.
-     HTTPS with system CAs is standard. Cleartext HTTP is permitted for local network
-     Jellyfin servers (e.g. 192.168.x.x, .local) only after explicit user confirmation
-     and strict private IP/LAN host verification in JellyfinServerConfig. -->
+<!-- The platform base configuration permits cleartext; it does not enforce LAN-only traffic.
+     JellyfinServerConfig requires explicit consent and a local HTTP host spelling.
+     JellyfinClient additionally validates the resolved address candidates used by direct
+     cleartext connections and enforces redirect rules. HTTPS uses system CAs. -->
 <network-security-config xmlns:tools="http://schemas.android.com/tools">
     <base-config cleartextTrafficPermitted="true" tools:ignore="InsecureBaseConfiguration">
         <trust-anchors>
