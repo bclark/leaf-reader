@@ -266,7 +266,7 @@ fun LibraryScreen(
                     LibraryFilter.READING_LISTS -> JellyfinCatalogueView.LISTS
                     LibraryFilter.OFFLINE -> JellyfinCatalogueView.DOWNLOADED
                 }
-                if (catalogue.state.value.search != searchQuery.trim()) delay(300)
+                if (searchQuery.isNotBlank() && catalogue.state.value.search != searchQuery.trim()) delay(300)
                 catalogue.browse(target, searchQuery, unreadOnly)
             }
         }
