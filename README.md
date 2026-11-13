@@ -13,19 +13,27 @@
   <img src="https://img.shields.io/badge/architecture-Kotlin%20Multiplatform-7F52FF.svg" alt="Kotlin Multiplatform">
 </p>
 
+## A look inside Leaf
+
 <p align="center">
-  <img src="docs/screens/spread.png" width="850" alt="Two-Page Spread Reading Mode">
+  <a href="docs/screens/readme/reader-spread.png"><img src="docs/screens/readme/reader-spread.png" width="850" alt="Leaf displaying two pages of Pepper&amp;Carrot side by side, with page navigation controls"></a>
+  <br>
+  <em>Room for the whole story. Two-page reading on a wide display.</em>
 </p>
 
 <p align="center">
-  <img src="docs/screens/library.png" width="22%" alt="Comic Library with Series Stacks">
+  <a href="docs/screens/readme/library.png"><img src="docs/screens/readme/library.png" width="30%" alt="Leaf library with a comic series, a reading list and import controls"></a>
   &nbsp;
-  <img src="docs/screens/series.png" width="22%" alt="Series Detail View">
+  <a href="docs/screens/readme/series.png"><img src="docs/screens/readme/series.png" width="30%" alt="Pepper and Carrot series collection with three issues and reading progress"></a>
   &nbsp;
-  <img src="docs/screens/lists.png" width="22%" alt="Reading Lists Stacks">
-  &nbsp;
-  <img src="docs/screens/reader.png" width="22%" alt="In-Reader Navigation & Controls">
+  <a href="docs/screens/readme/sources.png"><img src="docs/screens/readme/sources.png" width="30%" alt="Leaf's Add Comics menu offering Files, SMB Drive and Jellyfin"></a>
+  <br>
+  <em>Your library · Series at a glance · Bring your own comics</em>
 </p>
+
+Actual app captures from the November 2026 screenshot set, not UI mockups. Tap any image for a closer look. The source chooser shows available import options, not a connected server. Appearance can vary by platform and version.
+
+Comic artwork: [**Pepper&Carrot**](https://www.peppercarrot.com) by **David Revoy**, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Displayed in Leaf and resized/cropped naturally by the app. No affiliation or endorsement implied. Comics are not bundled with Leaf. [Screenshot sources and credits](docs/screens/readme/README.md).
 
 ---
 
