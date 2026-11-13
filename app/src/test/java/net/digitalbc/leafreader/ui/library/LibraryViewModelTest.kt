@@ -321,6 +321,180 @@ class LibraryViewModelTest {
     }
 
     @Test
+    fun seriesNameSearchKeepsMembersAvailableForDrillDown() = runBlocking {
+        val member = createComic(1, "Issue 1").copy(series = "Forest")
+        fakeComicDao.setComics(listOf(member, createComic(2, "Other")))
+        viewModel.setSearchQuery("forest")
+        val matching = withTimeout(3000) { viewModel.comics.first { it.isNotEmpty() } }
+        assertEquals(listOf(member), matching)
+    }
+
+    @Test
+    fun coverSelectionsSurviveBrowseAndPreferencesAndClearOnlyRemoteOnAccountChange() {
+        configureJellyfin()
+        var auth = JellyfinAuth("token", "user", "server", "Reader")
+        val vm = detailViewModel(auth = { auth }) { Result.failure(IllegalStateException("unused")) }
+        vm.rememberCoverSelection("remote:scoped-run", "second")
+        vm.rememberCoverSelection("local:3:Run:", "local-second")
+        vm.setLibraryFilter(LibraryFilter.SERIES)
+        vm.refreshLibraryPreferences()
+        vm.refreshDownloadedJellyfinItems()
+        assertEquals("second", vm.coverSelections.value["remote:scoped-run"])
+        assertEquals("local-second", vm.coverSelections.value["local:3:Run:"])
+        auth = auth.copy(userId = "other")
+        vm.refreshDownloadedJellyfinItems()
+        assertFalse(vm.coverSelections.value.containsKey("remote:scoped-run"))
+        assertEquals("local-second", vm.coverSelections.value["local:3:Run:"])
+    }
+
+    @Test
+    fun preparedRowsPublishTheSameBrowseContextAsTheirItems() = runBlocking {
+        fakeComicDao.setComics(listOf(
+            createComic(1, "Forest 1").copy(series = "Forest"),
+            createComic(2, "Forest 2", lastPage = 5).copy(series = "Forest")))
+        viewModel.setSearchQuery("Forest")
+        viewModel.setLibraryFilter(LibraryFilter.SERIES)
+        viewModel.unreadOnly.value = true
+        val prepared = withTimeout(3000) { viewModel.libraryRows.first {
+            it.filter == LibraryFilter.SERIES && it.query == "Forest" && it.unreadOnly
+        } }
+        assertEquals(listOf(1L), (prepared.items.single() as LibraryItem.SeriesStack).issues.map { it.id })
+        assertEquals(setOf(1L), prepared.selectableComicIds)
+    }
+
+    @Test
+    fun returningToSearchRestoresLoadedPagesWithoutRestartingAtPageOne() {
+        configureJellyfin()
+        var requests = 0
+        val vm = JellyfinCatalogueViewModel(repository, settings, defaultDispatcher = testDispatcher,
+            ioDispatcher = testDispatcher, restore = { null }, readIndex = { null }, saveIndex = { _, _, _ -> },
+            views = { Result.success(listOf(JellyfinView("books", "Comics", "books"))) },
+            fetch = { query ->
+                requests++
+                val entries = if (query.search.isBlank()) emptyList() else listOf(
+                    net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueEntry(
+                        JellyfinItem("result-${query.startIndex}", "Run", false, container = "cbz"), "Book", false))
+                Result.success(net.digitalbc.leafreader.data.jellyfin.JellyfinCataloguePage(entries,
+                    if (entries.isEmpty()) 0 else query.startIndex + 1,
+                    if (entries.isEmpty()) 0 else 3, entries.isNotEmpty() && query.startIndex < 2))
+            })
+        stores += ViewModelStore().apply { put("search-pages", vm) }
+        vm.ensure()
+        vm.browse(net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.ALL, "run", false)
+        vm.load(more = true)
+        assertEquals(2, vm.state.value.entries.size)
+        val before = requests
+        vm.browse(net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.DOWNLOADED, "", false)
+        vm.browse(net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.ALL, "run", false)
+        assertEquals(listOf("result-0", "result-1"), vm.state.value.entries.map { it.item.id })
+        assertEquals(2, vm.state.value.nextIndex)
+        assertEquals(before, requests)
+    }
+
+    @Test
+    fun menuPreferencesRefreshWithoutChangingBrowseOrUnreadState() {
+        viewModel.setLibraryFilter(LibraryFilter.OFFLINE)
+        viewModel.unreadOnly.value = true
+        viewModel.setSearchQuery("forest")
+        settings.libraryColumns = 4
+        settings.defaultRightToLeft = true
+        viewModel.refreshLibraryPreferences()
+        assertEquals(4, viewModel.libraryColumns.value)
+        assertTrue(viewModel.defaultRightToLeft.value)
+        assertEquals(LibraryFilter.OFFLINE, viewModel.libraryFilter.value)
+        assertTrue(viewModel.unreadOnly.value)
+        assertEquals("forest", viewModel.searchQuery.value)
+    }
+
+    @Test
+    fun independentUnreadQueriesServerScopeAndPreservesCollectionsAndOfflineChoice() {
+        configureJellyfin()
+        val queries = mutableListOf<net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueQuery>()
+        val vm = JellyfinCatalogueViewModel(repository, settings, defaultDispatcher = testDispatcher,
+            ioDispatcher = testDispatcher, restore = { null }, readIndex = { null }, saveIndex = { _, _, _ -> },
+            views = { Result.success(listOf(JellyfinView("books", "Comics", "books"))) },
+            fetch = { query ->
+                queries += query
+                Result.success(net.digitalbc.leafreader.data.jellyfin.JellyfinCataloguePage(emptyList(), 0, 0, false))
+            })
+        stores += ViewModelStore().apply { put("independent-unread", vm) }
+        vm.ensure()
+        vm.browse(net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.SERIES, "forest", true)
+        assertEquals(net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.UNREAD, queries.last().view)
+        assertEquals("forest", queries.last().search)
+        assertTrue(vm.state.value.unreadOnly)
+        vm.browse(net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.LISTS, "", true)
+        assertEquals(net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.LISTS, queries.last().view)
+        vm.openCollection(JellyfinItem("collection", "Ordered", true))
+        assertEquals("collection", queries.last().collectionId)
+        assertEquals(net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.UNREAD, queries.last().view)
+        vm.closeCollection()
+        assertTrue(vm.state.value.unreadOnly)
+        viewModel.setLibraryFilter(LibraryFilter.OFFLINE)
+        viewModel.unreadOnly.value = true
+        vm.refresh()
+        assertEquals(LibraryFilter.OFFLINE, viewModel.libraryFilter.value)
+        assertTrue(viewModel.unreadOnly.value)
+    }
+
+    @Test
+    fun offlineCollectionUsesSavedUnreadPagesWithoutMixingPaginationScopes() {
+        configureJellyfin()
+        val library = JellyfinView("books", "Comics", "books")
+        val first = net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueEntry(
+            JellyfinItem("first", "First issue", false, container = "cbz"), "Book", false)
+        val second = first.copy(item = first.item.copy(id = "second", name = "Second issue"))
+        val read = first.copy(item = first.item.copy(id = "read"), played = true)
+        val unknown = first.copy(item = first.item.copy(id = "unknown"), played = null)
+        for (fullMembershipCached in listOf(false, true)) {
+            val cachedQueries = mutableListOf<net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueQuery>()
+            val vm = JellyfinCatalogueViewModel(repository, settings,
+                defaultDispatcher = testDispatcher, ioDispatcher = testDispatcher,
+                views = { Result.failure(java.io.IOException("Offline")) },
+                fetch = { error("Offline collection must use saved pages") },
+                restore = { net.digitalbc.leafreader.data.jellyfin.JellyfinSavedCatalogue(
+                    listOf(library), library,
+                    net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueIndex(emptyList(), true, 0, 0, 1, 1)) },
+                cached = { query ->
+                    cachedQueries += query
+                    if (query.collectionId != "collection" || query.limit != 30 || query.search.isNotEmpty()) null
+                    else when {
+                        query.view == net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.LISTS &&
+                            fullMembershipCached && query.startIndex == 0 ->
+                            net.digitalbc.leafreader.data.jellyfin.JellyfinCataloguePage(
+                                listOf(first, read, unknown), 30, 60, true, fromCache = true)
+                        query.view == net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.UNREAD ->
+                            if (query.startIndex == 0)
+                                net.digitalbc.leafreader.data.jellyfin.JellyfinCataloguePage(
+                                    listOf(first), 30, 31, true, fromCache = true)
+                            else net.digitalbc.leafreader.data.jellyfin.JellyfinCataloguePage(
+                                listOf(second), 31, 31, false, fromCache = true)
+                        else -> null
+                    }
+                })
+            stores += ViewModelStore().apply { put("offline-collection-$fullMembershipCached", vm) }
+            vm.ensure()
+            vm.browse(net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.LISTS, "", true)
+            vm.openCollection(JellyfinItem("collection", "Ordered", true))
+            assertEquals(if (fullMembershipCached) listOf("first") else listOf("first", "second"),
+                vm.state.value.entries.map { it.item.id })
+            assertEquals(fullMembershipCached, vm.state.value.partialSearch)
+            assertNull(vm.state.value.error)
+            if (fullMembershipCached) assertFalse(cachedQueries.any {
+                it.collectionId == "collection" &&
+                    it.view == net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.UNREAD
+            })
+            vm.search("Second")
+            assertEquals(if (fullMembershipCached) emptyList<String>() else listOf("second"),
+                vm.state.value.entries.map { it.item.id })
+            vm.browse(net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.LISTS, "", false)
+            assertEquals(if (fullMembershipCached) listOf("first", "read", "unknown") else emptyList<String>(),
+                vm.state.value.entries.map { it.item.id })
+            assertEquals(!fullMembershipCached, vm.state.value.error != null)
+        }
+    }
+
+    @Test
     fun catalogueRetainsEachViewPaginationAndRejectsAnOldAccountResponse() = runBlocking {
         configureJellyfin()
         val requests = mutableListOf<net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueQuery>()
@@ -689,7 +863,8 @@ class LibraryViewModelTest {
             Result.success(JellyfinItemDetails(identity, item, overview = "Synopsis"))
         }
         vm.setSearchQuery("forest")
-        vm.setLibraryFilter(LibraryFilter.UNREAD)
+        vm.setLibraryFilter(LibraryFilter.ALL)
+        vm.unreadOnly.value = true
         val before = vm.jellyfinBrowser.value
         vm.openJellyfinDetail(item)
         assertEquals("Synopsis", vm.jellyfinDetail.value?.details?.overview)
@@ -698,7 +873,8 @@ class LibraryViewModelTest {
         assertNull(vm.jellyfinDetail.value)
         assertEquals(before, vm.jellyfinBrowser.value)
         assertEquals("forest", vm.searchQuery.value)
-        assertEquals(LibraryFilter.UNREAD, vm.libraryFilter.value)
+        assertEquals(LibraryFilter.ALL, vm.libraryFilter.value)
+        assertTrue(vm.unreadOnly.value)
         assertEquals(1, requests)
     }
 
@@ -942,7 +1118,7 @@ class LibraryViewModelTest {
         val read = createComic(2, "Issue 2", pageCount = 20, lastPage = 19)
         fakeComicDao.setComics(listOf(unread, read))
 
-        viewModel.setLibraryFilter(LibraryFilter.UNREAD)
+        viewModel.unreadOnly.value = true
 
         val items = withTimeout(3000) {
             viewModel.libraryItems.first { it.isNotEmpty() }

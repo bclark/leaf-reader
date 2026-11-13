@@ -101,10 +101,14 @@ fun ReadingListDetailScreen(
     val requestedDownloads by viewModel.downloadedOnly.collectAsStateWithLifecycle()
     val downloadedOnly = requestedDownloads || offlineDownloads
     val readable by viewModel.readableComics.collectAsStateWithLifecycle()
-    val members = if (downloadedOnly) allMembers.filter { member ->
+    val unreadOnly by viewModel.unreadOnly.collectAsStateWithLifecycle()
+    val scopedMembers = if (downloadedOnly) allMembers.filter { member ->
         readable.any { it.id == member.comic?.id }
     } else allMembers
-    val listComics = members.mapNotNull { it.comic }
+    val members = if (unreadOnly) scopedMembers.filter {
+        it.comic?.let { comic -> comic.lastPage == 0 } ?: (it.remote?.played == false)
+    } else scopedMembers
+    val listComics = scopedMembers.mapNotNull { it.comic }
     val detail by viewModel.jellyfinDetail.collectAsStateWithLifecycle()
     var selectedMember by remember { mutableStateOf<LibraryViewModel.ListMember?>(null) }
     val allComics by viewModel.comics.collectAsStateWithLifecycle()
@@ -121,7 +125,7 @@ fun ReadingListDetailScreen(
     }
     val actualColumns = libraryColumns.coerceIn(2, availableColumns.last())
 
-    val allCompleted = members.isNotEmpty() && members.size == listComics.size && listComics.all { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
+    val allCompleted = scopedMembers.isNotEmpty() && scopedMembers.size == listComics.size && listComics.all { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
     val nextUnread = listComics.firstOrNull { it.pageCount > 0 && it.lastPage < it.pageCount - 1 }
         ?: listComics.firstOrNull()
 
@@ -268,6 +272,7 @@ fun ReadingListDetailScreen(
                         androidx.compose.material3.FilterChip(selected = downloadedOnly, enabled = !offlineDownloads,
                             onClick = { viewModel.downloadedOnly.value = !downloadedOnly },
                             label = { Text("Downloaded only") }, modifier = Modifier.heightIn(min = 48.dp))
+                        UnreadOnlyControl(unreadOnly, { viewModel.unreadOnly.value = it })
                         Text("${allMembers.size} list members · ${members.size} shown")
                     }
                 }
@@ -297,10 +302,10 @@ fun ReadingListDetailScreen(
                                 val completedCount = listComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
                                 val statusText = if (members.isEmpty()) {
                                     "0 SHOWN"
-                                } else if (members.size != listComics.size) {
-                                    "${members.size} MEMBERS · LOCAL STATUS PARTIAL"
+                                } else if (scopedMembers.size != listComics.size) {
+                                    "${scopedMembers.size} MEMBERS · LOCAL STATUS PARTIAL"
                                 } else {
-                                    "$completedCount OF ${members.size} READ"
+                                    "$completedCount OF ${scopedMembers.size} READ"
                                 }
                                 Box(
                                     modifier = Modifier
@@ -325,7 +330,7 @@ fun ReadingListDetailScreen(
 
                                 if (listComics.isNotEmpty()) {
                                     val completedCount = listComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-                                    val progressFraction = completedCount.toFloat() / members.size.coerceAtLeast(1)
+                                    val progressFraction = completedCount.toFloat() / scopedMembers.size.coerceAtLeast(1)
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -344,7 +349,7 @@ fun ReadingListDetailScreen(
                             }
 
                             // Bulk actions apply only when every visible member is a local copy.
-                            if (listComics.isNotEmpty() && members.size == listComics.size && !downloadedOnly) {
+                            if (listComics.isNotEmpty() && scopedMembers.size == listComics.size && !downloadedOnly) {
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -425,7 +430,7 @@ fun ReadingListDetailScreen(
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text(
-                                    text = if (downloadedOnly) "NO DOWNLOADED MEMBERS" else "THIS LIST IS EMPTY",
+                                    text = if (unreadOnly) "NO UNREAD MEMBERS" else if (downloadedOnly) "NO DOWNLOADED MEMBERS" else "THIS LIST IS EMPTY",
                                     fontFamily = Anton,
                                     fontSize = 16.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,

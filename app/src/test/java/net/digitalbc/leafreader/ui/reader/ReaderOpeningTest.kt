@@ -1,6 +1,7 @@
 package net.digitalbc.leafreader.ui.reader
 
 import android.graphics.Bitmap
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.ViewModelStore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -28,8 +29,13 @@ import java.util.zip.ZipOutputStream
 class ReaderOpeningTest {
     private val main = UnconfinedTestDispatcher()
     private val stores = mutableListOf<ViewModelStore>()
+    private val viewModelJobs = mutableListOf<Job>()
     @Before fun setup() { Dispatchers.setMain(main) }
-    @After fun cleanup() { stores.forEach { it.clear() }; Dispatchers.resetMain() }
+    @After fun cleanup() {
+        stores.forEach { it.clear() }
+        runBlocking { viewModelJobs.forEach { it.join() } }
+        Dispatchers.resetMain()
+    }
 
     private fun image(): ByteArray = ByteArrayOutputStream().use { out ->
         Bitmap.createBitmap(32, 64, Bitmap.Config.ARGB_8888).apply {
@@ -50,6 +56,7 @@ class ReaderOpeningTest {
     private fun reader(dao: FakeDao): ReaderViewModel {
         val context = RuntimeEnvironment.getApplication()
         return ReaderViewModel(1, LibraryRepository(context, dao, AppSettings(context)), NoopPanelSource).also {
+            viewModelJobs += it.viewModelScope.coroutineContext[Job]!!
             stores += ViewModelStore().apply { put("reader", it) }
         }
     }

@@ -17,6 +17,7 @@ data class CatalogueState(
     val view: JellyfinCatalogueView = JellyfinCatalogueView.ALL,
     val collection: JellyfinItem? = null,
     val search: String = "",
+    val unreadOnly: Boolean = false,
     val entries: List<JellyfinCatalogueEntry> = emptyList(),
     val nextIndex: Int = 0,
     val total: Int = 0,
@@ -80,13 +81,14 @@ class JellyfinCatalogueViewModel(
     private var indexGeneration = 0L
     private var index: JellyfinCatalogueIndex? = null
     private var lastCheck = 0L
-    private val pages = mutableMapOf<Triple<JellyfinCatalogueView, String?, String>, CatalogueState>()
+    private data class PageKey(val view: JellyfinCatalogueView, val collection: String?, val search: String, val unread: Boolean)
+    private val pages = mutableMapOf<PageKey, CatalogueState>()
 
     val downloads: StateFlow<List<ComicEntity>> = repository.readableComics
 
     private fun currentScope() = listOf(settings.jellyfinServerUrl, settings.jellyfinServerId, settings.jellyfinUserId)
     val positionScope: String get() = currentScope().joinToString(":") { "${it.length}:$it" }
-    private fun key(s: CatalogueState) = Triple(s.view, s.collection?.id, s.search)
+    private fun key(s: CatalogueState) = PageKey(s.view, s.collection?.id, s.search, s.unreadOnly)
     private fun denied(kind: JellyfinFailureKind?) =
         kind == JellyfinFailureKind.AUTHENTICATION || kind == JellyfinFailureKind.ACCESS_DENIED
 
@@ -302,6 +304,21 @@ class JellyfinCatalogueViewModel(
             refreshing = base.refreshing, indexError = base.indexError, accountScope = base.accountScope,
             libraries = base.libraries, library = base.library)
 
+    /** Apply the independent filter and scope together so only the final query is requested. */
+    fun browse(view: JellyfinCatalogueView, search: String, unreadOnly: Boolean) {
+        val before = _state.value
+        val query = search.trim()
+        if (before.view == view && before.search == query && before.unreadOnly == unreadOnly) return
+        pages[key(before)] = before.copy(loading = false)
+        job?.cancel()
+        ++generation
+        val base = before.copy(view = view, collection = if (view == before.view) before.collection else null,
+            search = query, unreadOnly = unreadOnly, entries = emptyList(), nextIndex = 0,
+            total = 0, hasMore = false, loaded = false, loading = false, error = null)
+        _state.value = project(restorePage(base))
+        if (!_state.value.usesIndex && view != JellyfinCatalogueView.DOWNLOADED && !_state.value.loaded) load()
+    }
+
     fun select(view: JellyfinCatalogueView) {
         if (view == _state.value.view && _state.value.collection == null) return
         pages[key(_state.value)] = _state.value.copy(loading = false)
@@ -351,7 +368,7 @@ class JellyfinCatalogueViewModel(
                 val q = before.search.lowercase()
                 val source = index?.entries.orEmpty()
                 val entries = withContext(defaultDispatcher) { source.filter {
-                    (before.view != JellyfinCatalogueView.UNREAD || it.played == false) &&
+                    ((before.view != JellyfinCatalogueView.UNREAD && !before.unreadOnly) || it.played == false) &&
                         (before.creator == null || it.people.any(before.creator::matches)) &&
                         (it.item.name.contains(q, true) || it.item.seriesName?.contains(q, true) == true ||
                             it.folder?.name?.contains(q, true) == true)
@@ -360,18 +377,22 @@ class JellyfinCatalogueViewModel(
                     loaded = true, hasMore = false, error = null)
                 return@launch
             }
-            if (before.offline && before.collection != null && before.search.isNotBlank() && !denied(before.launchFailure)) {
+            if (before.offline && before.collection != null && !denied(before.launchFailure)) {
                 val members = linkedMapOf<String, JellyfinCatalogueEntry>()
-                var position = 0
+                var query = JellyfinCatalogueQuery(library.id, before.view, before.collection.id, limit = 30)
+                var saved = cached(query)
+                if (saved == null && before.unreadOnly) {
+                    query = query.copy(view = JellyfinCatalogueView.UNREAD)
+                    saved = cached(query)
+                }
                 var complete = false
-                do {
-                    val saved = cached(JellyfinCatalogueQuery(library.id, before.view, before.collection.id,
-                        "", position)) ?: break
+                while (saved != null) {
                     saved.entries.forEach { members[it.item.id] = it }
                     complete = !saved.hasMore
-                    if (saved.nextIndex <= position) break
-                    position = saved.nextIndex
-                } while (!complete)
+                    if (complete || saved.nextIndex <= query.startIndex) break
+                    query = query.copy(startIndex = saved.nextIndex)
+                    saved = cached(query)
+                }
                 if (!isActive || !valid(request, captured)) return@launch
                 val entries = withContext(defaultDispatcher) { members.values.filter {
                     it.item.name.contains(before.search, true) || it.item.seriesName?.contains(before.search, true) == true
@@ -381,7 +402,9 @@ class JellyfinCatalogueViewModel(
                     error = if (members.isEmpty() && !complete) "No saved collection membership is available. Connect to search this collection." else null)
                 return@launch
             }
-            val query = JellyfinCatalogueQuery(library.id, before.view, before.collection?.id,
+            val queryView = if (before.unreadOnly && (before.view != JellyfinCatalogueView.LISTS || before.collection != null))
+                JellyfinCatalogueView.UNREAD else before.view
+            val query = JellyfinCatalogueQuery(library.id, queryView, before.collection?.id,
                 before.search, if (more) before.nextIndex else 0, limit = 30, creator = before.creator)
             val result = if (before.offline) cached(query)?.let { Result.success(it) }
                 ?: Result.failure(java.io.IOException("No saved page for this scope"))

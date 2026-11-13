@@ -31,6 +31,7 @@ class JellyfinCredentialStore(
 
     @Synchronized
     fun saveAuth(auth: JellyfinAuth) {
+        require(auth.serverId != "jellyfin-server") { "Server identity must be verified" }
         try {
             val json = JSONObject().apply {
                 put("accessToken", auth.accessToken)
@@ -70,10 +71,14 @@ class JellyfinCredentialStore(
                 val decryptedBytes = cipher.doFinal(cipherText)
                 val json = JSONObject(String(decryptedBytes, Charsets.UTF_8))
 
+                val serverId = json.getString("serverId")
+                // Legacy placeholder identities need explicit reconnection before remote access.
+                if (serverId == "jellyfin-server") return null
+
                 JellyfinAuth(
                     accessToken = json.getString("accessToken"),
                     userId = json.getString("userId"),
-                    serverId = json.getString("serverId"),
+                    serverId = serverId,
                     username = json.getString("username"),
                     serverName = json.optString("serverName", "").ifBlank { null },
                 )

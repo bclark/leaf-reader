@@ -372,3 +372,22 @@ Physical baseline verification now covers distinct real Series groups, bounded v
 Bryan approved **All · Series · Lists · Offline** at the top of Library with a one-tap **Unread only** toolbar toggle and a removable chip while active. This supersedes the earlier main-header placement of Unread and Downloaded. The Offline tab uses the existing cross-source readable-copy rules and unreachable-launch fallback. The existing ability to narrow an opened Series or List to local copies remains part of the contract. Unread only applies within each view and carries across tabs.
 
 [Android and iOS handoff](../../../leaf-reader-design/docs/LIBRARY-OFFLINE-UNREAD.txt) and [approved Figma section](https://www.figma.com/design/fJAnpiOo1Mzr1rAVk09hRu?node-id=6-1638). Design approval is recorded. Implementation and candidate acceptance remain open.
+
+
+## Android Offline/Unread header development checkpoint · 2026-11-13 UTC
+
+The approved header is implemented in the isolated Android worktree at `21b3fac` plus uncommitted changes. All / Series / Lists / Offline, global Unread and removable chip are connected to native local/remote projections and detail filtering. Offline uses validated readable copies. List identity/membership/order and Continue availability/order are preserved. Compact S25 checks pass on exact debug `6d61e983…8fc69be` and optimized `ea8de8f0…d70d64` candidates for tabs, Unread, search/members/Back, peeled-cover preservation and scrolled tab/Menu restoration. Both flavor unit suites have 200 passes/one expected SMB-live skip, zero failures/errors, and both lints/assemblies pass.
+
+This contributes bounded Android evidence to JF-A01/A02/A04/A08/A09. Existing parity ledger and whole-feature acceptance states remain open. Native iOS results keep their separately recorded scope. Adaptive/accessibility/localization, unavailable local fixtures, unreachable cold launch/reconnect, broader lifecycle/two-client/upgrade/privacy/licensing/release checks remain pending. [Android exact-source handoff and regression history](../local/android-offline-unread-20261112/README.md), [engineering coordination](../ANDROID_ENG_NOTES.md). Shared board stays In Progress while the Android slice awaits review/integration.
+
+
+### Android header review correction · 2026-11-13 UTC
+
+The continuing Android review corrected exact-query saved-collection lookup for 30-record pages and independent Unread, with stable pagination scope and honest partial coverage. It also keeps local Series Continue/totals/Add membership available when Unread hides every displayed issue. The new cache regression was reproduced before the fix. Both flavor suites now have 201 passes/one expected skip, zero failures/errors, with both lints and debug/optimized assemblies passing. Optimized `f58e73ba…4b28ccf` is installed/checksum verified and passes the existing compact S25 header/peel/restoration/search journey. [Updated exact-source review and evidence limits](../local/android-offline-unread-20261112/review-followup/README.md). New offline-collection and empty-Unread local Series physical fixtures remain pending. Prior parity ledger/checklist states and native iOS evidence retain their recorded scope. Shared card remains In Progress.
+
+
+## Owner answers for T-02 and T-03 · 2026-11-13 02:04 UTC
+
+Bryan selected “Ask which position to keep” for Q-019/T-02. When unsent device progress differs from the server position, retain both and ask which to keep. This supersedes historical pending-decision statements, while implementation and two-client/device acceptance remain open.
+
+Bryan selected “Keep until manually removed” for Q-020/T-03. Read/Continue copies stay until manual removal. Explicit Downloads and device/Files/SMB originals remain protected. This authorizes the retention contract and its verification. Historical question/evidence records are preserved in Android engineering notes.

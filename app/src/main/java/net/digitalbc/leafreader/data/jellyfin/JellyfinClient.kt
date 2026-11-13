@@ -84,9 +84,10 @@ class JellyfinClient(
                 val userObj = json.getJSONObject("User")
                 val userId = userObj.getString("Id")
                 val userName = userObj.optString("Name", username)
-                val serverId = json.optString("ServerId", "").ifBlank {
-                    json.optJSONObject("SessionInfo")?.optString("ServerId", "") ?: "jellyfin-server"
-                }
+                val serverId = sequenceOf(json, json.optJSONObject("SessionInfo"))
+                    .mapNotNull { (it?.opt("ServerId") as? String)?.trim()?.takeIf(String::isNotEmpty) }
+                    .firstOrNull()
+                require(serverId != null && serverId != "jellyfin-server") { "Server identity is missing" }
 
                 JellyfinAuth(
                     accessToken = token,

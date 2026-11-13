@@ -7,6 +7,7 @@ import net.digitalbc.leafreader.data.db.ReadingListItemEntity
 internal data class LibraryProjectionInput(
     val allComics: List<ComicEntity>, val lists: List<ReadingListEntity>,
     val allListItems: List<ReadingListItemEntity>, val query: String, val filter: LibraryFilter,
+    val unreadOnly: Boolean = false, val readableIds: Set<Long> = emptySet(),
 )
 
 /** Pure row preparation, executed on Default by LibraryViewModel, never by a lazy item. */
@@ -40,7 +41,7 @@ internal fun projectLibrary(input: LibraryProjectionInput): List<LibraryItem> = 
             }
         } else emptyList()
 
-        when (filter) {
+        val projected = when (filter) {
             LibraryFilter.ALL -> {
                 val seriesGroups = filteredComics
                     .filter { !it.series.isNullOrBlank() }
@@ -113,9 +114,18 @@ internal fun projectLibrary(input: LibraryProjectionInput): List<LibraryItem> = 
                 }.sortedBy { it.seriesName.lowercase() }
             }
             LibraryFilter.READING_LISTS -> readingListCards
-            LibraryFilter.UNREAD -> {
-                val unreadComics = filteredComics.filter { it.lastPage == 0 }
-                unreadComics.map { LibraryItem.SingleComic(it) }
+            LibraryFilter.OFFLINE -> filteredComics.filter { it.id in readableIds }
+                .map { LibraryItem.SingleComic(it) }
+        }
+        if (!unreadOnly) projected else projected.mapNotNull { item ->
+            when (item) {
+                is LibraryItem.SingleComic -> item.takeIf { it.comic.lastPage == 0 }
+                is LibraryItem.SeriesStack -> item.issues.filter { it.lastPage == 0 }
+                    .takeIf { it.isNotEmpty() }?.let { issues ->
+                        item.copy(issues = issues, topCoverComic = issues.first(),
+                            totalIssues = issues.size, unreadIssues = issues.size)
+                    }
+                is LibraryItem.ReadingListItem -> item
             }
         }
 

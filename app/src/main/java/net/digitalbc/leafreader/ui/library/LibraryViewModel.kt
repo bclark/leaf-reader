@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.firstOrNull
@@ -50,7 +51,7 @@ enum class LibraryFilter(val label: String) {
     ALL("ALL"),
     SERIES("SERIES"),
     READING_LISTS("LISTS"),
-    UNREAD("UNREAD"),
+    OFFLINE("OFFLINE"),
 }
 
 sealed interface LibraryItem {
@@ -72,6 +73,14 @@ sealed interface LibraryItem {
         val itemCount: Int,
     ) : LibraryItem
 }
+
+data class LibraryRows(
+    val filter: LibraryFilter? = null,
+    val query: String = "",
+    val unreadOnly: Boolean = false,
+    val items: List<LibraryItem> = emptyList(),
+    val selectableComicIds: Set<Long> = emptySet(),
+)
 
 data class JellyfinDetailState(
     val item: JellyfinItem,
@@ -107,10 +116,22 @@ class LibraryViewModel(
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
     val downloadedOnly = MutableStateFlow(false)
+    val unreadOnly = MutableStateFlow(false)
+    private val _coverSelections = MutableStateFlow<Map<String, String>>(emptyMap())
+    val coverSelections = _coverSelections.asStateFlow()
+
+    fun rememberCoverSelection(key: String, comicId: String) {
+        _coverSelections.update { it + (key to comicId) }
+    }
     val readableComics = repository.readableComics
 
     private val _libraryFilter = MutableStateFlow(LibraryFilter.ALL)
     val libraryFilter: StateFlow<LibraryFilter> = _libraryFilter.asStateFlow()
+
+    fun refreshLibraryPreferences() {
+        _libraryColumns.value = settings.libraryColumns
+        _defaultRightToLeft.value = settings.defaultRightToLeft
+    }
 
     fun setLibraryFilter(filter: LibraryFilter) {
         _libraryFilter.value = filter
@@ -120,20 +141,36 @@ class LibraryViewModel(
         list to query.trim()
     }.mapLatest { (list, query) ->
         withContext(defaultDispatcher) {
-            if (query.isBlank()) list else list.filter { it.title.contains(query, ignoreCase = true) }
+            if (query.isBlank()) list else list.filter { it.title.contains(query, ignoreCase = true) ||
+                it.series?.contains(query, ignoreCase = true) == true }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val readingLists: StateFlow<List<ReadingListEntity>> =
         repository.readingLists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val libraryItems: StateFlow<List<LibraryItem>> = combine(
+    val libraryRows: StateFlow<LibraryRows> = combine(
         repository.comics, repository.readingLists, repository.allReadingListItems, _searchQuery, _libraryFilter,
     ) { rows, lists, items, query, filter ->
         LibraryProjectionInput(rows, lists, items, query, filter)
-    }.mapLatest { input ->
-        withContext(defaultDispatcher) { projectLibrary(input) }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    }.combine(unreadOnly) { input, unread -> input.copy(unreadOnly = unread) }
+        .combine(readableComics) { input, readable -> input to readable }
+        .mapLatest { (input, readable) ->
+        withContext(defaultDispatcher) {
+            val items = projectLibrary(input.copy(readableIds = readable.map { it.id }.toSet()))
+            val selectableIds = items.flatMap { item ->
+                when (item) {
+                    is LibraryItem.SingleComic -> listOf(item.comic.id)
+                    is LibraryItem.SeriesStack -> item.issues.map { it.id }
+                    is LibraryItem.ReadingListItem -> emptyList()
+                }
+            }.toSet()
+            LibraryRows(input.filter, input.query, input.unreadOnly, items, selectableIds)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryRows())
+
+    val libraryItems: StateFlow<List<LibraryItem>> = libraryRows.map { it.items }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Global default reading direction applied to newly imported comics. */
     private val _defaultRightToLeft = MutableStateFlow(settings.defaultRightToLeft)
@@ -208,6 +245,7 @@ class LibraryViewModel(
         val account = auth?.let { Triple(settings.jellyfinServerUrl, it.serverId, it.userId) }
         if (account == downloadedAccount && downloadedObserver != null) return
         downloadedObserver?.cancel()
+        _coverSelections.update { selections -> selections.filterKeys { it.startsWith("local:") } }
         downloadedAccount = account
         _jellyfinBrowser.update { JellyfinBrowserLogic.updateDownloadedIds(it, emptySet()) }
         _downloadedCopies.value = emptyMap()
