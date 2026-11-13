@@ -83,6 +83,27 @@ class JellyfinCatalogueViewModel(
     private var lastCheck = 0L
     private data class PageKey(val view: JellyfinCatalogueView, val collection: String?, val search: String, val unread: Boolean)
     private val pages = mutableMapOf<PageKey, CatalogueState>()
+    private var progressDuringIndex = mutableMapOf<String, JellyfinProgressUpdate>()
+    private var progressDuringLoad = mutableMapOf<String, JellyfinProgressUpdate>()
+
+    private fun observed(entries: List<JellyfinCatalogueEntry>, updates: Map<String, JellyfinProgressUpdate>) =
+        updates.values.fold(entries) { rows, update -> update.apply(rows) }
+
+    init {
+        viewModelScope.launch {
+            repository.progressUpdates.collect { update ->
+                if (!repository.isCurrentProgressUpdate(update) || _state.value.accountScope != positionScope)
+                    return@collect
+                if (_state.value.indexing) progressDuringIndex[update.identity.itemId] = update
+                if (_state.value.loading) progressDuringLoad[update.identity.itemId] = update
+                index = index?.let { it.copy(entries = update.apply(it.entries)) }
+                fun patched(state: CatalogueState) = state.copy(entries = update.apply(state.entries),
+                    indexedEntries = update.apply(state.indexedEntries))
+                pages.replaceAll { _, page -> patched(page) }
+                _state.update { project(patched(it)) }
+            }
+        }
+    }
 
     val downloads: StateFlow<List<ComicEntity>> = repository.readableComics
 
@@ -199,6 +220,7 @@ class JellyfinCatalogueViewModel(
         val old = index
         val wasOffline = _state.value.offline
         val update = JellyfinIndexUpdate(old)
+        val observations = mutableMapOf<String, JellyfinProgressUpdate>().also { progressDuringIndex = it }
         lastCheck = elapsedNanos()
         _state.value = _state.value.copy(indexing = true, refreshing = manual, indexError = null,
             loading = if (_state.value.usesIndex) old == null else _state.value.loading, error = null)
@@ -230,7 +252,7 @@ class JellyfinCatalogueViewModel(
                             }.associateBy { it.item.id }).values.toList()
                     }
                     if (!isActive || request != indexGeneration || captured != currentScope()) return@launch
-                    index = JellyfinCatalogueIndex(raw, false, page.nextIndex, page.total,
+                    index = JellyfinCatalogueIndex(observed(raw, observations), false, page.nextIndex, page.total,
                         System.currentTimeMillis(), old?.lastCompletedAt ?: 0)
                     _state.value = project(_state.value.copy(loading = if (_state.value.usesIndex) false else _state.value.loading,
                         loaded = true, offline = false, launchFailure = null, browsingSaved = false))
@@ -248,9 +270,9 @@ class JellyfinCatalogueViewModel(
                         update.append(page.copy(entries = enriched), System.currentTimeMillis())
                     }
                     if (!isActive || request != indexGeneration || captured != currentScope()) return@launch
-                    saveIndex(library.id, snapshot, captured)
+                    saveIndex(library.id, snapshot.copy(entries = observed(snapshot.entries, observations)), captured)
                     if (!isActive || request != indexGeneration || captured != currentScope()) return@launch
-                    index = snapshot
+                    index = snapshot.copy(entries = observed(snapshot.entries, observations))
                     _state.value = project(_state.value.copy(loading = if (_state.value.usesIndex) false else _state.value.loading,
                         loaded = true, offline = false, launchFailure = null, browsingSaved = false))
                     next = page.nextIndex
@@ -361,6 +383,7 @@ class JellyfinCatalogueViewModel(
         job?.cancel()
         val request = ++generation
         val captured = currentScope()
+        val observations = mutableMapOf<String, JellyfinProgressUpdate>().also { progressDuringLoad = it }
         _state.value = before.copy(loading = true, error = null)
         job = viewModelScope.launch {
             if (before.offline && before.collection == null && before.view != JellyfinCatalogueView.LISTS &&
@@ -373,7 +396,7 @@ class JellyfinCatalogueViewModel(
                         (it.item.name.contains(q, true) || it.item.seriesName?.contains(q, true) == true ||
                             it.folder?.name?.contains(q, true) == true)
                 } }
-                if (valid(request, captured)) _state.value = before.copy(entries = entries, loading = false,
+                if (valid(request, captured)) _state.value = before.copy(entries = observed(entries, observations), loading = false,
                     loaded = true, hasMore = false, error = null)
                 return@launch
             }
@@ -398,7 +421,7 @@ class JellyfinCatalogueViewModel(
                     it.item.name.contains(before.search, true) || it.item.seriesName?.contains(before.search, true) == true
                 } }
                 if (!isActive || !valid(request, captured)) return@launch
-                _state.value = before.copy(entries = entries, loading = false, loaded = true, hasMore = false, partialSearch = !complete,
+                _state.value = before.copy(entries = observed(entries, observations), loading = false, loaded = true, hasMore = false, partialSearch = !complete,
                     error = if (members.isEmpty() && !complete) "No saved collection membership is available. Connect to search this collection." else null)
                 return@launch
             }
@@ -417,7 +440,7 @@ class JellyfinCatalogueViewModel(
                 if (!isActive || !valid(request, captured)) return@onSuccess
                 val current = _state.value
                 if (denied(current.launchFailure)) return@onSuccess
-                _state.value = project(current.copy(entries = entries, nextIndex = page.nextIndex, total = page.total,
+                _state.value = project(current.copy(entries = observed(entries, observations), nextIndex = page.nextIndex, total = page.total,
                     hasMore = page.hasMore, loaded = true, loading = false, partialSearch = false, error = null,
                     offline = page.fromCache || current.offline))
             }.onFailure {

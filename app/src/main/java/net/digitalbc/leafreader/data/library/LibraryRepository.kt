@@ -37,6 +37,7 @@ import net.digitalbc.leafreader.data.jellyfin.JellyfinItemIdentity
 import net.digitalbc.leafreader.data.jellyfin.JellyfinItemsResult
 import net.digitalbc.leafreader.data.jellyfin.JellyfinProgress
 import net.digitalbc.leafreader.data.jellyfin.JellyfinProgressSnapshot
+import net.digitalbc.leafreader.data.jellyfin.JellyfinProgressUpdate
 import net.digitalbc.leafreader.data.jellyfin.JellyfinProgressConflict
 import net.digitalbc.leafreader.data.jellyfin.JellyfinProgressChoice
 import net.digitalbc.leafreader.data.jellyfin.JellyfinSyncAction
@@ -44,6 +45,7 @@ import net.digitalbc.leafreader.data.jellyfin.JellyfinSyncPolicy
 import org.json.JSONObject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.update
 import net.digitalbc.leafreader.data.jellyfin.JellyfinServerConfig
 import net.digitalbc.leafreader.data.jellyfin.JellyfinTransferProgress
@@ -103,6 +105,8 @@ class LibraryRepository(
     private val jellyfinCoverCache = CoverBitmapCache(jellyfinSyncScope)
     private val _progressConflicts = MutableStateFlow<List<JellyfinProgressConflict>>(emptyList())
     val progressConflicts = _progressConflicts.asStateFlow()
+    private val _progressUpdates = kotlinx.coroutines.flow.MutableSharedFlow<JellyfinProgressUpdate>()
+    val progressUpdates = _progressUpdates.asSharedFlow()
     private val progressSyncJobs = ConcurrentHashMap<Long, Job>()
     private val activeSessionJobs = ConcurrentHashMap.newKeySet<Job>()
     private val sessionGeneration = AtomicLong(0L)
@@ -379,6 +383,13 @@ class LibraryRepository(
             config.allowInsecureHttp == settings.jellyfinAllowInsecureHttp &&
             auth == jellyfinCredentialStore.loadAuth()
 
+    fun isCurrentProgressUpdate(update: JellyfinProgressUpdate): Boolean {
+        val auth = jellyfinCredentialStore.loadAuth() ?: return false
+        return update.generation == sessionGeneration.get() && update.identity.serverId == auth.serverId &&
+            update.identity.userId == auth.userId &&
+            update.serverUrl == JellyfinServerConfig.normalizeUrl(settings.jellyfinServerUrl)
+    }
+
     private suspend fun readProgressBaseline(auth: JellyfinAuth, url: String, itemId: String): JellyfinProgressSnapshot? {
         val payload = db?.jellyfinMetadataCacheDao()?.get(auth.serverId, auth.userId, url,
             "progress-baseline:$itemId") ?: return null
@@ -447,6 +458,9 @@ class LibraryRepository(
             val remote = observedRemote ?: jellyfinClient.getProgress(config, auth, link.itemId)
             if (!syncSessionCurrent(config, auth, generation)) return@withLock
             check(remote.isAvailable) { "The server did not provide a complete reading position. Changes remain queued." }
+            _progressUpdates.emit(JellyfinProgressUpdate(
+                JellyfinItemIdentity(auth.serverId, auth.userId, link.itemId), config.baseUrl, remote, generation))
+            if (!syncSessionCurrent(config, auth, generation)) return@withLock
             val comic = dao.getById(comicId) ?: return@withLock
             val baseline = readProgressBaseline(auth, config.baseUrl, link.itemId)
             val localPage = pending?.pageIndex ?: comic.lastPage
@@ -532,6 +546,8 @@ class LibraryRepository(
             }
             if (!syncSessionCurrent(config, auth, generation)) return false
             writeProgressBaseline(auth, config.baseUrl, entry.itemId, partial)
+            _progressUpdates.emit(JellyfinProgressUpdate(
+                JellyfinItemIdentity(auth.serverId, auth.userId, entry.itemId), config.baseUrl, partial, generation))
             if (!syncSessionCurrent(config, auth, generation) ||
                 outboxDao.getPendingForComic(entry.comicId)?.revision != entry.revision) return false
             jellyfinClient.markPlayedStatus(config, auth, entry.itemId, played)
@@ -541,6 +557,8 @@ class LibraryRepository(
         check(confirmed.isAvailable && confirmed.positionTicks == JellyfinProgress.pageToTicks(entry.pageIndex) &&
             confirmed.played == played) { "The server has not confirmed the reading state. Changes remain queued." }
         if (!syncSessionCurrent(config, auth, generation)) return false
+        _progressUpdates.emit(JellyfinProgressUpdate(
+            JellyfinItemIdentity(auth.serverId, auth.userId, entry.itemId), config.baseUrl, confirmed, generation))
         return checkNotNull(db).withTransaction {
             if (!syncSessionCurrent(config, auth, generation)) return@withTransaction false
             writeProgressBaseline(auth, config.baseUrl, entry.itemId, confirmed)

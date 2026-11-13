@@ -1,6 +1,28 @@
 package net.digitalbc.leafreader.data.jellyfin
 
-data class JellyfinProgressSnapshot(val positionTicks: Long?, val played: Boolean?) {
+/** A server observation, never an optimistic copy of pending device progress. */
+data class JellyfinProgressUpdate(
+    val identity: JellyfinItemIdentity,
+    val serverUrl: String,
+    val snapshot: JellyfinProgressSnapshot,
+    internal val generation: Long,
+) {
+    init { require(snapshot.isAvailable) }
+
+    fun apply(item: JellyfinItem): JellyfinItem = if (item.id != identity.itemId) item else
+        item.copy(playbackPositionTicks = checkNotNull(snapshot.positionTicks), played = checkNotNull(snapshot.played))
+
+    fun apply(details: JellyfinItemDetails): JellyfinItemDetails =
+        if (details.identity != identity) details else
+            details.copy(item = apply(details.item), playedPercentage = snapshot.playedPercentage)
+
+    fun apply(entries: List<JellyfinCatalogueEntry>): List<JellyfinCatalogueEntry> =
+        if (entries.none { it.item.id == identity.itemId }) entries else entries.map {
+            if (it.item.id == identity.itemId) it.copy(item = apply(it.item), played = snapshot.played) else it
+        }
+}
+
+data class JellyfinProgressSnapshot(val positionTicks: Long?, val played: Boolean?, val playedPercentage: Double? = null) {
     val isAvailable: Boolean get() = positionTicks != null && positionTicks >= 0 && played != null
 }
 

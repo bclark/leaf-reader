@@ -702,4 +702,15 @@ class JellyfinClientTest {
         assertTrue(runCatching { client.getProgress(config, auth, "item") }.isFailure)
     }
 
+    @Test fun progressPercentageUsesOnlyAvailableNumericServerValues() = runBlocking {
+        val config = JellyfinServerConfig(baseUrl(), true)
+        val auth = JellyfinAuth("token", "u", "srv", "Reader")
+        for ((value, expected) in listOf("25.5" to 25.5, "0" to 0.0, "100" to 100.0,
+            "null" to null, "\"25\"" to null, "-1" to null, "101" to null)) {
+            server.enqueue(MockResponse().setBody("""{"Id":"item","UserData":{"PlaybackPositionTicks":20000,"Played":false,"PlayedPercentage":$value}}"""))
+            assertEquals(expected, client.getProgress(config, auth, "item").playedPercentage)
+            server.takeRequest()
+        }
+    }
+
 }

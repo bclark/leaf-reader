@@ -281,6 +281,8 @@ class LibraryViewModel(
     private var jellyfinDetailJob: Job? = null
     private var jellyfinLocalJob: Job? = null
     private var detailGeneration = 0L
+    private var detailConnectionScope: Triple<String, String, String>? = null
+    private var detailProgressUpdate: net.digitalbc.leafreader.data.jellyfin.JellyfinProgressUpdate? = null
 
     private val _downloadedCopies = MutableStateFlow<Map<String, ComicEntity>>(emptyMap())
     val downloadedCopies = _downloadedCopies.asStateFlow()
@@ -288,6 +290,21 @@ class LibraryViewModel(
     private var downloadedAccount: Triple<String, String, String>? = null
 
     init {
+        viewModelScope.launch {
+            repository.progressUpdates.collect { update ->
+                if (!repository.isCurrentProgressUpdate(update)) return@collect
+                val currentDetail = detailConnectionScope == jellyfinConnectionScope()
+                if (currentDetail && _jellyfinDetail.value?.identity == update.identity) detailProgressUpdate = update
+                _jellyfinDetail.update { state ->
+                    if (!currentDetail || state?.identity != update.identity) state else {
+                        state.copy(item = update.apply(state.item),
+                            details = state.details?.let(update::apply))
+                    }
+                }
+                if (jellyfinLandingScope == jellyfinConnectionScope())
+                    _jellyfinBrowser.update { state -> state.copy(items = state.items.map(update::apply)) }
+            }
+        }
         viewModelScope.launch {
             repository.backfillMetadataIfNeeded()
         }
@@ -326,6 +343,8 @@ class LibraryViewModel(
         jellyfinDetailJob?.cancel()
         jellyfinLocalJob?.cancel()
         val generation = ++detailGeneration
+        detailConnectionScope = jellyfinConnectionScope()
+        val progressUpdate = detailProgressUpdate
         val auth = jellyfinAuth()
         val identity = auth?.let { JellyfinItemIdentity(it.serverId, it.userId, item.id) }
         _jellyfinDetail.value = JellyfinDetailState(
@@ -347,7 +366,13 @@ class LibraryViewModel(
                     onSuccess = { details ->
                         if (details.identity != identity) {
                             current.copy(loading = false, failure = JellyfinFailureKind.PARSE_ERROR)
-                        } else current.copy(loading = false, details = details, failure = null)
+                        } else {
+                            val observed = detailProgressUpdate?.takeIf {
+                                it !== progressUpdate && it.identity == identity && repository.isCurrentProgressUpdate(it)
+                            }
+                            val fresh = observed?.apply(details) ?: details
+                            current.copy(loading = false, details = fresh, failure = null)
+                        }
                     },
                     onFailure = { error ->
                         current.copy(loading = false,
@@ -365,6 +390,7 @@ class LibraryViewModel(
 
     fun closeJellyfinDetail() {
         ++detailGeneration
+        detailConnectionScope = null
         jellyfinDetailJob?.cancel()
         jellyfinLocalJob?.cancel()
         _jellyfinDetail.value = null

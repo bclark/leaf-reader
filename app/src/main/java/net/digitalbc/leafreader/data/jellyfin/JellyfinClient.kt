@@ -291,7 +291,9 @@ class JellyfinClient(
             is Int -> value.toLong()
             else -> null
         }?.takeIf { it >= 0 }
-        return JellyfinProgressSnapshot(ticks, data?.opt("Played") as? Boolean)
+        val percentage = (data?.opt("PlayedPercentage") as? Number)?.toDouble()
+            ?.takeIf { it.isFinite() && it in 0.0..100.0 }
+        return JellyfinProgressSnapshot(ticks, data?.opt("Played") as? Boolean, percentage)
     }
 
     suspend fun getItemDetails(

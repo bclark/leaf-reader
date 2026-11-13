@@ -2,6 +2,12 @@ package net.digitalbc.leafreader.data.library
 
 import android.content.Context
 import androidx.room.Room
+import androidx.lifecycle.ViewModelStore
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.*
+import net.digitalbc.leafreader.ui.library.LibraryViewModel
+import net.digitalbc.leafreader.ui.library.JellyfinCatalogueViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
@@ -309,6 +315,102 @@ class JellyfinProgressPolicyTest {
         assertNotNull(db.jellyfinSyncOutboxDao().getPendingForComic(id))
         assertTrue(repository.resolveJellyfinProgress(refreshed, JellyfinProgressChoice.SERVER).isSuccess)
         assertEquals(2, db.comicDao().getById(id)!!.lastPage)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun freshServerObservationsUpdateOpenDetailAndLoadedCatalogueWithoutReloading() = runBlocking {
+        val main = UnconfinedTestDispatcher()
+        Dispatchers.setMain(main)
+        val store = ViewModelStore()
+        try {
+            settings.jellyfinServerId = auth.serverId
+            settings.jellyfinUserId = auth.userId
+            val id = comic("captions")
+            baseline("captions", 0, false)
+            val identity = JellyfinItemIdentity(auth.serverId, auth.userId, "captions")
+            val stale = item("captions")
+            val details = CompletableDeferred<JellyfinItemDetails>()
+            val library = LibraryViewModel(repository, settings, loadJellyfinDetails = { Result.success(details.await()) },
+                defaultDispatcher = main)
+            store.put("library", library)
+            val books = JellyfinView("books", "Comics", "books")
+            var fetches = 0
+            var heldPage: CompletableDeferred<JellyfinCataloguePage>? = null
+            val catalogue = JellyfinCatalogueViewModel(repository, settings,
+                views = { Result.success(listOf(books)) }, restore = { null }, readIndex = { null },
+                fetch = { fetches++; Result.success(heldPage?.await() ?: JellyfinCataloguePage(
+                    listOf(JellyfinCatalogueEntry(stale, "Book", false)), 1, 1, false)) },
+                saveIndex = { _, _, _ -> }, defaultDispatcher = main, ioDispatcher = main)
+            store.put("catalogue", catalogue)
+            catalogue.ensure()
+            withTimeout(5000) { catalogue.state.first { it.loaded && !it.indexing && it.entries.isNotEmpty() } }
+            val requests = fetches
+            library.openJellyfinDetail(stale)
+            remote.position("captions", 30_000, true)
+            assertTrue(repository.checkJellyfinProgress(identity).isSuccess)
+            details.complete(JellyfinItemDetails(identity, stale, overview = "preserved", playedPercentage = 99.0))
+            withTimeout(5000) { library.jellyfinDetail.first { it?.details != null } }
+            val detail = library.jellyfinDetail.value!!.details!!
+            assertEquals(30_000L, detail.item.playbackPositionTicks)
+            assertTrue(detail.item.played)
+            assertNull(detail.playedPercentage) // unavailable fresh percentage must not retain the old99%
+            assertEquals("preserved", detail.overview)
+            withTimeout(5000) { catalogue.state.first { it.entries.singleOrNull()?.played == true } }
+            assertEquals(30_000L, catalogue.state.value.entries.single().item.playbackPositionTicks)
+            assertEquals(requests, fetches)
+            assertTrue(db.comicDao().getById(id)!!.completionOverride == true)
+            remote.position("captions", 0, false)
+            assertTrue(repository.checkJellyfinProgress(identity).isSuccess)
+            withTimeout(5000) { catalogue.state.first { it.entries.singleOrNull()?.played == false } }
+            assertEquals(0L, library.jellyfinDetail.value!!.details!!.item.playbackPositionTicks)
+            assertFalse(library.jellyfinDetail.value!!.details!!.item.played)
+            // A metadata pass begun before a sync must not restore its older progress fields.
+            val delayed = CompletableDeferred<JellyfinCataloguePage>()
+            heldPage = delayed
+            catalogue.refresh()
+            remote.position("captions", 40_000, true)
+            assertTrue(repository.checkJellyfinProgress(identity).isSuccess)
+            delayed.complete(JellyfinCataloguePage(listOf(JellyfinCatalogueEntry(stale, "Book", false)), 1, 1, false))
+            withTimeout(5000) { catalogue.state.first { !it.indexing } }
+            assertTrue(catalogue.state.value.entries.single().played == true)
+            assertEquals(40_000L, catalogue.state.value.entries.single().item.playbackPositionTicks)
+            // Observations are not a permanent overlay over a subsequent fresh metadata pass.
+            heldPage = null
+            catalogue.refresh()
+            withTimeout(5000) { catalogue.state.first { !it.indexing } }
+            assertFalse(catalogue.state.value.entries.single().played == true)
+            val otherUrl = MockWebServer().apply { dispatcher = remote; start() }
+            try {
+                settings.jellyfinServerUrl = otherUrl.url("/").toString().trimEnd('/')
+                remote.position("captions", 10_000, false)
+                assertTrue(repository.checkJellyfinProgress(identity).isSuccess)
+                // Matching server/user/item IDs must not update a detail loaded from another URL.
+                assertEquals(40_000L, library.jellyfinDetail.value!!.details!!.item.playbackPositionTicks)
+                assertTrue(library.jellyfinDetail.value!!.details!!.item.played)
+            } finally {
+                settings.jellyfinServerUrl = url()
+                otherUrl.shutdown()
+            }
+        } finally {
+            store.clear()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test fun progressObservationsAreNotOptimisticAndRejectChangedAccounts() = runBlocking {
+        val id = comic("observed")
+        baseline("observed", 0, false)
+        saveOffline(id, 4)
+        remote.position("observed", 20_000, false)
+        val next = async(start = CoroutineStart.UNDISPATCHED) { repository.progressUpdates.first() }
+        repository.flushJellyfinOutbox()
+        val observed = next.await()
+        assertEquals(20_000L, observed.snapshot.positionTicks)
+        assertEquals(4, db.comicDao().getById(id)!!.lastPage)
+        assertTrue(repository.isCurrentProgressUpdate(observed))
+        credentials.saveAuth(auth.copy(userId = "other"))
+        assertFalse(repository.isCurrentProgressUpdate(observed))
+        assertTrue(remote.writes.isEmpty())
     }
 
 }
