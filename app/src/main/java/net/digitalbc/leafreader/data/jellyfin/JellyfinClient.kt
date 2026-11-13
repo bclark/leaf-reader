@@ -141,6 +141,7 @@ class JellyfinClient(
         parentId: String?,
         startIndex: Int = 0,
         limit: Int = 100,
+        onProgress: ((String, JellyfinProgressSnapshot) -> Unit)? = null,
     ): JellyfinItemsResult = withContext(Dispatchers.IO) {
         val url = JellyfinEndpoints.userItems(
             baseUrl = config.baseUrl,
@@ -162,7 +163,10 @@ class JellyfinClient(
                 val itemsArray = json.optJSONArray("Items") ?: return@executeRequest JellyfinItemsResult(emptyList(), total, startIndex)
                 val items = mutableListOf<JellyfinItem>()
                 for (i in 0 until itemsArray.length()) {
-                    items.add(parseItem(itemsArray.getJSONObject(i), parentId))
+                    val value = itemsArray.getJSONObject(i)
+                    val item = parseItem(value, parentId)
+                    items.add(item)
+                    onProgress?.invoke(item.id, parseProgress(value))
                 }
                 JellyfinItemsResult(items = items, totalRecordCount = total, startIndex = startIndex)
             } catch (e: Exception) {
@@ -251,6 +255,37 @@ class JellyfinClient(
     }
 
     /** Fetches metadata only; never downloads an archive or reports reading progress. */
+    /** Missing progress remains unknown, so synchronization cannot infer a reset from defaults. */
+    suspend fun getProgress(
+        config: JellyfinServerConfig,
+        auth: JellyfinAuth,
+        itemId: String,
+    ): JellyfinProgressSnapshot = withContext(Dispatchers.IO) {
+        val request = authorizedRequestBuilder(
+            JellyfinEndpoints.itemDetails(config.baseUrl, auth.userId, itemId), auth,
+        ).get().build()
+        executeRequest(request) { response ->
+            if (!response.isSuccessful) mapHttpError(response.code, "Could not read the server position")
+            try {
+                val item = JSONObject(response.body?.string().orEmpty())
+                require(item.getString("Id").equals(itemId, ignoreCase = true)) { "Unexpected progress item" }
+                parseProgress(item)
+            } catch (error: Exception) {
+                throw JellyfinException(JellyfinFailureKind.PARSE_ERROR, "Invalid server reading position", error)
+            }
+        }
+    }
+
+    private fun parseProgress(item: JSONObject): JellyfinProgressSnapshot {
+        val data = item.optJSONObject("UserData")
+        val ticks = when (val value = data?.opt("PlaybackPositionTicks")) {
+            is Long -> value
+            is Int -> value.toLong()
+            else -> null
+        }?.takeIf { it >= 0 }
+        return JellyfinProgressSnapshot(ticks, data?.opt("Played") as? Boolean)
+    }
+
     suspend fun getItemDetails(
         config: JellyfinServerConfig,
         auth: JellyfinAuth,

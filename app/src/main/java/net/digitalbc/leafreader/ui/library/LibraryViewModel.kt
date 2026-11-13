@@ -117,6 +117,60 @@ class LibraryViewModel(
 
     val downloadedOnly = MutableStateFlow(false)
     val unreadOnly = MutableStateFlow(false)
+    val progressConflicts = repository.progressConflicts
+    private val _resolvingProgress = MutableStateFlow(false)
+    val resolvingProgress = _resolvingProgress.asStateFlow()
+    private val _progressChoiceError = MutableStateFlow<String?>(null)
+    val progressChoiceError = _progressChoiceError.asStateFlow()
+
+    private val _removingDownload = MutableStateFlow(false)
+    val removingDownload = _removingDownload.asStateFlow()
+
+    fun removeJellyfinDownload(identity: JellyfinItemIdentity, failureMessage: String) {
+        if (_removingDownload.value || _jellyfinDetail.value?.identity != identity) return
+        _removingDownload.value = true
+        viewModelScope.launch {
+            try {
+                repository.removeJellyfinDownload(identity).fold(onSuccess = {
+                    _jellyfinDetail.update { state ->
+                        if (state?.identity == identity) state.copy(localComic = null, readyComicId = null) else state
+                    }
+                    if (_jellyfinDetail.value?.identity == identity) refreshJellyfinLocalCopy()
+                }, onFailure = { _message.value = failureMessage })
+            } finally { _removingDownload.value = false }
+        }
+    }
+
+    fun clearProgressChoiceError() { _progressChoiceError.value = null }
+
+    fun deferProgressConflict(key: String) {
+        repository.deferProgressConflict(key)
+        clearProgressChoiceError()
+    }
+
+    fun reviewProgressConflicts() {
+        repository.reviewProgressConflicts()
+        clearProgressChoiceError()
+    }
+
+    fun resolveProgressConflict(
+        conflict: net.digitalbc.leafreader.data.jellyfin.JellyfinProgressConflict,
+        choice: net.digitalbc.leafreader.data.jellyfin.JellyfinProgressChoice,
+        failureMessage: String,
+    ) = runProgressOperation(failureMessage) { repository.resolveJellyfinProgress(conflict, choice) }
+
+    fun checkProgress(identity: net.digitalbc.leafreader.data.jellyfin.JellyfinItemIdentity, failureMessage: String) =
+        runProgressOperation(failureMessage) { repository.checkJellyfinProgress(identity) }
+
+    private fun runProgressOperation(failureMessage: String, request: suspend () -> Result<Unit>) {
+        if (_resolvingProgress.value) return
+        _resolvingProgress.value = true
+        _progressChoiceError.value = null
+        viewModelScope.launch {
+            try { request().onFailure { _progressChoiceError.value = failureMessage } }
+            finally { _resolvingProgress.value = false }
+        }
+    }
     private val _coverSelections = MutableStateFlow<Map<String, String>>(emptyMap())
     val coverSelections = _coverSelections.asStateFlow()
 
@@ -238,6 +292,14 @@ class LibraryViewModel(
             repository.backfillMetadataIfNeeded()
         }
         refreshDownloadedJellyfinItems()
+        viewModelScope.launch {
+            repository.comics.collect { rows ->
+                _jellyfinDetail.update { state ->
+                    val updated = state?.localComic?.id?.let { id -> rows.firstOrNull { it.id == id } }
+                    if (updated != null) state.copy(localComic = updated) else state
+                }
+            }
+        }
     }
 
     fun refreshDownloadedJellyfinItems() {

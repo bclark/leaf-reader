@@ -59,6 +59,7 @@ object BackupManager {
             cObj.put("lastSlot", comic.lastSlot)
             cObj.put("dateAdded", comic.dateAdded)
             cObj.put("lastOpened", comic.lastOpened)
+            comic.completionOverride?.let { cObj.put("completed", it) }
             comicsArray.put(cObj)
         }
         root.put("comics", comicsArray)
@@ -157,6 +158,7 @@ object BackupManager {
                     lastSlot = lastSlot,
                     dateAdded = dateAdded,
                     lastOpened = lastOpened,
+                    completed = if (cObj.isNull("completed")) null else cObj.getBoolean("completed"),
                 )
             }
         }

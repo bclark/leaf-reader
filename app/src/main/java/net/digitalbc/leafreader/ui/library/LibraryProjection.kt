@@ -63,10 +63,10 @@ internal fun projectLibrary(input: LibraryProjectionInput): List<LibraryItem> = 
                             compareBy<ComicEntity> { it.issueNumber ?: Float.MAX_VALUE }
                                 .thenBy { it.title }
                         )
-                        val nextIssue = sortedIssues.firstOrNull { it.pageCount > 0 && it.lastPage < it.pageCount - 1 }
+                        val nextIssue = sortedIssues.firstOrNull { it.pageCount > 0 && !it.isCompleted }
                             ?: sortedIssues.first()
-                        val completedCount = sortedIssues.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-                        val unreadCount = sortedIssues.count { it.lastPage == 0 }
+                        val completedCount = sortedIssues.count { it.isCompleted }
+                        val unreadCount = sortedIssues.count { it.isUnread }
 
                         items.add(
                             LibraryItem.SeriesStack(
@@ -97,10 +97,10 @@ internal fun projectLibrary(input: LibraryProjectionInput): List<LibraryItem> = 
                         compareBy<ComicEntity> { it.issueNumber ?: Float.MAX_VALUE }
                             .thenBy { it.title }
                     )
-                    val nextIssue = sortedIssues.firstOrNull { it.pageCount > 0 && it.lastPage < it.pageCount - 1 }
+                    val nextIssue = sortedIssues.firstOrNull { it.pageCount > 0 && !it.isCompleted }
                         ?: sortedIssues.first()
-                    val completedCount = sortedIssues.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-                    val unreadCount = sortedIssues.count { it.lastPage == 0 }
+                    val completedCount = sortedIssues.count { it.isCompleted }
+                    val unreadCount = sortedIssues.count { it.isUnread }
 
                     LibraryItem.SeriesStack(
                         seriesName = group.first().series ?: "Series",
@@ -119,8 +119,8 @@ internal fun projectLibrary(input: LibraryProjectionInput): List<LibraryItem> = 
         }
         if (!unreadOnly) projected else projected.mapNotNull { item ->
             when (item) {
-                is LibraryItem.SingleComic -> item.takeIf { it.comic.lastPage == 0 }
-                is LibraryItem.SeriesStack -> item.issues.filter { it.lastPage == 0 }
+                is LibraryItem.SingleComic -> item.takeIf { it.comic.isUnread }
+                is LibraryItem.SeriesStack -> item.issues.filter { it.isUnread }
                     .takeIf { it.isNotEmpty() }?.let { issues ->
                         item.copy(issues = issues, topCoverComic = issues.first(),
                             totalIssues = issues.size, unreadIssues = issues.size)

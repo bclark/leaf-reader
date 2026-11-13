@@ -28,9 +28,9 @@ class ComicReaderApp : Application() {
 
     companion object {
         /**
-         * Temporary experiment flag: disables ML panel detection and guided panel-by-panel reading,
-         * keeping Leaf in whole-page mode with standard page navigation and zoom/pan.
-         * Set to false to restore panel-by-panel guided reading.
+         * Current Android reading contract: whole-page navigation and zoom/pan.
+         * Preserve this switch and the model/runtime packaging exclusions. A reading-mode change
+         * requires an explicit product and packaging decision.
          */
         const val EXPERIMENT_DISABLE_PANEL_READING = true
     }

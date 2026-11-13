@@ -188,6 +188,14 @@ class ReaderOpeningTest {
         override suspend fun updateProgress(id: Long, page: Int, slot: Int, openedAt: Long): Int {
             comic = comic.copy(lastPage = page, lastSlot = slot); return 1
         }
+        override suspend fun updateLocalFiles(id: Long, path: String, cover: String?, format: String, pageCount: Int): Int {
+            comic = comic.copy(filePath = path, coverPath = cover, format = format, pageCount = pageCount)
+            return 1
+        }
+
+        override suspend fun updateCompletion(id: Long, completed: Boolean?): Int {
+            comic = comic.copy(completionOverride = completed); return 1
+        }
         override suspend fun updatePageCount(id: Long, pageCount: Int): Int {
             comic = comic.copy(pageCount = pageCount); return 1
         }

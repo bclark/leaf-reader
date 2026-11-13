@@ -685,4 +685,21 @@ class JellyfinClientTest {
         assertEquals("/Users/usr-1/PlayedItems/item-xyz", recorded.path)
         assertEquals("DELETE", recorded.method)
     }
+    @Test fun authoritativeProgressDoesNotCoerceUnknownOrMalformedValues() = runBlocking {
+        val config = JellyfinServerConfig(baseUrl(), true)
+        val auth = JellyfinAuth("token", "u", "srv", "Reader")
+        for (userData in listOf("{}", "null", "{\"PlaybackPositionTicks\":null,\"Played\":null}",
+            "{\"PlaybackPositionTicks\":\"0\",\"Played\":\"false\"}",
+            "{\"PlaybackPositionTicks\":-1,\"Played\":false}")) {
+            server.enqueue(MockResponse().setBody("{\"Id\":\"item\",\"UserData\":$userData}"))
+            assertFalse(client.getProgress(config, auth, "item").isAvailable)
+            assertTrue(server.takeRequest().getHeader("Authorization")!!.contains("token"))
+        }
+        server.enqueue(MockResponse().setBody("""{"Id":"item","UserData":{"PlaybackPositionTicks":0,"Played":false}}"""))
+        assertEquals(JellyfinProgressSnapshot(0, false), client.getProgress(config, auth, "item"))
+        server.takeRequest()
+        server.enqueue(MockResponse().setBody("""{"Id":"other","UserData":{"PlaybackPositionTicks":0,"Played":false}}"""))
+        assertTrue(runCatching { client.getProgress(config, auth, "item") }.isFailure)
+    }
+
 }

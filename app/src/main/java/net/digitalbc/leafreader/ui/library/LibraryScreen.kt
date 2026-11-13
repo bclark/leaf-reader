@@ -3,6 +3,9 @@ package net.digitalbc.leafreader.ui.library
 import android.graphics.BitmapFactory
 import android.graphics.Bitmap
 import android.util.LruCache
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -182,7 +185,7 @@ private fun formatFileSize(bytes: Long): String = when {
     else -> "$bytes B"
 }
 
-@OptIn(ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     viewModel: LibraryViewModel,
@@ -198,6 +201,7 @@ fun LibraryScreen(
     val preparedLocalRows by viewModel.libraryRows.collectAsStateWithLifecycle()
     val libraryItems = preparedLocalRows.items
     val unreadOnly by viewModel.unreadOnly.collectAsStateWithLifecycle()
+    val progressConflicts by viewModel.progressConflicts.collectAsStateWithLifecycle()
     val coverSelections by viewModel.coverSelections.collectAsStateWithLifecycle()
     val currentFilter by viewModel.libraryFilter.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
@@ -242,7 +246,7 @@ fun LibraryScreen(
                 is LibraryItem.SingleComic -> item.takeIf { it.comic.id in readableIds }
                 is LibraryItem.SeriesStack -> item.issues.filter { it.id in readableIds }.takeIf { it.isNotEmpty() }?.let {
                     item.copy(issues = it, topCoverComic = it.first(), totalIssues = it.size,
-                        unreadIssues = it.count { c -> c.lastPage < c.pageCount - 1 })
+                        unreadIssues = it.count { c -> c.isUnread })
                 }
                 is LibraryItem.ReadingListItem -> item
             }
@@ -333,7 +337,11 @@ fun LibraryScreen(
             else -> listOf(2, 3)
         }
     }
-    val actualColumns = libraryColumns.coerceIn(2, availableColumns.last())
+    // Keep the saved grid preference; larger text limits the rendered density for readable cards.
+    val maximumColumns = if (configuration.fontScale > 1.3f)
+        minOf(availableColumns.last(), maxOf(1, (configuration.screenWidthDp / (160f * configuration.fontScale)).toInt()))
+        else availableColumns.last()
+    val actualColumns = libraryColumns.coerceIn(if (configuration.fontScale > 1.3f) 1 else 2, maximumColumns)
     val gridPositions = rememberSaveableStateHolder()
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -604,21 +612,32 @@ fun LibraryScreen(
                 if (!isEditMode && !remoteMode && preparedLocalRows.selectableComicIds.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            androidx.compose.material3.TextButton(onClick = { viewModel.setEditMode(true) }) { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_edit)) }
+                            androidx.compose.material3.TextButton(onClick = { viewModel.setEditMode(true) }, colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_edit)) }
                         }
                     }
                 }
                 if (isEditMode) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             OchreBadge("${selectedComicIds.size} SELECTED")
                             val allSelected = preparedLocalRows.selectableComicIds.isNotEmpty() &&
                                 preparedLocalRows.selectableComicIds.all { it in selectedComicIds }
                             androidx.compose.material3.TextButton(onClick = {
                                 if (allSelected) viewModel.clearComicSelection()
                                 else viewModel.selectAllComics(preparedLocalRows.selectableComicIds.toList())
-                            }) { Text(androidx.compose.ui.res.stringResource(if (allSelected) net.digitalbc.leafreader.R.string.library_deselect_all else net.digitalbc.leafreader.R.string.library_select_all)) }
-                            androidx.compose.material3.TextButton(onClick = { viewModel.setEditMode(false) }) { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_done)) }
+                            }, colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) { Text(androidx.compose.ui.res.stringResource(if (allSelected) net.digitalbc.leafreader.R.string.library_deselect_all else net.digitalbc.leafreader.R.string.library_select_all)) }
+                            androidx.compose.material3.TextButton(onClick = { viewModel.setEditMode(false) }, colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_done)) }
+                        }
+                    }
+                }
+
+                if (progressConflicts.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        androidx.compose.material3.TextButton(onClick = {
+                            viewModel.reviewProgressConflicts()
+                        }, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.sync_review_positions))
                         }
                     }
                 }
@@ -892,7 +911,7 @@ fun LibraryScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                if (configuration.fontScale <= 1.3f) Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                                     Text(
                                         text = "${selectedComicIds.size} ${if (selectedComicIds.size == 1) "COMIC" else "COMICS"} SELECTED",
                                         fontFamily = Anton,
@@ -906,7 +925,8 @@ fun LibraryScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(4.dp))
@@ -1645,7 +1665,7 @@ fun LibraryScreen(
     }
 
     comicOptionsTarget?.let { comic ->
-        val isRead = comic.pageCount > 0 && comic.lastPage >= comic.pageCount - 1
+        val isRead = comic.isCompleted
         AlertDialog(
             onDismissRequest = { comicOptionsTarget = null },
             title = {
@@ -2284,7 +2304,11 @@ private fun SmbEntryRow(
     }
 }
 
-private val coverBitmapCache = LruCache<String, ImageBitmap>(200)
+internal val coverBitmapCache = object : LruCache<String, ImageBitmap>(
+    minOf(32 * 1024 * 1024, (Runtime.getRuntime().maxMemory() / 16).coerceIn(1, Int.MAX_VALUE.toLong()).toInt())
+) {
+    override fun sizeOf(key: String, value: ImageBitmap) = value.asAndroidBitmap().allocationByteCount
+}
 
 @Composable
 internal fun rememberCover(path: String?): ImageBitmap? {
@@ -2449,7 +2473,9 @@ private fun ComicStackCard(stack: LibraryItem.SeriesStack, columns: Int = 2,
     CoverStackCard(StackPresentation(stack.seriesName, stack.volume, covers,
         covers.firstOrNull { it.id == stack.topCoverComic.id.toString() } ?: covers.first(),
         stack.progressFraction,
-        "${stack.totalIssues} issues ${if (stack.unreadIssues > 0) "· ${stack.unreadIssues} unread" else "· read"}"),
+        androidx.compose.ui.res.pluralStringResource(
+            if (stack.progressFraction >= 1f) net.digitalbc.leafreader.R.plurals.library_series_completed
+            else net.digitalbc.leafreader.R.plurals.library_series_unread, stack.totalIssues, stack.totalIssues, stack.unreadIssues)),
         columns = columns, selectedCoverId = selectedCoverId, onCoverSelected = onCoverSelected, onClick = onClick)
 }
 

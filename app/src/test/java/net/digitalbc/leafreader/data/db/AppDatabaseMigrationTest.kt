@@ -5,6 +5,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
@@ -225,6 +226,11 @@ class AppDatabaseMigrationTest {
         verifyPopulatedUpgrade(version = 6, hasRevision = true, markPlayed = false)
     }
 
+    @Test
+    fun migrationFrom8To9PreservesPositionsListsOutboxAndMetadata() = runBlocking {
+        verifyPopulatedUpgrade(version = 8, hasRevision = true, markPlayed = false)
+    }
+
     private suspend fun verifyPopulatedUpgrade(
         version: Int,
         hasRevision: Boolean = false,
@@ -370,10 +376,15 @@ class AppDatabaseMigrationTest {
                 arrayOf<Any?>(markPlayed?.let { if (it) 1 else 0 }),
             )
         }
+        if (version >= 7) AppDatabase.MIGRATION_6_7.migrate(v4Db)
+        if (version >= 8) {
+            AppDatabase.MIGRATION_7_8.migrate(v4Db)
+            v4Db.execSQL("INSERT INTO jellyfin_metadata_cache VALUES('srv-test','usr-test','https://server.test','baseline','saved-state')")
+        }
         helper.close()
 
         fun openMigratedDatabase() = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
-            .addMigrations(AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8)
+            .addMigrations(AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9)
             .allowMainThreadQueries()
             .build()
 
@@ -381,7 +392,7 @@ class AppDatabaseMigrationTest {
 
         try {
             // Force migration/validation, then reopen the on-disk database to check durability.
-            assertEquals(8, migratedDb.openHelper.writableDatabase.version)
+            assertEquals(9, migratedDb.openHelper.writableDatabase.version)
             assertNull(migratedDb.pendingBackupPreferencesDao().get())
             migratedDb.close()
             migratedDb = openMigratedDatabase()
@@ -393,6 +404,12 @@ class AppDatabaseMigrationTest {
             assertEquals(15, comic?.lastPage)
             assertEquals(32, comic?.pageCount)
             assertEquals("jellyfin", comic?.source)
+            assertNull(comic?.completionOverride)
+            if (version >= 8) assertEquals("saved-state", migratedDb.jellyfinMetadataCacheDao()
+                .get("srv-test", "usr-test", "https://server.test", "baseline"))
+            migratedDb.comicDao().updateCompletion(42, true)
+            assertEquals(15, migratedDb.comicDao().getById(42)?.lastPage)
+            assertTrue(migratedDb.comicDao().getById(42)!!.isCompleted)
 
             // Verify remote comic link survived migration intact
             val link = migratedDb.remoteComicLinkDao().findLink("jellyfin", "srv-test", "usr-test", "item-spidey-42")

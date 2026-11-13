@@ -106,7 +106,7 @@ fun ReadingListDetailScreen(
         readable.any { it.id == member.comic?.id }
     } else allMembers
     val members = if (unreadOnly) scopedMembers.filter {
-        it.comic?.let { comic -> comic.lastPage == 0 } ?: (it.remote?.played == false)
+        it.comic?.let { comic -> comic.isUnread } ?: (it.remote?.played == false)
     } else scopedMembers
     val listComics = scopedMembers.mapNotNull { it.comic }
     val detail by viewModel.jellyfinDetail.collectAsStateWithLifecycle()
@@ -125,8 +125,8 @@ fun ReadingListDetailScreen(
     }
     val actualColumns = libraryColumns.coerceIn(2, availableColumns.last())
 
-    val allCompleted = scopedMembers.isNotEmpty() && scopedMembers.size == listComics.size && listComics.all { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-    val nextUnread = listComics.firstOrNull { it.pageCount > 0 && it.lastPage < it.pageCount - 1 }
+    val allCompleted = scopedMembers.isNotEmpty() && scopedMembers.size == listComics.size && listComics.all { it.isCompleted }
+    val nextUnread = listComics.firstOrNull { it.pageCount > 0 && !it.isCompleted }
         ?: listComics.firstOrNull()
 
     val continueButtonText = when {
@@ -299,7 +299,7 @@ fun ReadingListDetailScreen(
                                     .padding(end = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                val completedCount = listComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
+                                val completedCount = listComics.count { it.isCompleted }
                                 val statusText = if (members.isEmpty()) {
                                     "0 SHOWN"
                                 } else if (scopedMembers.size != listComics.size) {
@@ -329,7 +329,7 @@ fun ReadingListDetailScreen(
                                 }
 
                                 if (listComics.isNotEmpty()) {
-                                    val completedCount = listComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
+                                    val completedCount = listComics.count { it.isCompleted }
                                     val progressFraction = completedCount.toFloat() / scopedMembers.size.coerceAtLeast(1)
                                     Box(
                                         modifier = Modifier
@@ -507,7 +507,7 @@ fun ReadingListDetailScreen(
     // Long-Press Options Dialog for an Issue
     selectedComicForOptions?.let { comic ->
         val comicIndex = listComics.indexOfFirst { it.id == comic.id }
-        val isRead = comic.pageCount > 0 && comic.lastPage >= comic.pageCount - 1
+        val isRead = comic.isCompleted
         AlertDialog(
             onDismissRequest = { selectedComicForOptions = null },
             title = {

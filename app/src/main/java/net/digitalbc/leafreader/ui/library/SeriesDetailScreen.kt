@@ -117,9 +117,9 @@ fun SeriesDetailScreen(
         )
     }
 
-    val seriesComics = if (unreadOnly) scopedComics.filter { it.lastPage == 0 } else scopedComics
-    val allCompleted = scopedComics.isNotEmpty() && scopedComics.all { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-    val nextUnread = scopedComics.firstOrNull { it.pageCount > 0 && it.lastPage < it.pageCount - 1 }
+    val seriesComics = if (unreadOnly) scopedComics.filter { it.isUnread } else scopedComics
+    val allCompleted = scopedComics.isNotEmpty() && scopedComics.all { it.isCompleted }
+    val nextUnread = scopedComics.firstOrNull { it.pageCount > 0 && !it.isCompleted }
         ?: scopedComics.firstOrNull()
 
     val continueButtonText = when {
@@ -228,7 +228,7 @@ fun SeriesDetailScreen(
                                     .padding(end = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                val completedCount = scopedComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
+                                val completedCount = scopedComics.count { it.isCompleted }
                                 val statusText = if (scopedComics.isEmpty()) {
                                     "0 ISSUES"
                                 } else {
@@ -256,7 +256,7 @@ fun SeriesDetailScreen(
                                 }
 
                                 if (scopedComics.isNotEmpty()) {
-                                    val completedCount = scopedComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
+                                    val completedCount = scopedComics.count { it.isCompleted }
                                     val progressFraction = completedCount.toFloat() / scopedComics.size
                                     Box(
                                         modifier = Modifier
@@ -505,7 +505,7 @@ fun SeriesDetailScreen(
     }
 
     selectedComicForOptions?.let { comic ->
-        val isRead = comic.pageCount > 0 && comic.lastPage >= comic.pageCount - 1
+        val isRead = comic.isCompleted
         AlertDialog(
             onDismissRequest = { selectedComicForOptions = null },
             title = {

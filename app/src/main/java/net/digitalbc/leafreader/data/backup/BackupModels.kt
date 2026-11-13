@@ -28,6 +28,7 @@ data class BackupComic(
     val lastSlot: Int = 0,
     val dateAdded: Long = 0,
     val lastOpened: Long = 0,
+    val completed: Boolean? = null,
 )
 
 data class BackupReadingListItem(

@@ -102,6 +102,9 @@ fun JellyfinBrowserScreen(
 ) {
     val browser by viewModel.jellyfinBrowser.collectAsStateWithLifecycle()
     val detail by viewModel.jellyfinDetail.collectAsStateWithLifecycle()
+    val syncingProgress by viewModel.resolvingProgress.collectAsStateWithLifecycle()
+    val progressSyncError by viewModel.progressChoiceError.collectAsStateWithLifecycle()
+    val syncRetryMessage = stringResource(R.string.sync_choice_retry)
     val positions = rememberSaveableStateHolder()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
@@ -124,6 +127,9 @@ fun JellyfinBrowserScreen(
     LaunchedEffect(detail?.readyComicId) {
         viewModel.consumeJellyfinRead()?.let(onOpenComic)
     }
+
+    val removingDownload by viewModel.removingDownload.collectAsStateWithLifecycle()
+    val removeFailureMessage = stringResource(R.string.remove_download_failed)
 
     val selectedCount = browser.selectedItemIds.size
 
@@ -179,6 +185,11 @@ fun JellyfinBrowserScreen(
                 cover = { _, modifier -> JellyfinCoverImage(heroBitmap, modifier) },
                 heroBitmap = heroBitmap,
                 onCreator = creatorNavigation,
+                onSync = state.identity?.let { identity -> ({ viewModel.checkProgress(identity, syncRetryMessage) }) },
+                syncing = syncingProgress,
+                syncError = progressSyncError,
+                onRemoveDownload = state.identity?.let { identity -> ({ viewModel.removeJellyfinDownload(identity, removeFailureMessage) }) },
+                removingDownload = removingDownload,
             )
             SnackbarHost(snackbarHostState, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
         }

@@ -811,6 +811,7 @@ class LibraryRepositoryJellyfinTest {
         val result = repository.importJellyfinComic(item)
         assertTrue(result.isSuccess)
         val comicId = result.getOrThrow()
+        val progressServer = enableProgressFixture(comicId, ticks = 0L, played = false)
 
         // Enqueue progress response
         server.enqueue(MockResponse().setResponseCode(204))
@@ -819,10 +820,10 @@ class LibraryRepositoryJellyfinTest {
         repository.syncJellyfinProgressDirect(comicId, page = 4)
 
         // Consume the download request first
-        server.takeRequest()
+        takeRequest()
 
         // Now take the progress sync request
-        val recorded = server.takeRequest()
+        val recorded = takeRequest()
         assertEquals("/Sessions/Playing/Progress", recorded.path)
         assertEquals("POST", recorded.method)
         val bodyStr = recorded.body.readUtf8()
@@ -858,6 +859,7 @@ class LibraryRepositoryJellyfinTest {
         val result = repository.importJellyfinComic(item)
         assertTrue(result.isSuccess)
         val comicId = result.getOrThrow()
+        enableProgressFixture(comicId)
 
         // Enqueue progress response and mark played response
         server.enqueue(MockResponse().setResponseCode(204))
@@ -867,14 +869,14 @@ class LibraryRepositoryJellyfinTest {
         repository.syncJellyfinProgressDirect(comicId, page = 4)
 
         // Download request
-        server.takeRequest()
+        takeRequest()
 
         // 1. Progress request
-        val progressReq = server.takeRequest()
+        val progressReq = takeRequest()
         assertEquals("/Sessions/Playing/Progress", progressReq.path)
 
         // 2. Mark played request
-        val playedReq = server.takeRequest()
+        val playedReq = takeRequest()
         assertEquals("/Users/u/PlayedItems/last-page-item", playedReq.path)
         assertEquals("POST", playedReq.method)
     }
@@ -940,12 +942,13 @@ class LibraryRepositoryJellyfinTest {
 
         val item = JellyfinItem(id = "outbox-item-1", name = "OutboxTest.cbz", isFolder = false, container = "cbz")
         val comicId = repository.importJellyfinComic(item).getOrThrow()
-        server.takeRequest(5, TimeUnit.SECONDS) // consume download
+        val progressServer = enableProgressFixture(comicId, ticks = 0L, played = false)
+        takeRequest() // consume download
 
         server.enqueue(MockResponse().setResponseCode(204))
         repository.syncJellyfinProgressDirect(comicId, page = 2)
 
-        val req = server.takeRequest(5, TimeUnit.SECONDS)
+        val req = takeRequest()
         assertNotNull(req)
         assertEquals("/Sessions/Playing/Progress", req?.path)
 
@@ -972,12 +975,13 @@ class LibraryRepositoryJellyfinTest {
 
         val item = JellyfinItem(id = "retry-item-1", name = "RetryTest.cbz", isFolder = false, container = "cbz")
         val comicId = repository.importJellyfinComic(item).getOrThrow()
-        server.takeRequest(5, TimeUnit.SECONDS) // consume download
+        val progressServer = enableProgressFixture(comicId, ticks = 0L, played = false)
+        takeRequest() // consume download
 
         // Server fails with 500
         server.enqueue(MockResponse().setResponseCode(500).setBody("Server Error"))
         repository.syncJellyfinProgressDirect(comicId, page = 3)
-        server.takeRequest(5, TimeUnit.SECONDS) // consume failed progress request
+        takeRequest() // consume failed progress request
 
         // Outbox must retain the pending entry
         val pending = outboxDao.getPendingForComic(comicId)
@@ -989,7 +993,7 @@ class LibraryRepositoryJellyfinTest {
         server.enqueue(MockResponse().setResponseCode(204))
         repository.flushJellyfinOutbox()
 
-        val flushedReq = server.takeRequest(5, TimeUnit.SECONDS)
+        val flushedReq = takeRequest()
         assertNotNull(flushedReq)
         assertEquals("/Sessions/Playing/Progress", flushedReq?.path)
 
@@ -1051,17 +1055,21 @@ class LibraryRepositoryJellyfinTest {
 
         val item = JellyfinItem(id = "page0-item-1", name = "Page0Test.cbz", isFolder = false, container = "cbz")
         val comicId = repository.importJellyfinComic(item).getOrThrow()
-        server.takeRequest(5, TimeUnit.SECONDS) // consume download
+        val progressServer = enableProgressFixture(comicId, ticks = 20000L, played = true)
+        takeRequest() // consume download
 
         server.enqueue(MockResponse().setResponseCode(204))
 
         // Read page 0 without explicit unread flag
         repository.syncJellyfinProgressDirect(comicId, page = 0)
 
-        val progressReq = server.takeRequest(5, TimeUnit.SECONDS)
+        val progressReq = takeRequest()
         assertNotNull(progressReq)
         assertEquals("/Sessions/Playing/Progress", progressReq?.path)
 
+        // Drain authoritative readbacks and verify no DELETE was sent.
+        while (server.takeRequest(100, TimeUnit.MILLISECONDS) != null) { }
+        assertTrue(progressServer.writes.none { it.method == "DELETE" })
         // No DELETE request should be sent to PlayedItems
         val deleteReq = server.takeRequest(200, TimeUnit.MILLISECONDS)
         assertNull("Page 0 navigation must not unmark played status", deleteReq)
@@ -1086,7 +1094,8 @@ class LibraryRepositoryJellyfinTest {
 
         val item = JellyfinItem(id = "unread-item-1", name = "UnreadTest.cbz", isFolder = false, container = "cbz")
         val comicId = repository.importJellyfinComic(item).getOrThrow()
-        server.takeRequest(5, TimeUnit.SECONDS) // consume download
+        val progressServer = enableProgressFixture(comicId, ticks = 0L, played = true)
+        takeRequest() // consume download
 
         server.enqueue(MockResponse().setResponseCode(204))
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
@@ -1094,10 +1103,10 @@ class LibraryRepositoryJellyfinTest {
         // Explicit mark unread
         repository.syncJellyfinProgressDirect(comicId, page = 0, explicitPlayed = false)
 
-        val progressReq = server.takeRequest(5, TimeUnit.SECONDS)
+        val progressReq = takeRequest()
         assertNotNull(progressReq)
 
-        val deleteReq = server.takeRequest(5, TimeUnit.SECONDS)
+        val deleteReq = takeRequest()
         assertNotNull(deleteReq)
         assertEquals("/Users/u/PlayedItems/unread-item-1", deleteReq?.path)
         assertEquals("DELETE", deleteReq?.method)
@@ -1122,7 +1131,8 @@ class LibraryRepositoryJellyfinTest {
 
         val item = JellyfinItem(id = "reconcile-item-1", name = "ReconcileTest.cbz", isFolder = false, container = "cbz")
         val comicId = repository.importJellyfinComic(item).getOrThrow()
-        server.takeRequest(5, TimeUnit.SECONDS) // consume download
+        val progressServer = enableProgressFixture(comicId, ticks = 0L, played = false)
+        takeRequest() // consume download
 
         // Remote has progress at page 6 (60,000 ticks)
         val remoteItem = JellyfinItem(
@@ -1134,6 +1144,7 @@ class LibraryRepositoryJellyfinTest {
             played = false,
         )
 
+        progressServer.position(item.id, 60_000L, false)
         repository.reconcileItemProgressFromRemote(remoteItem)
 
         val updated = comicDao.getById(comicId)
@@ -1246,7 +1257,8 @@ class LibraryRepositoryJellyfinTest {
 
         val item = JellyfinItem(id = "intent-item-1", name = "IntentTest.cbz", isFolder = false, container = "cbz")
         val comicId = repository.importJellyfinComic(item).getOrThrow()
-        server.takeRequest(5, TimeUnit.SECONDS) // consume download
+        val progressServer = enableProgressFixture(comicId, ticks = 0L, played = true)
+        takeRequest() // consume download
 
         // 1. Explicitly mark as unread (explicitPlayed = false)
         repository.saveProgress(comicId, page = 0, slot = 0, explicitPlayed = false)
@@ -1268,11 +1280,11 @@ class LibraryRepositoryJellyfinTest {
 
         repository.flushJellyfinOutbox()
 
-        val progressReq = server.takeRequest(5, TimeUnit.SECONDS)
+        val progressReq = takeRequest()
         assertNotNull(progressReq)
         assertEquals("/Sessions/Playing/Progress", progressReq?.path)
 
-        val deleteReq = server.takeRequest(5, TimeUnit.SECONDS)
+        val deleteReq = takeRequest()
         assertNotNull(deleteReq)
         assertEquals("/Users/u/PlayedItems/intent-item-1", deleteReq?.path)
         assertEquals("DELETE", deleteReq?.method)
@@ -1327,7 +1339,7 @@ class LibraryRepositoryJellyfinTest {
             if (played != null) assertPlayed(takeRequest(), "race-item", "u", played)
             assertEquals(page * 10_000L, held.position.get())
             assertEquals(played, held.played.get())
-            assertEquals(if (played == null) 2 else 3, server.requestCount)
+            assertEquals(if (played == null) 2 else 3, held.writes.size)
         } finally {
             held.release.countDown()
             flush.cancel()
@@ -1345,7 +1357,7 @@ class LibraryRepositoryJellyfinTest {
         val observedDao = object : JellyfinSyncOutboxDao by outboxDao {
             override suspend fun getPendingForComic(comicId: Long): JellyfinSyncOutboxEntity? {
                 // Make the per-comic preflight lookup synchronous, so Unconfined runs to the mutex.
-                if (lookups.incrementAndGet() == 2) return snapshot
+                lookups.incrementAndGet()
                 return outboxDao.getPendingForComic(comicId)
             }
         }
@@ -1356,14 +1368,15 @@ class LibraryRepositoryJellyfinTest {
         var perComic: Job? = null
         try {
             withTimeout(5000) { held.started.await() }
+            val lookupsBefore = lookups.get()
             perComic = repository.triggerJellyfinProgressSync(comic, 3, debounceMs = 0)
             assertTrue(perComic!!.isActive)
-            assertEquals("Per-comic flush must wait before its locked re-read", 2, lookups.get())
+            assertEquals("Per-comic flush must wait before its locked re-read", lookupsBefore + 1, lookups.get())
             held.release.countDown()
             withTimeout(5000) { bulk.join(); perComic.join() }
             assertNull(outboxDao.getPendingForComic(comic))
             assertProgress(takeRequest(), "serialized-item", 3)
-            assertEquals("Only one send may acknowledge the shared pending row", 1, server.requestCount)
+            assertEquals("Only one send may acknowledge the shared pending row", 1, held.writes.size)
         } finally {
             held.release.countDown()
             bulk.cancel()
@@ -1415,7 +1428,7 @@ class LibraryRepositoryJellyfinTest {
             }
             assertEquals("Cancellation must retain unsent played intent and both rows", oldPending,
                 outboxDao.getPendingForUser("srv", "u"))
-            assertEquals(if (switchAccount) 5 else 2, server.requestCount)
+            assertEquals(if (switchAccount) 3 else 1, held.writes.size)
         } finally {
             held.release.countDown()
         }
@@ -1433,6 +1446,7 @@ class LibraryRepositoryJellyfinTest {
         refreshDaos()
         val held = HeldProgress(hold = false)
         configureSync(held)
+        held.position("durable-item", 0L, true)
         val comic = linkedComic("durable-item")
         saveOffline(comic, 0, false)
         saveOffline(comic, 2)
@@ -1455,6 +1469,7 @@ class LibraryRepositoryJellyfinTest {
     fun failedPlayedStatusRetainsIntentUntilBothRequestsSucceed() = runBlocking {
         val held = HeldProgress(hold = false)
         configureSync(held)
+        held.position("retry-item", 0L, true)
         val comic = linkedComic("retry-item")
         saveOffline(comic, 0, false)
         val pending = outboxDao.getPendingForComic(comic)
@@ -1470,7 +1485,7 @@ class LibraryRepositoryJellyfinTest {
         assertPlayed(takeRequest(), "retry-item", "u", false)
         assertEquals(false, held.played.get())
         assertNull(outboxDao.getPendingForComic(comic))
-        assertEquals(4, server.requestCount)
+        assertEquals(4, held.writes.size)
     }
 
     @Test
@@ -1486,6 +1501,167 @@ class LibraryRepositoryJellyfinTest {
         assertEquals(0, comicDao.getById(comic)?.lastPage)
         assertEquals(0, comicDao.getById(comic)?.lastSlot)
         assertNull(outboxDao.getPendingForComic(comic))
+        assertEquals(0, server.requestCount)
+    }
+
+
+    @Test fun aFreshOnePageLocalImportIsUnreadUntilReadingCompletesIt() = runBlocking {
+        val file = File(RuntimeEnvironment.getApplication().cacheDir, "fresh-one-page.cbz")
+        file.writeBytes(createValidCbzBytes(1))
+        val id = repository.importComic(android.net.Uri.fromFile(file)).getOrThrow()
+        val comic = comicDao.getById(id)!!
+        assertEquals(0, comic.lastPage)
+        assertEquals(false, comic.completionOverride)
+        assertFalse(comic.isCompleted)
+        assertTrue(comic.isUnread)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test fun freshImportsKeepServerReadStateSeparateFromExactPositionIncludingOnePage() = runBlocking {
+        credStore.saveAuth(JellyfinAuth("token-u", "u", "srv", "Reader"))
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        for ((index, snapshot) in listOf(Triple(1, 0L, false), Triple(5, 40_000L, false), Triple(5, 0L, true)).withIndex()) {
+            val (pages, ticks, played) = snapshot
+            val bytes = createValidCbzBytes(pages)
+            server.enqueue(MockResponse().setBody(okio.Buffer().write(bytes)))
+            val item = JellyfinItem("fresh-$index", "Fresh.cbz", false, container = "cbz", playbackPositionTicks = ticks, played = played)
+            val id = repository.importJellyfinComic(item).getOrThrow()
+            takeRequest()
+            val comic = comicDao.getById(id)!!
+            assertEquals((ticks / 10_000).toInt(), comic.lastPage)
+            assertEquals(played, comic.completionOverride)
+            assertEquals(played, comic.isCompleted)
+            assertEquals(ticks == 0L && !played, comic.isUnread)
+            assertNull(outboxDao.getPendingForComic(id))
+        }
+    }
+
+    private suspend fun importedRetentionFixture(itemId: String): Pair<JellyfinItem, Long> {
+        credStore.saveAuth(JellyfinAuth("token-u", "u", "srv", "Reader"))
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+        val item = JellyfinItem(itemId, "Retained.cbz", false, container = "cbz")
+        enqueueArchive()
+        val id = repository.importJellyfinComic(item).getOrThrow()
+        assertTrue(takeRequest().path!!.contains("/Download"))
+        return item to id
+    }
+
+    private fun enqueueArchive() {
+        val bytes = createValidCbzBytes(5)
+        server.enqueue(MockResponse().setBody(okio.Buffer().write(bytes)).setHeader("Content-Length", bytes.size))
+    }
+
+    @Test fun manualRemovalAndRedownloadPreserveCanonicalHistoryListsAndPendingRevisionAcrossReopen() = runBlocking {
+        repository.jellyfinSyncScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
+        repository.observationScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
+        db.close()
+        val context = RuntimeEnvironment.getApplication()
+        context.deleteDatabase("sync-durability.db")
+        fun open() = Room.databaseBuilder(context, AppDatabase::class.java, "sync-durability.db").allowMainThreadQueries().build()
+        db = open(); refreshDaos(); repository = newRepository(JellyfinClient("retention"))
+        val (item, id) = importedRetentionFixture("retention")
+        saveOffline(id, 3, true)
+        val list = repository.createReadingList("Retained order")
+        repository.addComicToReadingList(list, id)
+        val before = comicDao.getById(id)!!
+        val members = db.readingListDao().getAllItems()
+        val pending = outboxDao.getPendingForComic(id)
+        val identity = JellyfinItemIdentity("srv", "u", item.id)
+        val requestCount = server.requestCount
+        assertTrue(repository.removeJellyfinDownload(identity).isSuccess)
+        assertEquals(requestCount, server.requestCount)
+        assertFalse(File(before.filePath).exists())
+        before.coverPath?.let { assertFalse(File(it).exists()) }
+        assertEquals(before.copy(coverPath = null), comicDao.getById(id))
+        assertEquals(members, db.readingListDao().getAllItems())
+        assertEquals(pending, outboxDao.getPendingForComic(id))
+        assertTrue(repository.observeDownloadedJellyfinCopies().first().isEmpty())
+        repository.jellyfinSyncScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
+        repository.observationScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
+        db.close(); db = open(); refreshDaos(); repository = newRepository(JellyfinClient("retention-reopen"))
+        assertEquals(pending, outboxDao.getPendingForComic(id))
+        enqueueArchive()
+        // Differing server metadata must not replace the retained unsent local position/read state.
+        val restoredId = repository.importJellyfinComic(item.copy(playbackPositionTicks = 10_000, played = false)).getOrThrow()
+        takeRequest()
+        assertEquals(id, restoredId)
+        assertEquals(1, comicDao.getAll().size)
+        val restored = comicDao.getById(id)!!
+        assertEquals(3, restored.lastPage)
+        assertEquals(true, restored.completionOverride)
+        assertEquals(before.lastOpened, restored.lastOpened)
+        assertEquals(before.dateAdded, restored.dateAdded)
+        assertTrue(File(restored.filePath).isFile)
+        assertEquals(pending, outboxDao.getPendingForComic(id))
+        assertEquals(members, db.readingListDao().getAllItems())
+        assertEquals(id, linkDao.findLink("jellyfin", "srv", "u", item.id)!!.comicId)
+        assertEquals(id, repository.observeDownloadedJellyfinCopies().first()[item.id]!!.id)
+    }
+
+    @Test fun failedRedownloadLeavesRetainedHistoryPendingAndListsUntouched() = runBlocking {
+        val (item, id) = importedRetentionFixture("retention-failure")
+        saveOffline(id, 2, false)
+        val list = repository.createReadingList("Keep")
+        repository.addComicToReadingList(list, id)
+        assertTrue(repository.removeJellyfinDownload(JellyfinItemIdentity("srv", "u", item.id)).isSuccess)
+        val before = comicDao.getById(id)
+        val members = db.readingListDao().getAllItems()
+        val pending = outboxDao.getPendingForComic(id)
+        val context = RuntimeEnvironment.getApplication()
+        fun files() = listOf("comics", "covers").flatMap { File(context.filesDir, it).listFiles()?.map { it.path }.orEmpty() }.toSet()
+        val originalFiles = files()
+        db.openHelper.writableDatabase.execSQL("CREATE TRIGGER reject_retention_link BEFORE INSERT ON remote_comic_links BEGIN SELECT RAISE(ABORT, 'injected relink failure'); END")
+        enqueueArchive()
+        assertTrue(repository.importJellyfinComic(item).isFailure)
+        takeRequest()
+        assertEquals(listOf(before), comicDao.getAll())
+        assertEquals(pending, outboxDao.getPendingForComic(id))
+        assertEquals(members, db.readingListDao().getAllItems())
+        assertEquals(id, linkDao.findLink("jellyfin", "srv", "u", item.id)!!.comicId)
+        assertEquals(originalFiles, files())
+    }
+
+    @Test fun cancellationAtRelinkCommitKeepsThePublishedCanonicalCopyUsable() = runBlocking {
+        val (item, id) = importedRetentionFixture("retention-cancel")
+        saveOffline(id, 3, false)
+        assertTrue(repository.removeJellyfinDownload(JellyfinItemIdentity("srv", "u", item.id)).isSuccess)
+        val pending = outboxDao.getPendingForComic(id)
+        val parent = Job()
+        val links = object : RemoteComicLinkDao by linkDao {
+            override suspend fun insert(link: net.digitalbc.leafreader.data.db.RemoteComicLinkEntity): Long {
+                val result = linkDao.insert(link)
+                parent.cancel() // Cancellation while publication is committing must not delete committed files.
+                return result
+            }
+        }
+        repository.jellyfinSyncScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
+        repository.observationScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
+        repository = LibraryRepository(RuntimeEnvironment.getApplication(), comicDao, settings, db.readingListDao(), db,
+            remoteComicLinkDao = links, jellyfinClient = JellyfinClient("retention-cancel"), jellyfinCredentialStore = credStore)
+        enqueueArchive()
+        val operation = CoroutineScope(parent + Dispatchers.IO).async { repository.importJellyfinComic(item) }
+        assertTrue(runCatching { operation.await() }.exceptionOrNull() is CancellationException)
+        parent.join()
+        takeRequest()
+        assertEquals(1, comicDao.getAll().size)
+        assertTrue(File(comicDao.getById(id)!!.filePath).isFile)
+        assertEquals(id, repository.getReadableJellyfinComic(JellyfinItemIdentity("srv", "u", item.id)).getOrThrow()!!.id)
+        assertEquals(3, comicDao.getById(id)!!.lastPage)
+        assertEquals(pending, outboxDao.getPendingForComic(id))
+    }
+
+    @Test fun removeDownloadRejectsLocalOriginalsAndUnmanagedPathsWithoutRequests() = runBlocking {
+        for (source in listOf("local", "smb", "jellyfin")) {
+            val identity = JellyfinItemIdentity("srv", "u", "protected-$source")
+            val comic = retainedComic(identity)
+            db.openHelper.writableDatabase.execSQL("UPDATE comics SET source=? WHERE id=?", arrayOf<Any>(source, comic.id))
+            assertTrue(repository.removeJellyfinDownload(identity).isFailure)
+            assertTrue(File(comic.filePath).isFile)
+            assertNotNull(comicDao.getById(comic.id))
+        }
         assertEquals(0, server.requestCount)
     }
 
@@ -1519,12 +1695,31 @@ class LibraryRepositoryJellyfinTest {
     private suspend fun linkedComic(item: String, user: String = "u"): Long {
         val id = comicDao.insert(net.digitalbc.leafreader.data.db.ComicEntity(
             title = item, filePath = "/$item.cbz", coverPath = null, format = "CBZ",
-            pageCount = 10, dateAdded = 1000, lastOpened = 1000,
+            pageCount = 10, dateAdded = 1000, lastOpened = 1000, completionOverride = false,
         ))
         linkDao.insert(net.digitalbc.leafreader.data.db.RemoteComicLinkEntity(
             comicId = id, provider = "jellyfin", serverId = "srv", userId = user, itemId = item,
         ))
+        val snapshot = (server.dispatcher as SyncProtocolDispatcher).position(item)
+        seedBaseline(id, snapshot.positionTicks!!, snapshot.played!!)
         return id
+    }
+
+    private suspend fun seedBaseline(comicId: Long, ticks: Long, played: Boolean) {
+        val link = linkDao.findByComicId(comicId)!!
+        comicDao.updateCompletion(comicId, played)
+        db.jellyfinMetadataCacheDao().put(net.digitalbc.leafreader.data.db.JellyfinMetadataCache(
+            link.serverId, link.userId, baseUrl(), "progress-baseline:${link.itemId}",
+            JSONObject().put("ticks", ticks).put("played", played).toString()))
+    }
+
+    private suspend fun enableProgressFixture(comicId: Long, ticks: Long = 0, played: Boolean = false): SyncProtocolDispatcher {
+        val link = linkDao.findByComicId(comicId)!!
+        return SyncProtocolDispatcher(queuedResponses = true).also {
+            it.position(link.itemId, ticks, played)
+            seedBaseline(comicId, ticks, played)
+            server.dispatcher = it
+        }
     }
 
     private suspend fun saveOffline(comic: Long, page: Int, played: Boolean? = null) {
@@ -1537,8 +1732,14 @@ class LibraryRepositoryJellyfinTest {
         }
     }
 
-    private fun takeRequest(): RecordedRequest =
-        requireNotNull(server.takeRequest(5, TimeUnit.SECONDS)) { "Expected a Jellyfin request" }
+    private fun takeRequest(): RecordedRequest {
+        while (true) {
+            val request = requireNotNull(server.takeRequest(5, TimeUnit.SECONDS)) { "Expected a Jellyfin request" }
+            if (request.method == "GET" && request.requestUrl!!.pathSegments.let { it.size == 2 && it[0] == "Items" }) {
+                assertNotNull("Progress reads must be authenticated", request.getHeader("Authorization"))
+            } else return request
+        }
+    }
 
     private fun assertProgress(
         request: RecordedRequest, item: String, page: Int, token: String = "token-u",
@@ -1556,14 +1757,13 @@ class LibraryRepositoryJellyfinTest {
         assertEquals("/Users/$user/PlayedItems/$item", request.path)
     }
 
-    private class HeldProgress(private val hold: Boolean = true) : Dispatcher() {
+    private class HeldProgress(private val hold: Boolean = true) : SyncProtocolDispatcher() {
         val started = CompletableDeferred<Unit>()
         val cancelled = CompletableDeferred<Unit>()
         val release = CountDownLatch(1)
         val position = AtomicLong(-1)
         val played = AtomicReference<Boolean?>(null)
         @Volatile var loginUser = "u"
-        @Volatile var failNextPlayed = false
         private val first = AtomicBoolean(true)
         val client = JellyfinClient("sync-test", customHttpClient = OkHttpClient.Builder()
             .eventListener(object : EventListener() {
@@ -1581,24 +1781,21 @@ class LibraryRepositoryJellyfinTest {
                     """{"AccessToken":"token-$loginUser","ServerId":"srv","User":{"Id":"$loginUser","Name":"Test"}}"""
                 )
             }
-            if (request.method == "GET") {
+            if (request.method == "GET" && !path.startsWith("/Items/")) {
                 return MockResponse().setBody("""{"Items":[],"TotalRecordCount":0,"StartIndex":0}""")
             }
-            if (path == "/Sessions/Playing/Progress") {
-                if (hold && first.compareAndSet(true, false)) {
-                    started.complete(Unit)
-                    if (!release.await(10, TimeUnit.SECONDS)) return MockResponse().setResponseCode(500)
-                }
-                val json = JSONObject(request.body.clone().readUtf8())
-                position.set(json.getLong("PositionTicks"))
-            } else if (path.contains("/PlayedItems/")) {
-                if (failNextPlayed) {
-                    failNextPlayed = false
-                    return MockResponse().setResponseCode(500)
-                }
-                played.set(request.method == "POST")
+            val response = super.dispatch(request)
+            if (response.status.split(' ')[1].toInt() in 200..299) {
+                if (path == "/Sessions/Playing/Progress") {
+                    val json = JSONObject(request.body.clone().readUtf8())
+                    position.set(json.getLong("PositionTicks"))
+                    if (hold && first.compareAndSet(true, false)) {
+                        started.complete(Unit)
+                        if (!release.await(10, TimeUnit.SECONDS)) return MockResponse().setResponseCode(500)
+                    }
+                } else if (path.contains("/PlayedItems/")) played.set(request.method == "POST")
             }
-            return MockResponse().setResponseCode(204)
+            return response
         }
     }
 }

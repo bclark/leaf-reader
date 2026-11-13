@@ -154,4 +154,12 @@ class JellyfinModelsTest {
         assertEquals(23, JellyfinProgress.ticksToPage(300_000L, maxPages = 24))
         assertEquals(0, JellyfinProgress.ticksToPage(-10_000L, maxPages = 24))
     }
+    @Test
+    fun extremeTicksClampBeforeNarrowingInsteadOfWrappingThePage() {
+        assertEquals(19, JellyfinProgress.ticksToPage(Long.MAX_VALUE, maxPages = 20))
+        assertEquals(Int.MAX_VALUE, JellyfinProgress.ticksToPage(Long.MAX_VALUE))
+        assertEquals(0, JellyfinProgress.ticksToPage(Long.MIN_VALUE, maxPages = 20))
+        assertEquals(0, JellyfinProgress.ticksToPage(Long.MIN_VALUE))
+    }
+
 }

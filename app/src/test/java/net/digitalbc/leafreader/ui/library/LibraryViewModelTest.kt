@@ -981,6 +981,21 @@ class LibraryViewModelTest {
     }
 
     @Test
+    fun retainedDetailReflectsCommittedPositionAndCompletionChanges() {
+        val item = JellyfinItem("item", "Comic", false)
+        val saved = createComic(42, "Comic", lastPage = 4, series = "Fixture")
+        fakeComicDao.setComics(listOf(saved))
+        val vm = detailViewModel(local = { Result.success(saved) }) { identity ->
+            Result.success(JellyfinItemDetails(identity, item))
+        }
+        vm.openJellyfinDetail(item)
+        val changed = saved.copy(lastPage = 1, completionOverride = true)
+        fakeComicDao.setComics(listOf(changed))
+        assertEquals(changed, vm.jellyfinDetail.value!!.localComic)
+        assertTrue(vm.jellyfinDetail.value!!.localComic!!.isCompleted)
+    }
+
+    @Test
     fun repeatedReadAndResumeDoNotReplacePendingNavigation() = runBlocking {
         val item = JellyfinItem("item", "Comic", false)
         val gate = CompletableDeferred<Unit>()
@@ -1545,6 +1560,19 @@ class LibraryViewModelTest {
         override suspend fun updateProgress(id: Long, page: Int, slot: Int, openedAt: Long): Int {
             comicsState.value = comicsState.value.map {
                 if (it.id == id) it.copy(lastPage = page, lastSlot = slot, lastOpened = openedAt) else it
+            }
+            return 1
+        }
+
+        override suspend fun updateLocalFiles(id: Long, path: String, cover: String?, format: String, pageCount: Int): Int {
+            val comic = getById(id) ?: return 0
+            setComics(getAll().map { if (it.id == id) comic.copy(filePath = path, coverPath = cover, format = format, pageCount = pageCount) else it })
+            return 1
+        }
+
+        override suspend fun updateCompletion(id: Long, completed: Boolean?): Int {
+            comicsState.value = comicsState.value.map {
+                if (it.id == id) it.copy(completionOverride = completed) else it
             }
             return 1
         }

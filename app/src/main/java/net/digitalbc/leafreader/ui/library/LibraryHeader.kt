@@ -21,15 +21,8 @@ import net.digitalbc.leafreader.ui.theme.Ochre
 @Composable
 internal fun LibraryTabs(selected: LibraryFilter, onSelect: (LibraryFilter) -> Unit) {
     val views = LibraryFilter.entries
-    TabRow(
-        selectedTabIndex = views.indexOf(selected),
-        containerColor = MaterialTheme.colorScheme.background,
-        contentColor = MaterialTheme.colorScheme.onBackground,
-        indicator = { positions ->
-            TabRowDefaults.SecondaryIndicator(
-                Modifier.tabIndicatorOffset(positions[views.indexOf(selected)]), color = Ochre)
-        },
-    ) {
+    val largeType = androidx.compose.ui.platform.LocalConfiguration.current.fontScale > 1.3f
+    val content: @Composable () -> Unit = {
         views.forEach { view ->
             Tab(selected = view == selected, onClick = { onSelect(view) },
                 modifier = Modifier.heightIn(min = 48.dp)) {
@@ -38,10 +31,21 @@ internal fun LibraryTabs(selected: LibraryFilter, onSelect: (LibraryFilter) -> U
                     LibraryFilter.SERIES -> R.string.library_view_series
                     LibraryFilter.READING_LISTS -> R.string.library_view_lists
                     LibraryFilter.OFFLINE -> R.string.library_view_offline
-                }), modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp), fontFamily = Archivo)
+                }), modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp), fontFamily = Archivo,
+                    maxLines = if (largeType) 1 else 2, softWrap = !largeType)
             }
         }
     }
+    val indicator: @Composable (List<TabPosition>) -> Unit = { positions ->
+        TabRowDefaults.SecondaryIndicator(
+            Modifier.tabIndicatorOffset(positions[views.indexOf(selected)]), color = Ochre)
+    }
+    if (largeType) ScrollableTabRow(selectedTabIndex = views.indexOf(selected), edgePadding = 0.dp,
+        containerColor = MaterialTheme.colorScheme.background, contentColor = MaterialTheme.colorScheme.onBackground,
+        indicator = indicator, tabs = content)
+    else TabRow(selectedTabIndex = views.indexOf(selected), containerColor = MaterialTheme.colorScheme.background,
+        contentColor = MaterialTheme.colorScheme.onBackground, indicator = indicator, tabs = content)
+
 }
 
 @Composable
