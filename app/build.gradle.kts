@@ -57,6 +57,7 @@ android {
             matchingFallbacks += listOf("debug")
         }
         release {
+            ndk { debugSymbolLevel = "SYMBOL_TABLE" }
             // R8 strips dead code; resource shrinking drops unreferenced resources.
             isMinifyEnabled = true
             isShrinkResources = true

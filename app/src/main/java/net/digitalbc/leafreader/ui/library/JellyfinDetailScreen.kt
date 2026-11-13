@@ -79,7 +79,30 @@ internal fun JellyfinDetailScreen(
     cover: @Composable (JellyfinItem, Modifier) -> Unit,
     heroBitmap: Bitmap? = null,
     onCreator: ((JellyfinPerson) -> Unit)? = null,
+    onSync: (() -> Unit)? = null,
+    syncing: Boolean = false,
+    syncError: String? = null,
+    onRemoveDownload: (() -> Unit)? = null,
+    removingDownload: Boolean = false,
 ) {
+    var confirmRemoval by remember(state.identity) { mutableStateOf(false) }
+    if (confirmRemoval && onRemoveDownload != null) {
+        AlertDialog(onDismissRequest = { confirmRemoval = false },
+            title = { Text(stringResource(R.string.remove_download)) },
+            text = { Text(stringResource(R.string.remove_download_explanation)) },
+            confirmButton = {
+                TextButton(onClick = { confirmRemoval = false; onRemoveDownload() },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) {
+                    Text(stringResource(R.string.remove_download))
+                }
+            }, dismissButton = {
+                TextButton(onClick = { confirmRemoval = false }, modifier = Modifier.heightIn(min = 48.dp),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) {
+                    Text(stringResource(R.string.cancel))
+                }
+            })
+    }
     val item = state.details?.item ?: state.item
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -169,7 +192,8 @@ internal fun JellyfinDetailScreen(
                                 }
                             }
                             DetailActions(state, importing, importProgress, importDetail,
-                                onRead, onDownload, onCancel, onCheckCopy)
+                                onRead, onDownload, onCancel, onCheckCopy, onSync, syncing, syncError,
+                                onRemoveDownload?.let { { confirmRemoval = true } }, removingDownload)
                         }
                     }
                 }
@@ -233,6 +257,11 @@ private fun DetailActions(
     onDownload: () -> Unit,
     onCancel: () -> Unit,
     onCheckCopy: () -> Unit,
+    onSync: (() -> Unit)?,
+    syncing: Boolean,
+    syncError: String?,
+    onRemoveDownload: (() -> Unit)?,
+    removingDownload: Boolean,
 ) {
     val comic = state.localComic
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -253,7 +282,7 @@ private fun DetailActions(
                 }
             }
             comic != null -> {
-                Button(onClick = onRead, modifier = Modifier.heightIn(min = 48.dp),
+                Button(onClick = onRead, enabled = !removingDownload, modifier = Modifier.heightIn(min = 48.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = net.digitalbc.leafreader.ui.theme.Ochre,
@@ -267,6 +296,20 @@ private fun DetailActions(
                 Text(stringResource(R.string.jellyfin_device_position,
                     comic.lastPage.coerceIn(0, (comic.pageCount - 1).coerceAtLeast(0)) + 1, comic.pageCount),
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+                onSync?.let { sync ->
+                    OutlinedButton(onClick = sync, enabled = !syncing && !removingDownload, modifier = Modifier.heightIn(min = 48.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) {
+                        Text(stringResource(if (syncing) R.string.loading else R.string.sync_reading_position))
+                    }
+                }
+                syncError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                onRemoveDownload?.let { remove ->
+                    OutlinedButton(onClick = remove, enabled = !removingDownload && !syncing,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) {
+                        Text(stringResource(if (removingDownload) R.string.loading else R.string.remove_download))
+                    }
+                }
             }
             importing -> {
                 Text(importDetail ?: stringResource(R.string.importing))

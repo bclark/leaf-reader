@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="library_view_all">All</string>
+    <string name="library_view_series">Series</string>
+    <string name="library_view_lists">Lists</string>
+    <string name="library_view_offline">Offline</string>
+    <string name="library_unread_only">Unread only</string>
+    <string name="library_clear_unread">Clear Unread only</string>
+    <string name="library_no_unread">No unread comics in this view.</string>
+    <string name="library_offline_empty">No readable copies yet. Import a comic from Files or SMB, or download one from Jellyfin.</string>
+    <string name="library_default_rtl">Default right-to-left reading</string>
+    <string name="library_edit">Edit</string>
+    <string name="library_select_all">Select all</string>
+    <string name="library_deselect_all">Deselect all</string>
+    <string name="library_done">Done</string>
+    <plurals name="library_series_completed">
+        <item quantity="one">%1$d issue · read</item>
+        <item quantity="other">%1$d issues · read</item>
+    </plurals>
+    <plurals name="library_series_unread">
+        <item quantity="one">%1$d issue · %2$d unread</item>
+        <item quantity="other">%1$d issues · %2$d unread</item>
+    </plurals>
+</resources>

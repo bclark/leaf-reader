@@ -47,6 +47,8 @@ internal fun LazyGridScope.mainCatalogueGrid(
     accountScope: String = "",
     onLongClick: (JellyfinCatalogueEntry) -> Unit = {},
     coverWidthPx: Int = 400,
+    coverSelections: Map<String, String> = emptyMap(),
+    onCoverSelected: (String, String) -> Unit = { _, _ -> },
 ) {
     if (state.library == null || state.libraries.size > 1) {
         item(span = { GridItemSpan(maxLineSpan) }) {
@@ -95,13 +97,21 @@ internal fun LazyGridScope.mainCatalogueGrid(
         state.seriesGroups.forEach { group ->
             item(key = "remote-series:${group.key}", contentType = "remote-series") {
                 androidx.compose.runtime.CompositionLocalProvider(LocalRemoteCoverOffline provides state.offline) {
-                    RemoteSeriesStackCard(group, columns, state.hasMore, loadCover, coverWidthPx) { onSeries(group.key) }
+                    RemoteSeriesStackCard(group, columns, state.hasMore, loadCover, coverWidthPx,
+                        selectedCoverId = coverSelections["remote:${group.key}"],
+                        onCoverSelected = { onCoverSelected("remote:${group.key}", it) }) { onSeries(group.key) }
                 }
             }
         }
     } else {
         val entries = if (state.view == JellyfinCatalogueView.SERIES)
             state.seriesGroups.firstOrNull { it.key == selectedSeries }?.entries.orEmpty() else state.entries
+        if (selectedSeries != null && entries.isEmpty()) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Text(if (state.unreadOnly) androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_no_unread)
+                    else "No comics in this series.")
+            }
+        }
         if (state.view == JellyfinCatalogueView.LISTS && state.collection == null) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Text("Jellyfin collections · account-wide. Only readable members in this comic library are shown on open.")
@@ -141,6 +151,8 @@ internal fun LazyGridScope.mainCatalogueGrid(
     if (state.loaded && !state.loading && state.entries.isEmpty() && state.library != null && state.error == null) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Text(if (state.creator != null) androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.creator_no_matches)
+                else if (state.view == JellyfinCatalogueView.LISTS && state.collection == null) "No compatible Jellyfin collections."
+                else if (state.unreadOnly) androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_no_unread)
                 else if (state.view == JellyfinCatalogueView.LISTS) "No compatible collections or members on this page."
                 else "No comics in this view. Unknown reading state is not classified as unread.")
         }

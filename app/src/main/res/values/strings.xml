@@ -103,4 +103,6 @@
     <string name="creator_no_library">Connect to a comic library to find this creator.</string>
     <string name="jellyfin_retained_read_explanation">Downloads the complete comic before opening. The copy stays on this device until you remove it.</string>
     <string name="creator_account_changed">The connected account changed. Return to your library and choose a creator again.</string>
+    <string name="privacy_policy">Privacy policy</string>
+    <string name="notices_load_failed">Could not load third-party notices.</string>
 </resources>

@@ -46,6 +46,37 @@ class BackupManagerTest {
     }
 
     @Test
+    fun completionRoundTripsSeparatelyFromPositionAndOldBackupsKeepLegacyDefaults() = runBlocking {
+        val states = listOf(true, false, null)
+        for ((index, completed) in states.withIndex()) {
+            db.comicDao().insert(ComicEntity(id = index + 1L, title = "Issue $index",
+                filePath = "/fixture/$index.cbz", coverPath = null, format = "CBZ", pageCount = 20,
+                lastPage = if (index == 0) 0 else 19, dateAdded = 1, lastOpened = 2,
+                completionOverride = completed))
+        }
+        val json = repository.exportBackup("0.3.7")
+        assertEquals(states, BackupManager.parseAndValidate(json).getOrThrow().comics.map { it.completed })
+        for (id in 1L..3L) db.comicDao().updateCompletion(id, null)
+        repository.applyBackup(json, BackupConflictStrategy.OVERWRITE).getOrThrow()
+        val restored = db.comicDao().getAll().sortedBy { it.id }
+        assertEquals(states, restored.map { it.completionOverride })
+        assertEquals(listOf(0, 19, 19), restored.map { it.lastPage })
+        assertTrue(restored[0].isCompleted)
+        assertFalse(restored[0].isUnread)
+        assertFalse(restored[1].isCompleted)
+        assertTrue(restored[2].isCompleted)
+
+        val legacy = org.json.JSONObject(json)
+        for (i in 0 until legacy.getJSONArray("comics").length())
+            legacy.getJSONArray("comics").getJSONObject(i).remove("completed")
+        repository.applyBackup(legacy.toString(), BackupConflictStrategy.OVERWRITE).getOrThrow()
+        assertTrue(db.comicDao().getAll().all { it.completionOverride == null })
+        assertTrue(db.comicDao().getById(1)!!.isUnread)
+        legacy.getJSONArray("comics").getJSONObject(0).put("completed", "invalid")
+        assertTrue(BackupManager.parseAndValidate(legacy.toString()).isFailure)
+    }
+
+    @Test
     fun remoteMembersRoundTripWithoutDownloadsAndPreserveScopedIdentityAndOrder() = runBlocking {
         val list = repository.createReadingList("Remote reading order")
         val entry = net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueEntry(

@@ -23,6 +23,12 @@ interface ComicDao {
     @Query("UPDATE comics SET lastPage = :page, lastSlot = :slot, lastOpened = :openedAt WHERE id = :id")
     suspend fun updateProgress(id: Long, page: Int, slot: Int, openedAt: Long): Int
 
+    @Query("UPDATE comics SET completionOverride = :completed WHERE id = :id")
+    suspend fun updateCompletion(id: Long, completed: Boolean?): Int
+
+    @Query("UPDATE comics SET filePath = :path, coverPath = :cover, format = :format, pageCount = :pageCount WHERE id = :id")
+    suspend fun updateLocalFiles(id: Long, path: String, cover: String?, format: String, pageCount: Int): Int
+
     @Query("UPDATE comics SET pageCount = :pageCount WHERE id = :id")
     suspend fun updatePageCount(id: Long, pageCount: Int): Int
 

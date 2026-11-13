@@ -52,6 +52,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.booleanResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import net.digitalbc.leafreader.R
@@ -536,6 +538,28 @@ fun MenuScreen(
 
             Spacer(Modifier.size(32.dp))
 
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).heightIn(min = 48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween) {
+                var rightToLeft by remember { mutableStateOf(settings.defaultRightToLeft) }
+                val directionLabel = stringResource(R.string.library_default_rtl)
+                Text(directionLabel, modifier = Modifier.weight(1f),
+                    fontFamily = Archivo, color = MaterialTheme.colorScheme.onSurface)
+                Switch(checked = rightToLeft,
+                    modifier = Modifier.semantics { contentDescription = directionLabel },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Ink,
+                        checkedTrackColor = MaterialTheme.colorScheme.tertiary,
+                        checkedBorderColor = MaterialTheme.colorScheme.tertiary,
+                        uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        uncheckedTrackColor = Ink,
+                        uncheckedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ), onCheckedChange = {
+                    settings.defaultRightToLeft = it
+                    rightToLeft = it
+                })
+            }
+
             // ---- SMB Drive -----------------------------------------------------------
             SectionLabel("SMB DRIVE")
             Spacer(Modifier.size(10.dp))
@@ -973,7 +997,7 @@ fun MenuScreen(
             }
 
             Spacer(Modifier.size(18.dp))
-            LinkRow("Privacy policy — Leaf collects no data.") {
+            LinkRow(stringResource(R.string.privacy_policy)) {
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_URL)))
             }
             Spacer(Modifier.size(8.dp))
@@ -1082,10 +1106,18 @@ fun MenuScreen(
     }
 
     if (showLicensesDialog) {
-        val licensesText = remember {
-            runCatching {
-                context.assets.open("THIRD_PARTY_NOTICES.md").bufferedReader().use { it.readText() }
-            }.getOrDefault("Failed to load third-party notices.")
+        val loadingNotices = stringResource(R.string.loading)
+        val failedNotices = stringResource(R.string.notices_load_failed)
+        val licensesText by androidx.compose.runtime.produceState(loadingNotices, context, failedNotices) {
+            value = withContext(Dispatchers.IO) {
+                runCatching {
+                    val files = listOf("THIRD_PARTY_NOTICES.md") +
+                        context.assets.list("THIRD_PARTY_LICENSES").orEmpty().sorted().map { "THIRD_PARTY_LICENSES/$it" }
+                    files.joinToString("\n\n") { path ->
+                        context.assets.open(path).bufferedReader().use { it.readText() }
+                    }
+                }.getOrDefault(failedNotices)
+            }
         }
         AlertDialog(
             onDismissRequest = { showLicensesDialog = false },

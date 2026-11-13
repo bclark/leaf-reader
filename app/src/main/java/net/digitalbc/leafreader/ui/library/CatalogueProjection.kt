@@ -12,7 +12,7 @@ internal class CatalogueProjector {
         val old = previous
         val reusable = old != null && old.entries === base.entries && old.indexedEntries === base.indexedEntries &&
             old.accountScope == base.accountScope && old.library?.id == base.library?.id &&
-            old.view == base.view && old.usesIndex == base.usesIndex && old.launchFailure == base.launchFailure
+            old.view == base.view && old.unreadOnly == base.unreadOnly && old.usesIndex == base.usesIndex && old.launchFailure == base.launchFailure
         val prepared = if (reusable) result!! else prepareCatalogue(base)
         val downloaded = if (reusable && downloads == downloadedIds) prepared.downloadedSeriesGroups else
             prepared.seriesGroups.mapNotNull { group ->
@@ -31,12 +31,15 @@ private fun prepareCatalogue(base: CatalogueState): CatalogueState {
     if (base.launchFailure == JellyfinFailureKind.AUTHENTICATION ||
         base.launchFailure == JellyfinFailureKind.ACCESS_DENIED)
         return base.copy(entries = emptyList(), seriesGroups = emptyList(), downloadedSeriesGroups = emptyList())
-    val entries = if (base.usesIndex) {
+    val candidates = if (base.usesIndex) {
         if (base.view == JellyfinCatalogueView.UNREAD) base.entries.filter { it.played == false } else base.entries
     } else if (base.indexedEntries.isEmpty()) base.entries else {
         val known = base.indexedEntries.associateBy { it.item.id }
         base.entries.map { it.copy(folder = known[it.item.id]?.folder ?: it.folder) }
     }
+    val entries = if (base.unreadOnly) candidates.filter {
+        (base.view == JellyfinCatalogueView.LISTS && base.collection == null) || it.played == false
+    } else candidates
     val groups = if (base.view == JellyfinCatalogueView.SERIES)
         JellyfinSeries.groups(base.accountScope, "", base.library?.id.orEmpty(), entries) else emptyList()
     return base.copy(entries = entries, seriesGroups = groups)

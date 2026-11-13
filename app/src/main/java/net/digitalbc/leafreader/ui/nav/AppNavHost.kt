@@ -9,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -41,6 +42,7 @@ private object Routes {
 @Composable
 fun AppNavHost() {
     val navController = rememberNavController()
+    val currentEntry by navController.currentBackStackEntryAsState()
     val app = LocalContext.current.applicationContext as ComicReaderApp
     val libraryVm: LibraryViewModel = viewModel(factory = LibraryViewModel.factory(app))
 
@@ -54,6 +56,8 @@ fun AppNavHost() {
             navController.navigate("creator/${Uri.encode(person.name)}?id=${Uri.encode(person.id.orEmpty())}&scope=${Uri.encode(catalogueVm.positionScope)}")
         },
     ) {
+    if (currentEntry?.destination?.route != Routes.READER)
+        net.digitalbc.leafreader.ui.library.ProgressConflictHost(libraryVm)
     NavHost(navController = navController, startDestination = Routes.LIBRARY) {
         composable(Routes.CREATOR, arguments = listOf(
             navArgument("name") { type = NavType.StringType },

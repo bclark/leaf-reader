@@ -48,4 +48,19 @@ class CatalogueProjectionTest {
         assertNull(updated.entries.single().folder)
         assertEquals("1", updated.entries.single().item.id)
     }
+    @Test fun independentUnreadKeepsSeriesIdentityAndCollectionRowsAndRejectsUnknown() {
+        val rows = listOf(entry(1), entry(2).copy(played = true), entry(3).copy(played = null))
+        val projector = CatalogueProjector()
+        val base = CatalogueState(accountScope = "server-user", view = JellyfinCatalogueView.SERIES, entries = rows)
+        val all = projector.prepare(base, setOf("1", "2"))
+        val unread = projector.prepare(base.copy(unreadOnly = true), setOf("1", "2"))
+        assertEquals(all.seriesGroups.single().key, unread.seriesGroups.single().key)
+        assertEquals(listOf("1"), unread.seriesGroups.single().entries.map { it.item.id })
+        assertEquals(listOf("1"), unread.downloadedSeriesGroups.single().entries.map { it.item.id })
+        assertEquals(3, projector.prepare(base, emptySet()).entries.size)
+        val collection = entry(4).copy(type = "BoxSet", played = null)
+        assertEquals(listOf(collection), projector.prepare(CatalogueState(
+            view = JellyfinCatalogueView.LISTS, unreadOnly = true, entries = listOf(collection)), emptySet()).entries)
+    }
+
 }

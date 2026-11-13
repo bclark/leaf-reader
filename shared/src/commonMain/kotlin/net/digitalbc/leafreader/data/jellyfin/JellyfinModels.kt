@@ -195,8 +195,9 @@ object JellyfinProgress {
         (pageIndex.coerceAtLeast(0).toLong()) * TICKS_PER_PAGE
 
     fun ticksToPage(ticks: Long, maxPages: Int? = null): Int {
-        val page = (ticks / TICKS_PER_PAGE).toInt()
-        return if (maxPages != null && maxPages > 0) page.coerceIn(0, maxPages - 1) else page.coerceAtLeast(0)
+        val page = (ticks / TICKS_PER_PAGE).coerceAtLeast(0L)
+        val maximum = if (maxPages != null && maxPages > 0) (maxPages - 1).toLong() else Int.MAX_VALUE.toLong()
+        return page.coerceAtMost(maximum).toInt()
     }
 }
 

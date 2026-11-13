@@ -3,6 +3,9 @@ package net.digitalbc.leafreader.ui.library
 import android.graphics.BitmapFactory
 import android.graphics.Bitmap
 import android.util.LruCache
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -182,7 +185,7 @@ private fun formatFileSize(bytes: Long): String = when {
     else -> "$bytes B"
 }
 
-@OptIn(ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     viewModel: LibraryViewModel,
@@ -195,7 +198,11 @@ fun LibraryScreen(
     catalogue: JellyfinCatalogueViewModel? = null,
 ) {
     val comics by viewModel.comics.collectAsStateWithLifecycle()
-    val libraryItems by viewModel.libraryItems.collectAsStateWithLifecycle()
+    val preparedLocalRows by viewModel.libraryRows.collectAsStateWithLifecycle()
+    val libraryItems = preparedLocalRows.items
+    val unreadOnly by viewModel.unreadOnly.collectAsStateWithLifecycle()
+    val progressConflicts by viewModel.progressConflicts.collectAsStateWithLifecycle()
+    val coverSelections by viewModel.coverSelections.collectAsStateWithLifecycle()
     val currentFilter by viewModel.libraryFilter.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
@@ -203,7 +210,6 @@ fun LibraryScreen(
     val importStatus by viewModel.importStatus.collectAsStateWithLifecycle()
     val importDetail by viewModel.importDetail.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
-    val defaultRtl by viewModel.defaultRightToLeft.collectAsStateWithLifecycle()
     val libraryColumns by viewModel.libraryColumns.collectAsStateWithLifecycle()
     val isEditMode by viewModel.isEditMode.collectAsStateWithLifecycle()
     val selectedComicIds by viewModel.selectedComicIds.collectAsStateWithLifecycle()
@@ -215,12 +221,20 @@ fun LibraryScreen(
     val jellyfinBrowser by viewModel.jellyfinBrowser.collectAsStateWithLifecycle()
     val requestedDownloads by viewModel.downloadedOnly.collectAsStateWithLifecycle()
     val launchFallback = catalogueState?.downloadedFallback == true
-    val downloadedOnly = requestedDownloads || launchFallback
     var remoteSeries by rememberSaveable { mutableStateOf<String?>(null) }
+    var collectionRootQuery by rememberSaveable { mutableStateOf("") }
+    fun closeRemoteCollection() {
+        catalogue?.closeCollection()
+        viewModel.setSearchQuery(collectionRootQuery)
+    }
+    val downloadedOnly = currentFilter == LibraryFilter.OFFLINE ||
+        (requestedDownloads && (remoteSeries != null || catalogueState?.collection != null))
+    LaunchedEffect(launchFallback, catalogueState?.accountScope) {
+        if (launchFallback) viewModel.setLibraryFilter(LibraryFilter.OFFLINE)
+    }
     var remoteListSelection by remember { mutableStateOf<RemoteListSelection?>(null) }
     val remoteMode = viewModel.hasJellyfinConfig && catalogue != null &&
-        (!launchFallback || (currentFilter == LibraryFilter.SERIES && catalogueState?.canBrowseSaved == true)) &&
-        (!downloadedOnly || currentFilter in listOf(LibraryFilter.SERIES, LibraryFilter.READING_LISTS)) && !isEditMode
+        (currentFilter != LibraryFilter.OFFLINE) && !isEditMode
     val downloadedCopies by viewModel.downloadedCopies.collectAsStateWithLifecycle()
     val representedLocalIds = if (remoteMode && currentFilter == LibraryFilter.SERIES)
         catalogueState?.entries.orEmpty().mapNotNull { downloadedCopies[it.item.id]?.id }.toSet() else emptySet()
@@ -232,7 +246,7 @@ fun LibraryScreen(
                 is LibraryItem.SingleComic -> item.takeIf { it.comic.id in readableIds }
                 is LibraryItem.SeriesStack -> item.issues.filter { it.id in readableIds }.takeIf { it.isNotEmpty() }?.let {
                     item.copy(issues = it, topCoverComic = it.first(), totalIssues = it.size,
-                        unreadIssues = it.count { c -> c.lastPage < c.pageCount - 1 })
+                        unreadIssues = it.count { c -> c.isUnread })
                 }
                 is LibraryItem.ReadingListItem -> item
             }
@@ -241,7 +255,7 @@ fun LibraryScreen(
     }
     RemoteListActions(remoteListSelection, catalogueState?.library?.id, viewModel) { remoteListSelection = null }
     LaunchedEffect(catalogue, viewModel.jellyfinBrowsePositionKey(null), currentFilter,
-        catalogueState?.library?.id, catalogueState?.launchFailure, catalogueState?.browsingSaved, searchQuery, downloadedOnly) {
+        catalogueState?.library?.id, catalogueState?.launchFailure, catalogueState?.browsingSaved, catalogueState?.collection?.id, searchQuery, downloadedOnly, unreadOnly) {
         if (viewModel.hasJellyfinConfig && catalogue != null) {
             catalogue.ensure()
             viewModel.refreshDownloadedJellyfinItems()
@@ -250,25 +264,27 @@ fun LibraryScreen(
                     LibraryFilter.ALL -> JellyfinCatalogueView.ALL
                     LibraryFilter.SERIES -> JellyfinCatalogueView.SERIES
                     LibraryFilter.READING_LISTS -> JellyfinCatalogueView.LISTS
-                    LibraryFilter.UNREAD -> JellyfinCatalogueView.UNREAD
+                    LibraryFilter.OFFLINE -> JellyfinCatalogueView.DOWNLOADED
                 }
-                if (catalogue.state.value.view != target) catalogue.select(target)
-                delay(300)
-                catalogue.search(searchQuery)
+                if (searchQuery.isNotBlank() && catalogue.state.value.search != searchQuery.trim()) delay(300)
+                catalogue.browse(target, searchQuery, unreadOnly)
             }
         }
     }
     val catalogueLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(catalogueLifecycle, catalogue) {
+        viewModel.refreshLibraryPreferences()
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && viewModel.hasJellyfinConfig)
-                catalogue?.onForeground()
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshLibraryPreferences()
+                if (viewModel.hasJellyfinConfig) catalogue?.onForeground()
+            }
         }
         catalogueLifecycle.lifecycle.addObserver(observer)
         onDispose { catalogueLifecycle.lifecycle.removeObserver(observer) }
     }
     BackHandler(enabled = jellyfinDetail == null && (remoteSeries != null || catalogueState?.collection != null)) {
-        if (remoteSeries != null) remoteSeries = null else catalogue?.closeCollection()
+        if (remoteSeries != null) remoteSeries = null else closeRemoteCollection()
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -291,6 +307,7 @@ fun LibraryScreen(
     var comicOptionsTarget by remember { mutableStateOf<ComicEntity?>(null) }
 
     var isSearchOpen by rememberSaveable { mutableStateOf(false) }
+    val unreadFocus = remember { FocusRequester() }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     var isSearchFocused by remember { mutableStateOf(false) }
@@ -299,16 +316,10 @@ fun LibraryScreen(
         viewModel.setEditMode(false)
     }
 
-    BackHandler(enabled = isSearchOpen && !isEditMode) {
+    BackHandler(enabled = isSearchOpen && !isEditMode && remoteSeries == null && catalogueState?.collection == null) {
         isSearchOpen = false
         viewModel.clearSearch()
         focusManager.clearFocus()
-    }
-
-    LaunchedEffect(isSearchOpen) {
-        if (isSearchOpen) {
-            focusRequester.requestFocus()
-        }
     }
 
     val configuration = LocalConfiguration.current
@@ -320,19 +331,12 @@ fun LibraryScreen(
             else -> listOf(2, 3)
         }
     }
-    val actualColumns = libraryColumns.coerceIn(2, availableColumns.last())
+    // Keep the saved grid preference; larger text limits the rendered density for readable cards.
+    val maximumColumns = if (configuration.fontScale > 1.3f)
+        minOf(availableColumns.last(), maxOf(1, (configuration.screenWidthDp / (160f * configuration.fontScale)).toInt()))
+        else availableColumns.last()
+    val actualColumns = libraryColumns.coerceIn(if (configuration.fontScale > 1.3f) 1 else 2, maximumColumns)
     val gridPositions = rememberSaveableStateHolder()
-
-    val isRtlLayout = LocalLayoutDirection.current == LayoutDirection.Rtl
-    val targetRtlRotation = when {
-        isRtlLayout -> if (defaultRtl) 0f else 180f
-        else -> if (defaultRtl) 180f else 0f
-    }
-    val rtlRotation by animateFloatAsState(
-        targetValue = targetRtlRotation,
-        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-        label = "directionFlip",
-    )
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (!uris.isNullOrEmpty()) viewModel.importComics(uris)
@@ -376,11 +380,18 @@ fun LibraryScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    LeafWordmark()
+                    if (configuration.fontScale > 1.3f) {
+                        Image(androidx.compose.ui.res.painterResource(net.digitalbc.leafreader.R.drawable.ic_leaf_logo),
+                            contentDescription = "Leaf", modifier = Modifier.size(36.dp))
+                    } else LeafWordmark()
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        if (!isEditMode) {
+                            UnreadOnlyControl(unreadOnly, { viewModel.unreadOnly.value = it },
+                                Modifier.focusRequester(unreadFocus), onToolbar = true)
+                        }
                         Box(
                             Modifier
                                 .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
@@ -444,6 +455,8 @@ fun LibraryScreen(
                     enter = fadeIn() + expandVertically(),
                     exit = fadeOut() + shrinkVertically(),
                 ) {
+                    // Detail navigation can retain open search without composing its field.
+                    LaunchedEffect(Unit) { focusRequester.requestFocus() }
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -522,6 +535,22 @@ fun LibraryScreen(
             }
         }
 
+        if (!isEditMode) {
+            LibraryTabs(currentFilter) { filter ->
+                remoteSeries = null
+                if (filter != LibraryFilter.OFFLINE) catalogue?.browseSavedCatalogue()
+                viewModel.setLibraryFilter(filter)
+            }
+            if (unreadOnly) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), horizontalArrangement = Arrangement.End) {
+                    UnreadOnlyChip {
+                        viewModel.unreadOnly.value = false
+                        unreadFocus.requestFocus()
+                    }
+                }
+            }
+        }
+
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
             isRefreshing = catalogueState?.refreshing == true,
             onRefresh = { if (viewModel.hasJellyfinConfig) catalogue?.refresh() },
@@ -529,9 +558,26 @@ fun LibraryScreen(
         ) {
             Box(Modifier.matchParentSize().halftone(LeafSecondary, alpha = 0.05f))
 
-            val gridKey = listOf(viewModel.jellyfinBrowsePositionKey(null), currentFilter.name,
-                searchQuery, downloadedOnly.toString(), remoteSeries.orEmpty(), catalogueState?.collection?.id.orEmpty())
+            val gridKey = listOf(viewModel.jellyfinBrowsePositionKey(null),
+                if (remoteMode) catalogueState?.library?.id.orEmpty() else "", currentFilter.name,
+                searchQuery, downloadedOnly.toString(), unreadOnly.toString(), remoteSeries.orEmpty(), catalogueState?.collection?.id.orEmpty())
                 .joinToString(":") { "${it.length}:$it" }
+            val targetView = when (currentFilter) {
+                LibraryFilter.ALL -> JellyfinCatalogueView.ALL
+                LibraryFilter.SERIES -> JellyfinCatalogueView.SERIES
+                LibraryFilter.READING_LISTS -> JellyfinCatalogueView.LISTS
+                LibraryFilter.OFFLINE -> JellyfinCatalogueView.DOWNLOADED
+            }
+            val localRowsReady = preparedLocalRows.filter == currentFilter &&
+                preparedLocalRows.query == searchQuery && preparedLocalRows.unreadOnly == unreadOnly
+            val remoteRowsReady = catalogueState != null &&
+                (catalogueState.loaded || catalogueState.error != null || catalogueState.launchFailure != null) &&
+                (catalogueState.library == null || (catalogueState.view == targetView &&
+                    catalogueState.search == searchQuery.trim() && catalogueState.unreadOnly == unreadOnly))
+            val rowsReady = if (remoteMode) remoteRowsReady &&
+                ((currentFilter != LibraryFilter.READING_LISTS && !downloadedOnly) || localRowsReady)
+                else localRowsReady
+            if (rowsReady) {
             gridPositions.SaveableStateProvider(gridKey) {
             // One constraint read for the screen, never one subcomposition per cover.
             BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -559,249 +605,35 @@ fun LibraryScreen(
                 horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
                 verticalArrangement = Arrangement.spacedBy(verticalSpacing),
             ) {
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (isEditMode) {
-                            OchreBadge("${selectedComicIds.size} SELECTED")
-                        } else if (searchQuery.isNotBlank()) {
-                            if (remoteMode) OchreBadge("FOUND ${catalogueState?.entries?.size ?: 0} LOADED")
-                            else OchreBadge("FOUND ${comics.size} ${if (comics.size == 1) "COMIC" else "COMICS"}")
-                        } else {
-                            OchreBadge("YOUR LIBRARY")
+                if (!isEditMode && !remoteMode && preparedLocalRows.selectableComicIds.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            androidx.compose.material3.TextButton(onClick = { viewModel.setEditMode(true) }, colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_edit)) }
                         }
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (!isEditMode && comics.isNotEmpty() && !remoteMode) {
-                                Box(
-                                    modifier = Modifier
-                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                                        .clickable(
-                                            role = Role.Button,
-                                            onClickLabel = "Edit library selection",
-                                            onClick = { viewModel.setEditMode(true) },
-                                        ),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .height(30.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                                            .border(1.dp, Ink, RoundedCornerShape(4.dp))
-                                            .padding(horizontal = 10.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(
-                                            "EDIT",
-                                            fontFamily = Anton,
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                        )
-                                    }
-                                }
-                            } else if (isEditMode) {
-                                val allSelected = comics.isNotEmpty() && selectedComicIds.size == comics.size
-                                Box(
-                                    modifier = Modifier
-                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                                        .clickable(
-                                            role = Role.Button,
-                                            onClickLabel = if (allSelected) "Deselect all comics" else "Select all comics",
-                                            onClick = {
-                                                if (allSelected) viewModel.clearComicSelection()
-                                                else viewModel.selectAllComics(comics.map { it.id })
-                                            },
-                                        ),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .height(30.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(if (allSelected) Ochre else MaterialTheme.colorScheme.surfaceVariant)
-                                            .border(1.dp, Ink, RoundedCornerShape(4.dp))
-                                            .padding(horizontal = 10.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(
-                                            if (allSelected) "DESELECT ALL" else "SELECT ALL",
-                                            fontFamily = Anton,
-                                            fontSize = 11.sp,
-                                            color = if (allSelected) Ink else MaterialTheme.colorScheme.onSurface,
-                                        )
-                                    }
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                                        .clickable(
-                                            role = Role.Button,
-                                            onClickLabel = "Done editing",
-                                            onClick = { viewModel.setEditMode(false) },
-                                        ),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .height(30.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(Ochre)
-                                            .padding(horizontal = 10.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(
-                                            "DONE",
-                                            fontFamily = Anton,
-                                            fontSize = 11.sp,
-                                            color = Ink,
-                                        )
-                                    }
-                                }
-                            }
-
-                            if (!isEditMode) {
-                                Box(
-                                    modifier = Modifier
-                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                                        .clickable(
-                                            role = Role.Button,
-                                            onClickLabel = "Change grid density",
-                                            onClick = {
-                                                val idx = availableColumns.indexOf(actualColumns)
-                                                val next = availableColumns[(if (idx >= 0) idx + 1 else 0) % availableColumns.size]
-                                                viewModel.setLibraryColumns(next)
-                                            },
-                                        )
-                                        .semantics {
-                                            contentDescription = "Library grid columns, $actualColumns"
-                                        },
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .height(30.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(Ochre)
-                                            .border(1.dp, Ink, RoundedCornerShape(4.dp))
-                                            .padding(horizontal = 9.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                                        ) {
-                                            ColumnDensityIcon(columns = actualColumns)
-                                            Text(
-                                                "$actualColumns",
-                                                fontFamily = Anton,
-                                                fontSize = 11.sp,
-                                                color = Ink,
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                                        .clickable(
-                                            role = Role.Button,
-                                            onClickLabel = "Toggle reading direction",
-                                            onClick = { viewModel.toggleDefaultDirection() },
-                                        )
-                                        .semantics {
-                                            contentDescription = if (defaultRtl) {
-                                                "Default reading direction: Right to Left"
-                                            } else {
-                                                "Default reading direction: Left to Right"
-                                            }
-                                        },
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .height(30.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(Ochre)
-                                            .border(1.dp, Ink, RoundedCornerShape(4.dp))
-                                            .padding(horizontal = 10.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                            modifier = Modifier.graphicsLayer { rotationY = rtlRotation },
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.AutoMirrored.Filled.MenuBook,
-                                                contentDescription = null,
-                                                tint = Ink,
-                                                modifier = Modifier.size(14.dp),
-                                            )
-                                            Icon(
-                                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                                contentDescription = null,
-                                                tint = Ink,
-                                                modifier = Modifier.size(14.dp),
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                    }
+                }
+                if (isEditMode) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OchreBadge("${selectedComicIds.size} SELECTED")
+                            val allSelected = preparedLocalRows.selectableComicIds.isNotEmpty() &&
+                                preparedLocalRows.selectableComicIds.all { it in selectedComicIds }
+                            androidx.compose.material3.TextButton(onClick = {
+                                if (allSelected) viewModel.clearComicSelection()
+                                else viewModel.selectAllComics(preparedLocalRows.selectableComicIds.toList())
+                            }, colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) { Text(androidx.compose.ui.res.stringResource(if (allSelected) net.digitalbc.leafreader.R.string.library_deselect_all else net.digitalbc.leafreader.R.string.library_select_all)) }
+                            androidx.compose.material3.TextButton(onClick = { viewModel.setEditMode(false) }, colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_done)) }
                         }
                     }
                 }
 
-                if (!isEditMode) {
+                if (progressConflicts.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(bottom = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            LibraryFilter.entries.forEach { filter ->
-                                val isSelected = currentFilter == filter
-                                Box(
-                                    modifier = Modifier
-                                        .defaultMinSize(minHeight = 48.dp)
-                                        .selectable(
-                                            selected = isSelected,
-                                            role = Role.Tab,
-                                            onClick = {
-                                                remoteSeries = null
-                                                viewModel.setLibraryFilter(filter)
-                                            },
-                                        )
-                                        .semantics {
-                                            selected = isSelected
-                                        },
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(if (isSelected) Ochre else MaterialTheme.colorScheme.surfaceVariant)
-                                            .border(1.dp, if (isSelected) Ochre else Ink, RoundedCornerShape(4.dp))
-                                            .padding(horizontal = 14.dp, vertical = 7.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(
-                                            text = filter.label,
-                                            fontFamily = Anton,
-                                            fontSize = 12.sp,
-                                            color = if (isSelected) Ink else MaterialTheme.colorScheme.onSurface,
-                                        )
-                                    }
-                                }
-                            }
+                        androidx.compose.material3.TextButton(onClick = {
+                            viewModel.reviewProgressConflicts()
+                        }, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.sync_review_positions))
                         }
                     }
                 }
@@ -816,13 +648,9 @@ fun LibraryScreen(
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        androidx.compose.material3.FilterChip(
+                        if (remoteSeries != null || catalogueState?.collection != null) androidx.compose.material3.FilterChip(
                             selected = downloadedOnly,
-                            enabled = !launchFallback || catalogueState?.canBrowseSaved == true,
-                            onClick = {
-                                if (launchFallback) catalogue?.browseSavedCatalogue()
-                                else viewModel.downloadedOnly.value = !downloadedOnly
-                            },
+                            onClick = { viewModel.downloadedOnly.value = !requestedDownloads },
                             label = { Text("Downloaded") }, modifier = Modifier.heightIn(min = 48.dp))
                         if (remoteMode) {
                             Text(catalogueState?.library?.name?.let { if (searchQuery.isBlank()) "Jellyfin · $it" else "Search · $it" } ?: "Jellyfin",
@@ -845,20 +673,33 @@ fun LibraryScreen(
                         selectedSeries = remoteSeries,
                         downloadedIds = jellyfinBrowser.downloadedItemIds,
                         onSeries = { remoteSeries = it },
-                        onBack = { if (remoteSeries != null) remoteSeries = null else catalogue?.closeCollection() },
+                        onBack = { if (remoteSeries != null) remoteSeries = null else closeRemoteCollection() },
                         onItem = { viewModel.openJellyfinDetail(it) },
-                        onCollection = { catalogue?.openCollection(it) },
+                        onCollection = {
+                            collectionRootQuery = searchQuery
+                            viewModel.setSearchQuery("")
+                            catalogue?.openCollection(it)
+                        },
                         onLibrary = { catalogue?.chooseLibrary(it) },
                         onRetry = { catalogue?.retryView() },
                         onMore = { catalogue?.load(more = true) },
                         loadCover = { viewModel.loadJellyfinCover(it, remoteCoverWidthPx) },
                         coverWidthPx = remoteCoverWidthPx,
+                        coverSelections = coverSelections,
+                        onCoverSelected = viewModel::rememberCoverSelection,
                     )
                 }
 
                 if (displayedLocalItems.isEmpty() && !remoteMode) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
-                        if (searchQuery.isNotBlank()) {
+                        if (unreadOnly) {
+                            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_no_unread))
+                                androidx.compose.material3.TextButton(onClick = { viewModel.unreadOnly.value = false }) {
+                                    Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_clear_unread))
+                                }
+                            }
+                        } else if (searchQuery.isNotBlank()) {
                             Column(
                                 Modifier
                                     .fillMaxWidth()
@@ -896,7 +737,7 @@ fun LibraryScreen(
                             }
                         } else {
                             Text(
-                                if (downloadedOnly) "No readable downloads yet. Import a comic or download one from Jellyfin."
+                                if (downloadedOnly) androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_offline_empty)
                                 else "No comics yet. Tap LOAD COMIC to add a CBZ, CBR, or PDF.",
                                 fontFamily = Archivo,
                                 fontSize = 13.sp,
@@ -941,9 +782,12 @@ fun LibraryScreen(
                             )
                         }
                         is LibraryItem.SeriesStack -> {
+                            val coverKey = "local:${item.seriesName.length}:${item.seriesName}:${item.volume.orEmpty()}"
                             ComicStackCard(
                                 stack = item,
                                 columns = actualColumns,
+                                selectedCoverId = coverSelections[coverKey],
+                                onCoverSelected = { viewModel.rememberCoverSelection(coverKey, it) },
                                 onClick = {
                                     onOpenSeries(item.seriesName, item.volume)
                                 },
@@ -963,7 +807,7 @@ fun LibraryScreen(
 
                 val isListsFilter = currentFilter == LibraryFilter.READING_LISTS
 
-                if (searchQuery.isBlank() && !isEditMode) {
+                if (searchQuery.isBlank() && !isEditMode && !unreadOnly) {
                     item {
                         AddTile(
                             importing = importing,
@@ -984,6 +828,12 @@ fun LibraryScreen(
                 }
             }
             }
+            }
+
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    androidx.compose.material3.CircularProgressIndicator()
+                }
             }
 
             if (!isEditMode && !importing) {
@@ -1057,7 +907,7 @@ fun LibraryScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                if (configuration.fontScale <= 1.3f) Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                                     Text(
                                         text = "${selectedComicIds.size} ${if (selectedComicIds.size == 1) "COMIC" else "COMICS"} SELECTED",
                                         fontFamily = Anton,
@@ -1071,7 +921,8 @@ fun LibraryScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(4.dp))
@@ -1810,7 +1661,7 @@ fun LibraryScreen(
     }
 
     comicOptionsTarget?.let { comic ->
-        val isRead = comic.pageCount > 0 && comic.lastPage >= comic.pageCount - 1
+        val isRead = comic.isCompleted
         AlertDialog(
             onDismissRequest = { comicOptionsTarget = null },
             title = {
@@ -1982,9 +1833,7 @@ internal fun ComicCard(
     val shadowOffset = if (columns >= 4) 3.dp else 5.dp
     val progressHeight = if (columns >= 4) 5.dp else 7.dp
 
-    val fileSize = remember(comic?.filePath) {
-        comic?.filePath?.let { runCatching { File(it).length() }.getOrDefault(0L) } ?: 0L
-    }
+    val fileSize by rememberFileSize(comic?.filePath)
     val sizeText = formatFileSize(fileSize)
 
     Column(Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
@@ -2451,7 +2300,11 @@ private fun SmbEntryRow(
     }
 }
 
-private val coverBitmapCache = LruCache<String, ImageBitmap>(200)
+internal val coverBitmapCache = object : LruCache<String, ImageBitmap>(
+    minOf(32 * 1024 * 1024, (Runtime.getRuntime().maxMemory() / 16).coerceIn(1, Int.MAX_VALUE.toLong()).toInt())
+) {
+    override fun sizeOf(key: String, value: ImageBitmap) = value.asAndroidBitmap().allocationByteCount
+}
 
 @Composable
 internal fun rememberCover(path: String?): ImageBitmap? {
@@ -2610,26 +2463,30 @@ private fun stackCover(cover: StackCover?, load: (suspend (JellyfinItem) -> Bitm
 }
 
 @Composable
-private fun ComicStackCard(stack: LibraryItem.SeriesStack, columns: Int = 2, onClick: () -> Unit) {
+private fun ComicStackCard(stack: LibraryItem.SeriesStack, columns: Int = 2,
+    selectedCoverId: String? = null, onCoverSelected: (String) -> Unit = {}, onClick: () -> Unit) {
     val covers = remember(stack.issues) { stack.issues.map { StackCover(it.id.toString(), it.coverPath, it.issueNumber) } }
     CoverStackCard(StackPresentation(stack.seriesName, stack.volume, covers,
         covers.firstOrNull { it.id == stack.topCoverComic.id.toString() } ?: covers.first(),
         stack.progressFraction,
-        "${stack.totalIssues} issues ${if (stack.unreadIssues > 0) "· ${stack.unreadIssues} unread" else "· read"}"),
-        columns = columns, onClick = onClick)
+        androidx.compose.ui.res.pluralStringResource(
+            if (stack.progressFraction >= 1f) net.digitalbc.leafreader.R.plurals.library_series_completed
+            else net.digitalbc.leafreader.R.plurals.library_series_unread, stack.totalIssues, stack.totalIssues, stack.unreadIssues)),
+        columns = columns, selectedCoverId = selectedCoverId, onCoverSelected = onCoverSelected, onClick = onClick)
 }
 
 @Composable
 internal fun RemoteSeriesStackCard(
     group: net.digitalbc.leafreader.data.jellyfin.JellyfinSeriesGroup,
     columns: Int, partial: Boolean, loadCover: suspend (JellyfinItem) -> Bitmap?, coverWidthPx: Int = 400,
-    onClick: () -> Unit,
+    selectedCoverId: String? = null, onCoverSelected: (String) -> Unit = {}, onClick: () -> Unit,
 ) {
     val covers = remember(group.entries) { group.entries.map { StackCover(it.item.id, null, it.issueNumber?.toFloat(), it.item) } }
     androidx.compose.runtime.key(group.key) {
         CoverStackCard(StackPresentation(group.name, null, covers, covers.first(), 0f,
             "${covers.size} ${if (partial) "loaded comics" else "comics"} · Jellyfin", remote = true),
-            loadRemoteCover = loadCover, remoteCoverWidthPx = coverWidthPx, columns = columns, onClick = onClick)
+            loadRemoteCover = loadCover, remoteCoverWidthPx = coverWidthPx, columns = columns,
+            selectedCoverId = selectedCoverId, onCoverSelected = onCoverSelected, onClick = onClick)
     }
 }
 
@@ -2639,6 +2496,8 @@ private fun CoverStackCard(
     loadRemoteCover: (suspend (JellyfinItem) -> Bitmap?)? = null,
     remoteCoverWidthPx: Int = 400,
     columns: Int = 2,
+    selectedCoverId: String? = null,
+    onCoverSelected: (String) -> Unit = {},
     onClick: () -> Unit,
 ) {
     val pct = stack.progressFraction
@@ -2650,7 +2509,11 @@ private fun CoverStackCard(
         val idx = stack.issues.indexOfFirst { it.id == stack.topCoverComic.id }
         if (idx >= 0) idx else 0
     }
-    var topIndex by rememberSaveable(stack.seriesName, stack.volume) { mutableIntStateOf(initialIndex) }
+    var savedTopIndex by rememberSaveable(stack.seriesName, stack.volume) { mutableIntStateOf(initialIndex) }
+    val selectedIndex = remember(stack.issues, selectedCoverId) {
+        selectedCoverId?.let { id -> stack.issues.indexOfFirst { it.id == id } } ?: -1
+    }
+    val topIndex = if (selectedIndex >= 0) selectedIndex else savedTopIndex
     val issueCount = stack.issues.size
     val currentTopComic = remember(stack.issues, topIndex) {
         if (issueCount > 0) stack.issues[(topIndex % issueCount + issueCount) % issueCount]
@@ -2693,7 +2556,8 @@ private fun CoverStackCard(
                     offsetY = offsetY,
                     coroutineScope = coroutineScope,
                     onThresholdMet = {
-                        topIndex = if (issueCount > 0) (topIndex + 1) % issueCount else topIndex + 1
+                        savedTopIndex = if (issueCount > 0) (topIndex + 1) % issueCount else topIndex + 1
+                        stack.issues.getOrNull(savedTopIndex)?.let { onCoverSelected(it.id) }
                     },
                     onClick = onClick,
                 )

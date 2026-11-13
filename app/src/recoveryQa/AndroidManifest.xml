@@ -3,8 +3,14 @@
     xmlns:tools="http://schemas.android.com/tools">
     <application android:label="Leaf Recovery QA" android:allowBackup="false"
         tools:replace="android:label,android:allowBackup">
+        <profileable android:shell="true" />
+        <activity android:name="net.digitalbc.leafreader.qa.HalftoneQaActivity" android:exported="true" />
         <activity android:name="net.digitalbc.leafreader.qa.RecoveryQaActivity"
             android:exported="true" />
+        <activity android:name="net.digitalbc.leafreader.qa.LibraryQaActivity" android:exported="true" />
+        <activity android:name="net.digitalbc.leafreader.qa.LibraryLargeQaActivity" android:exported="true" />
+        <activity android:name="net.digitalbc.leafreader.qa.LibraryMediumQaActivity" android:exported="true" />
+        <activity android:name="net.digitalbc.leafreader.qa.LibraryWideQaActivity" android:exported="true" />
         <activity-alias android:name="${applicationId}.LightLauncher"
             android:enabled="true" android:exported="false"
             android:targetActivity="net.digitalbc.leafreader.MainActivity" />

@@ -175,6 +175,51 @@ class JellyfinClientTest {
     }
 
     @Test
+    fun authenticationRequiresAnAuthoritativeServerIdentity() = runBlocking {
+        val config = JellyfinServerConfig(baseUrl(), true)
+        for (identity in listOf("", "\"ServerId\":\"\",", "\"ServerId\":null,", "\"ServerId\":false,", "\"ServerId\":0,", "\"ServerId\":\"jellyfin-server\",")) {
+            server.enqueue(MockResponse().setBody("""{$identity"AccessToken":"token","User":{"Id":"user"}}"""))
+            try {
+                client.authenticate(config, "Reader", "password")
+                fail("Missing or shared server identity must be rejected")
+            } catch (error: JellyfinException) {
+                assertEquals(JellyfinFailureKind.PARSE_ERROR, error.kind)
+            }
+        }
+        server.enqueue(MockResponse().setBody("""{"AccessToken":"token","User":{"Id":"user"},
+            "SessionInfo":{"ServerId":"verified-server"}}"""))
+        assertEquals("verified-server", client.authenticate(config, "Reader", "password").serverId)
+    }
+
+    @Test
+    fun legacySharedIdentityCannotBeLoadedOrOverwriteValidCredentials() {
+        val context = RuntimeEnvironment.getApplication()
+        val key = javax.crypto.spec.SecretKeySpec("LeafTestKey12345678901234567890!".toByteArray(), "AES")
+        val store = JellyfinCredentialStore(context, keyProvider = { key })
+        store.clear()
+        val legacy = """{"accessToken":"token","userId":"user","serverId":"jellyfin-server","username":"Reader"}"""
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, key)
+        val file = File(context.filesDir, "jellyfin_auth.enc")
+        file.outputStream().use {
+            it.write(cipher.iv.size)
+            it.write(cipher.iv)
+            it.write(cipher.doFinal(legacy.toByteArray()))
+        }
+        assertNull(store.loadAuth())
+        assertTrue("Keep the encrypted legacy file available for explicit reconnection", file.exists())
+        val valid = JellyfinAuth("valid-token", "user", "verified-server", "Reader")
+        store.saveAuth(valid)
+        try {
+            store.saveAuth(valid.copy(serverId = "jellyfin-server"))
+            fail("Shared identity must not replace valid credentials")
+        } catch (_: IllegalArgumentException) {
+            assertEquals(valid, store.loadAuth())
+        }
+        store.clear()
+    }
+
+    @Test
     fun authenticate401ThrowsAuthenticationError() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(401).setBody("Invalid user or pw"))
 
@@ -640,4 +685,32 @@ class JellyfinClientTest {
         assertEquals("/Users/usr-1/PlayedItems/item-xyz", recorded.path)
         assertEquals("DELETE", recorded.method)
     }
+    @Test fun authoritativeProgressDoesNotCoerceUnknownOrMalformedValues() = runBlocking {
+        val config = JellyfinServerConfig(baseUrl(), true)
+        val auth = JellyfinAuth("token", "u", "srv", "Reader")
+        for (userData in listOf("{}", "null", "{\"PlaybackPositionTicks\":null,\"Played\":null}",
+            "{\"PlaybackPositionTicks\":\"0\",\"Played\":\"false\"}",
+            "{\"PlaybackPositionTicks\":-1,\"Played\":false}")) {
+            server.enqueue(MockResponse().setBody("{\"Id\":\"item\",\"UserData\":$userData}"))
+            assertFalse(client.getProgress(config, auth, "item").isAvailable)
+            assertTrue(server.takeRequest().getHeader("Authorization")!!.contains("token"))
+        }
+        server.enqueue(MockResponse().setBody("""{"Id":"item","UserData":{"PlaybackPositionTicks":0,"Played":false}}"""))
+        assertEquals(JellyfinProgressSnapshot(0, false), client.getProgress(config, auth, "item"))
+        server.takeRequest()
+        server.enqueue(MockResponse().setBody("""{"Id":"other","UserData":{"PlaybackPositionTicks":0,"Played":false}}"""))
+        assertTrue(runCatching { client.getProgress(config, auth, "item") }.isFailure)
+    }
+
+    @Test fun progressPercentageUsesOnlyAvailableNumericServerValues() = runBlocking {
+        val config = JellyfinServerConfig(baseUrl(), true)
+        val auth = JellyfinAuth("token", "u", "srv", "Reader")
+        for ((value, expected) in listOf("25.5" to 25.5, "0" to 0.0, "100" to 100.0,
+            "null" to null, "\"25\"" to null, "-1" to null, "101" to null)) {
+            server.enqueue(MockResponse().setBody("""{"Id":"item","UserData":{"PlaybackPositionTicks":20000,"Played":false,"PlayedPercentage":$value}}"""))
+            assertEquals(expected, client.getProgress(config, auth, "item").playedPercentage)
+            server.takeRequest()
+        }
+    }
+
 }

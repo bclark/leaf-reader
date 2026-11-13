@@ -81,4 +81,6 @@
     <string name="jellyfin_launch_denied">Se denegó el acceso a Jellyfin. Se muestran los cómics descargados.</string>
     <string name="jellyfin_launch_failed">No se pudo cargar Jellyfin. Se muestran los cómics descargados.</string>
     <string name="jellyfin_launch_retrying">Conectando a Jellyfin…</string>
+    <string name="privacy_policy">Política de privacidad</string>
+    <string name="notices_load_failed">No se pudieron cargar los avisos de terceros.</string>
 </resources>
