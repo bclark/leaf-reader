@@ -855,3 +855,10 @@ Bryan authorizes main-account King Spawn Vol.02 for live progress/read-state tes
 
 
 Console follow-through: Publishing overview is now inspected read-only. Managed publishing is off; one unsubmitted Alpha tester-feedback-channel change points to https://digitalbc.net/leaf/support/ (submit button observed disabled). No pending new build is established by that change. Native navigation then timed out; reconciliation found Chrome focus changed away from Console, so UI input stopped. Individual track drafts and public upload certificate remain unverified, no mutation-ready release state. Existing Console data/settings remain untouched. [Updated observation](docs/local/android-artifact-preflight-20261113/CONSOLE_READONLY.md).
+
+
+## Authorized online Jellyfin checks and focus crash fix — 2026-11-13
+
+Optimized local Debug-keyb5f81126 (0.3.7/30700) fixes the confirmed Library search-focus crash exposed by real main-account KingSpawnVol02 testing. Full217inputs frozen before build; Android243pass/one expected SMB-live skip per flavor, zero-error/87-warning lints; shared144 reports up-to-date, not newly rerun. Installed in place without reset/account/security/radio changes. Exact previous crash path now passes. [Full evidence](docs/local/android-real-sync-20261113/browser-resume/README.md).
+
+Bounded live browser/S25 results: remote position/completion and lower-position reset, durable pending intent across crash/update, defer/relaunch/review, server and device choices, stale-choice rejection and independent browser readback pass. Visible page1/unplayed restored and cold-synced; named145page/367.5MB and original160MB/page3of300 copies retained. History/playcount/timestamps are not claimed restored. Cached remote captions can lag until metadata reload. This does not establish real network-loss/account-switch/storage interruption, whole JF-A/parity, other devices, final release signing/artifacts/privacy/licensing/transfer/upgrade/Play acceptance. KEEP BUILDING; no release checklist closure, upload, publication, live merge or CI enablement. Previous d240 performance evidence remains scoped to that older artifact.

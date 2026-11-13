@@ -322,12 +322,6 @@ fun LibraryScreen(
         focusManager.clearFocus()
     }
 
-    LaunchedEffect(isSearchOpen) {
-        if (isSearchOpen) {
-            focusRequester.requestFocus()
-        }
-    }
-
     val configuration = LocalConfiguration.current
     val screenWidthDp = configuration.screenWidthDp.dp
     val availableColumns = remember(screenWidthDp) {
@@ -461,6 +455,8 @@ fun LibraryScreen(
                     enter = fadeIn() + expandVertically(),
                     exit = fadeOut() + shrinkVertically(),
                 ) {
+                    // Detail navigation can retain open search without composing its field.
+                    LaunchedEffect(Unit) { focusRequester.requestFocus() }
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
