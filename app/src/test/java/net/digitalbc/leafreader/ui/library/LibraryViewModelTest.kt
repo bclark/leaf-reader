@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -1129,9 +1130,10 @@ class LibraryViewModelTest {
 
     @Test
     fun unreadFilterOnlyReturnsComicsWithLastPageZero() = runBlocking {
-        val unread = createComic(1, "Issue 1", pageCount = 20, lastPage = 0)
-        val read = createComic(2, "Issue 2", pageCount = 20, lastPage = 19)
+        val unread = createComic(1, "Issue 1", series = "Unread standalone", pageCount = 20, lastPage = 0)
+        val read = createComic(2, "Issue 2", series = "Read standalone", pageCount = 20, lastPage = 19)
         fakeComicDao.setComics(listOf(unread, read))
+        repository.backfillMetadataIfNeeded()
 
         viewModel.unreadOnly.value = true
 
@@ -1442,7 +1444,7 @@ class LibraryViewModelTest {
 
         viewModel.markReadingListRead(1L, true)
         withTimeout(3000) {
-            while (!fakeComicDao.getAll().all { it.lastPage > 0 }) {
+            while (!fakeComicDao.getAll().all { it.lastPage > 0 && it.completionOverride == true }) {
                 kotlinx.coroutines.delay(10)
             }
         }
@@ -1452,7 +1454,7 @@ class LibraryViewModelTest {
 
         viewModel.markReadingListRead(1L, false)
         withTimeout(3000) {
-            while (!fakeComicDao.getAll().all { it.lastPage == 0 }) {
+            while (!fakeComicDao.getAll().all { it.lastPage == 0 && it.completionOverride == false }) {
                 kotlinx.coroutines.delay(10)
             }
         }
@@ -1553,47 +1555,59 @@ class LibraryViewModelTest {
         override suspend fun getById(id: Long): ComicEntity? = comicsState.value.find { it.id == id }
 
         override suspend fun insert(comic: ComicEntity): Long {
-            comicsState.value = comicsState.value + comic
+            comicsState.update { it + comic }
             return comic.id
         }
 
         override suspend fun updateProgress(id: Long, page: Int, slot: Int, openedAt: Long): Int {
-            comicsState.value = comicsState.value.map {
-                if (it.id == id) it.copy(lastPage = page, lastSlot = slot, lastOpened = openedAt) else it
+            comicsState.update { comics ->
+                comics.map {
+                    if (it.id == id) it.copy(lastPage = page, lastSlot = slot, lastOpened = openedAt) else it
+                }
             }
             return 1
         }
 
         override suspend fun updateLocalFiles(id: Long, path: String, cover: String?, format: String, pageCount: Int): Int {
-            val comic = getById(id) ?: return 0
-            setComics(getAll().map { if (it.id == id) comic.copy(filePath = path, coverPath = cover, format = format, pageCount = pageCount) else it })
+            if (getById(id) == null) return 0
+            comicsState.update { comics ->
+                comics.map { if (it.id == id) it.copy(filePath = path, coverPath = cover, format = format, pageCount = pageCount) else it }
+            }
             return 1
         }
 
         override suspend fun updateCompletion(id: Long, completed: Boolean?): Int {
-            comicsState.value = comicsState.value.map {
-                if (it.id == id) it.copy(completionOverride = completed) else it
+            comicsState.update { comics ->
+                comics.map {
+                    if (it.id == id) it.copy(completionOverride = completed) else it
+                }
             }
             return 1
         }
 
         override suspend fun updatePageCount(id: Long, pageCount: Int): Int {
-            comicsState.value = comicsState.value.map {
-                if (it.id == id) it.copy(pageCount = pageCount) else it
+            comicsState.update { comics ->
+                comics.map {
+                    if (it.id == id) it.copy(pageCount = pageCount) else it
+                }
             }
             return 1
         }
 
         override suspend fun updateReadingDirection(id: Long, rtl: Boolean): Int {
-            comicsState.value = comicsState.value.map {
-                if (it.id == id) it.copy(rightToLeft = rtl) else it
+            comicsState.update { comics ->
+                comics.map {
+                    if (it.id == id) it.copy(rightToLeft = rtl) else it
+                }
             }
             return 1
         }
 
         override suspend fun updateMetadata(id: Long, series: String?, volume: String?, issueNumber: Float?) {
-            comicsState.value = comicsState.value.map {
-                if (it.id == id) it.copy(series = series, volume = volume, issueNumber = issueNumber) else it
+            comicsState.update { comics ->
+                comics.map {
+                    if (it.id == id) it.copy(series = series, volume = volume, issueNumber = issueNumber) else it
+                }
             }
         }
 
@@ -1615,7 +1629,7 @@ class LibraryViewModelTest {
             }
 
         override suspend fun delete(id: Long): Int {
-            comicsState.value = comicsState.value.filter { it.id != id }
+            comicsState.update { comics -> comics.filter { it.id != id } }
             return 1
         }
     }
