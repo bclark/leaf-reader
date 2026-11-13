@@ -112,7 +112,7 @@ def check_number(version, code, current, state):
 def source_files():
     names = list(filter(None, git('ls-files', '-z', '--', *INPUTS).split('\0')))
     for name in names:
-        if re.search(r'(^|/)(\.env(?:\..*)?|local\.properties|.*credentials.*|.*service.account.*)|\.(jks|keystore|p8|p12|pem)$', name, re.I):
+        if re.search(r'(^|/)(\.env(?:\..*)?|local\.properties|.*credentials(?:[._-]|$).*|.*service.account(?:[._-]|$).*)|\.(jks|keystore|p8|p12|pem)$', name, re.I):
             fail(f'Private configuration is tracked; do not snapshot: {name}')
         if (ROOT / name).is_symlink():
             fail(f'Review tracked symlink before snapshotting: {name}')

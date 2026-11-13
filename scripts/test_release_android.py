@@ -187,6 +187,20 @@ class AndroidReleaseTests(unittest.TestCase):
         self.assertFalse((directory / 'source/.env').exists())
         self.assertFalse((directory / 'source/local.properties').exists())
 
+    def test_source_credential_store_is_copied_but_secret_files_are_rejected(self):
+        self.repo()
+        name = 'app/src/main/java/net/digitalbc/leafreader/data/jellyfin/JellyfinCredentialStore.kt'
+        self.file(name, 'class JellyfinCredentialStore')
+        subprocess.run(['git', 'add', name], cwd=self.root, check=True)
+        directory = self.prepared(allow_dirty=True)
+        self.assertEqual((directory / 'source' / name).read_text(), 'class JellyfinCredentialStore')
+        for secret in ('app/credentials.json', 'app/google-credentials.json', 'app/service-account.json', 'app/upload.jks'):
+            self.file(secret, 'private fixture')
+            subprocess.run(['git', 'add', secret], cwd=self.root, check=True)
+            with self.assertRaisesRegex(RuntimeError, 'Private configuration'):
+                self.prepared(allow_dirty=True)
+            subprocess.run(['git', 'rm', '-f', secret], cwd=self.root, check=True, stdout=subprocess.DEVNULL)
+
     def test_dirty_requires_opt_in_and_preserves_edits(self):
         self.repo()
         self.file('shared/src/Core.kt', 'approved change')
