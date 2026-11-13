@@ -13,6 +13,11 @@
   <img src="https://img.shields.io/badge/architecture-Kotlin%20Multiplatform-7F52FF.svg" alt="Kotlin Multiplatform">
 </p>
 
+<!-- Official, unmodified Apple badge: https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg -->
+<p align="center">
+  <a href="https://apps.apple.com/app/leaf-comic-reader/id6830333334"><img src="docs/badges/download-on-the-app-store.svg" height="54" alt="Download Leaf Comic Reader on the App Store"></a>
+</p>
+
 ## A look inside Leaf
 
 <p align="center">
