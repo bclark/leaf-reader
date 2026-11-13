@@ -82,3 +82,18 @@ SELECT COUNT(*) AS selected_frames,
     WHERE s.name = 'queueBuffer' AND s.dur > 0 AND s.depth > rt.depth
       AND s.ts >= rt.ts AND s.ts + s.dur <= rt.ts + rt.dur) AS raw_nested_queue_spans
 FROM leaf_ranked;
+
+-- Incomplete thread_state durations (-1) are unknown, not CPU or sleeping time.
+-- Empty trace-loss counters do not guarantee complete scheduler attribution.
+WITH coverage AS (
+  SELECT x.role, x.dur,
+    COALESCE((SELECT SUM(MIN(st.ts + st.dur, x.ts + x.dur) - MAX(st.ts, x.ts))
+      FROM thread_state st WHERE st.utid = x.utid AND st.dur > 0
+        AND st.ts < x.ts + x.dur AND st.ts + st.dur > x.ts), 0) AS covered_ns
+  FROM leaf_wait_spans x
+)
+SELECT role, ROUND(SUM(dur) / 1e6, 6) AS elapsed_ms,
+  ROUND(SUM(covered_ns) / 1e6, 6) AS scheduler_covered_ms,
+  ROUND(SUM(dur - covered_ns) / 1e6, 6) AS scheduler_uncovered_ms,
+  ROUND(100.0 * SUM(covered_ns) / SUM(dur), 6) AS scheduler_coverage_pct
+FROM coverage GROUP BY role;
