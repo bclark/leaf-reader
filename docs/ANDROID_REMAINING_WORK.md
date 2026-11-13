@@ -25,3 +25,6 @@ The earlier 205-input records remain valid for their recorded scope: 204 app/sha
 Current design reference is whole-page reading, forest/paper/gold, Anton/Archivo, full rear artwork and intentional downward Series peel. The obsolete panel/model architecture is not a restoration target. Preserve device/SMB originals, auth boundaries, privacy and manually retained Read/Continue copies.
 
 No local fixtures or unit suites close Play-delivered upgrade acceptance, actual tester feedback, privacy publication or production eligibility. App modification is not permission to change CI, merge the moving live checkout, publish a policy, upload, submit for review or release.
+
+
+Console follow-through: Publishing overview checked read-only, managed publishing off, one unsubmitted Alpha tester-feedback-channel change to https://digitalbc.net/leaf/support/. No new-release submission inferred. Native navigation timed out and reconciliation found Chrome focus away from Console; UI input stopped. Individual drafts/upload certificate remain open; no release state changed. [Updated inventory](local/android-artifact-preflight-20261113/CONSOLE_READONLY.md).
