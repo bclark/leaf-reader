@@ -4,7 +4,7 @@ Recommendation: **KEEP BUILDING**. This is a development readiness record, not r
 
 Prior S25 development candidate was `2b59a88824335fb40132a15c2f92edace350ea806f4466f78908687988184ff4`, runtime source `f3e5bb5cd62aa49593888577887124fa068620db`, with mounted-search autofocus and observed Jellyfin caption freshness. All217 inputs frozen before the build; [caption and outage evidence](local/android-sync-captions-20261113/IMPLEMENTATION.md). Existing Debug certificate, package net.digitalbc.leafreader,0.3.7/30700; no equivalence to Play Alpha established. Each flavor: 246 passes/one expected SMB-live skip, lints zero errors/87 warnings. Shared144 reports verified with up-to-date task. Earlier artifacts retain their own evidence limits.
 
-Latest local release build is now **signed0.3.8/30800**, sourcecb7c96e, immutable216inputs unchanged: FullAAB28887595... and FullAPK9ee4d340... both verify against existing uploadcertificate3856FF77...1DD94A. Fresh shared144passed; each flavor246passed/one expectedskip; lints0errors/fatal87warnings. Debug/minified artifacts and static packaging checks pass. No device install or upload; exact native/distribution gates remain. [Signed artifacts and receipts](local/android-release-prep-20261113/README.md).
+Latest local release build is now **signed0.3.8/30800**, sourcecb7c96e, immutable216inputs unchanged: FullAAB28887595... and FullAPK9ee4d340... both verify against existing uploadcertificate3856FF77...1DD94A. Fresh shared144passed; each flavor246passed/one expectedskip; lints0errors/fatal87warnings. Debug/minified artifacts and static packaging checks pass. Exact signed emulator acceptance now passes bounded retained-data upgrade, reading/native rendering, export/restore/cancellation and cold restart on Android17/16KiB. No S25 mutation or upload; broader native/distribution gates remain. [Signed artifacts and receipts](local/android-release-prep-20261113/README.md).
 
 ## Assigned work and acceptance
 
@@ -45,3 +45,10 @@ Signed retry coordination: the local driver now checks native occupancy before a
 ## Serial signed retry completed
 
 The owner said continue after the iOS phase explicitly finished. Pre/post-Keychain native checks and shared/candidate locks passed; fresh signed run completed with existing keystore unchanged. Prior interrupted attempt and overlap qualification remain preserved. No automatic worker, device tests, performance capture, install or upload. Q-026 access/signing is verified; Q-027 and final acceptance remain. Next: dedicated compatible native QA, preserving the S25 library and existing signatures.
+
+
+## Signed emulator QA completed — 2026-11-14
+
+Exact signed0.3.8 APK9ee4d340/sourcecb7c96e upgraded authentic same-key0.3.7 in-place on existing Pixel_10_Pro Android17/16KiB emulator. Generated comic page5/12 and one-member custom list retained. Native export, picker/preview cancellation, KeepLocal7 and Overwrite5 with cold restart, generated7zip-via-CBR native backend and PDF pixel rendering/navigation pass. All216frozen inputs unchanged; no rebuild or runtime edit. [Bounded native evidence](local/android-release-prep-20261113/device-qa/README.md).
+
+Next: varied-preference/remote-credential backup coverage, true RAR4/RAR5 files, actual offline/network/cancellation/transfer and physical final-artifact acceptance; resolve public privacy/corresponding-source/replacement/artworkQ027/declarations/key-recovery evidence before any Play handoff. Preserve S25: differing development certificate cannot be bypassed with uninstall. Emulator coverage does not waive minimum-OS/form-factor/vendor or Play-delivered gates. KEEP BUILDING. Native slot released, emulator stopped with task data retained; board broad statuses remain honest, noDone/upload/publication.
