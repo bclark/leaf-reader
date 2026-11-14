@@ -644,6 +644,41 @@ class LibraryRepositoryJellyfinTest {
         assertEquals(comicId, repeatResult.getOrNull())
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun directContinueRetrievalReportsMissingAndNeverNavigates() = runBlocking {
+        kotlinx.coroutines.Dispatchers.setMain(kotlinx.coroutines.test.UnconfinedTestDispatcher())
+        val store = androidx.lifecycle.ViewModelStore()
+        try {
+            credStore.saveAuth(JellyfinAuth("token", "user", "server", "Reader"))
+            settings.jellyfinServerUrl = baseUrl()
+            settings.jellyfinAllowInsecureHttp = true
+            val item = JellyfinItem("missing-continue", "Missing.cbz", false, container = "cbz")
+            val identity = JellyfinItemIdentity("server", "user", item.id)
+            val vm = net.digitalbc.leafreader.ui.library.LibraryViewModel(repository, settings,
+                loadJellyfinDetails = { Result.success(net.digitalbc.leafreader.data.jellyfin.JellyfinItemDetails(identity, item)) })
+            store.put("continue-missing", vm)
+            vm.openJellyfinDetail(item)
+            withTimeout(5_000) { vm.jellyfinDetail.first { it?.loading == false && !it.checkingLocal } }
+            server.enqueue(MockResponse().setResponseCode(404))
+            vm.downloadJellyfinDetail(openWhenReady = true)
+            assertEquals("/Items/missing-continue/Download", takeRequest().path)
+            withTimeout(5_000) { vm.jellyfinDetail.first { it?.failure == net.digitalbc.leafreader.data.jellyfin.JellyfinFailureKind.NOT_FOUND } }
+            assertNull(vm.consumeJellyfinRead())
+            assertTrue(comicDao.getAll().isEmpty())
+            assertTrue(ownedImportFiles().none { it.endsWith(".part") })
+        } finally { clearModels(store); kotlinx.coroutines.Dispatchers.resetMain() }
+    }
+
+    @Test
+    fun continueReadRevalidatesMissingCopyWithoutRemovingHistory() = runBlocking {
+        val comic = retainedComic(JellyfinItemIdentity("server", "user", "local-continue"))
+        assertNotNull(repository.getReadableComic(comic.id))
+        File(comic.filePath).delete()
+        assertNull(repository.getReadableComic(comic.id))
+        assertEquals(comic, comicDao.getById(comic.id))
+    }
+
     @Test
     fun disconnectCancelsHeldArchiveWithoutPublishingOrDeletingOtherCopies() = runBlocking {
         val original = retainedComic(JellyfinItemIdentity("server", "user", "original"))

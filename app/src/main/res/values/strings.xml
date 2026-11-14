@@ -105,4 +105,14 @@
     <string name="creator_account_changed">The connected account changed. Return to your library and choose a creator again.</string>
     <string name="privacy_policy">Privacy policy</string>
     <string name="notices_load_failed">Could not load third-party notices.</string>
+    <string name="library_continue">Continue</string>
+    <string name="library_continue_page_total">Page %1$d of %2$d</string>
+    <string name="library_continue_page">Page %1$d</string>
+    <string name="library_add_comics">Add comics</string>
+    <string name="library_create_reading_list">Create Reading List</string>
+    <string name="library_select_comics">Select comics</string>
+    <string name="library_settings_more">Settings and more</string>
+    <string name="library_empty_title">YOUR COMICS, YOUR WAY</string>
+    <string name="library_empty_body">Connect your Jellyfin library, or read files stored on this device. You can connect later from Add comics.</string>
+    <string name="library_connect_jellyfin">Connect Jellyfin</string>
 </resources>

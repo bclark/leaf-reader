@@ -24,6 +24,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import kotlin.math.roundToInt
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -39,6 +42,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -117,10 +121,16 @@ fun MenuScreen(
     onSetLandscapeSpread: (Boolean) -> Unit = {},
     settings: AppSettings,
     repository: LibraryRepository? = null,
+    openJellyfinSetup: Boolean = false,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val menuScroll = rememberScrollState()
+    var jellyfinOffset by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(openJellyfinSetup, jellyfinOffset) {
+        if (openJellyfinSetup) jellyfinOffset?.let { menuScroll.scrollTo(it) }
+    }
     var smbHost by remember { mutableStateOf(settings.smbHost) }
     var smbShare by remember { mutableStateOf(settings.smbShare) }
     var smbUsername by remember { mutableStateOf(settings.smbUsername) }
@@ -279,7 +289,7 @@ fun MenuScreen(
             Column(
                 Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(menuScroll)
                     .navigationBarsPadding()
                     .padding(horizontal = 24.dp)
                     .padding(top = 16.dp, bottom = 28.dp),
@@ -662,7 +672,9 @@ fun MenuScreen(
             Spacer(Modifier.size(32.dp))
 
             // ---- Jellyfin Server -----------------------------------------------------
-            SectionLabel(stringResource(R.string.jellyfin_server_section))
+            androidx.compose.foundation.layout.Box(Modifier.onGloballyPositioned {
+                jellyfinOffset = it.positionInParent().y.roundToInt()
+            }) { SectionLabel(stringResource(R.string.jellyfin_server_section)) }
             Spacer(Modifier.size(10.dp))
             Column(
                 Modifier

@@ -273,6 +273,10 @@ class LibraryRepository(
 
     suspend fun getComic(id: Long): ComicEntity? = dao.getById(id)
 
+    suspend fun getReadableComic(id: Long): ComicEntity? = withContext(Dispatchers.IO) {
+        dao.getById(id)?.takeIf { fileAvailability.isReadable(it, force = true) }
+    }
+
     suspend fun saveProgress(id: Long, page: Int, slot: Int, explicitPlayed: Boolean? = null): Int =
         withContext(NonCancellable + Dispatchers.IO) {
             suspend fun update(): Int {

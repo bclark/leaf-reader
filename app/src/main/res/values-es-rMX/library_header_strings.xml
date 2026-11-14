@@ -9,7 +9,6 @@
     <string name="library_no_unread">No hay cómics sin leer en esta vista.</string>
     <string name="library_offline_empty">Aún no hay copias disponibles. Importa un cómic de Archivos o SMB, o descarga uno de Jellyfin.</string>
     <string name="library_default_rtl">Lectura de derecha a izquierda por defecto</string>
-    <string name="library_edit">Editar</string>
     <string name="library_select_all">Seleccionar todo</string>
     <string name="library_deselect_all">Deseleccionar todo</string>
     <string name="library_done">Listo</string>

@@ -8,6 +8,7 @@
         <activity android:name="net.digitalbc.leafreader.qa.RecoveryQaActivity"
             android:exported="true" />
         <activity android:name="net.digitalbc.leafreader.qa.LibraryQaActivity" android:exported="true" />
+        <activity android:name="net.digitalbc.leafreader.qa.LibraryPhoneQaActivity" android:exported="true" />
         <activity android:name="net.digitalbc.leafreader.qa.LibraryLargeQaActivity" android:exported="true" />
         <activity android:name="net.digitalbc.leafreader.qa.LibraryMediumQaActivity" android:exported="true" />
         <activity android:name="net.digitalbc.leafreader.qa.LibraryWideQaActivity" android:exported="true" />

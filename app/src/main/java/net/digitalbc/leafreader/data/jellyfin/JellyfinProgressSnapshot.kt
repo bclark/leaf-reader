@@ -14,15 +14,17 @@ data class JellyfinProgressUpdate(
 
     fun apply(details: JellyfinItemDetails): JellyfinItemDetails =
         if (details.identity != identity) details else
-            details.copy(item = apply(details.item), playedPercentage = snapshot.playedPercentage)
+            details.copy(item = apply(details.item), playedPercentage = snapshot.playedPercentage,
+                lastPlayedDate = snapshot.lastPlayedDate ?: details.lastPlayedDate)
 
     fun apply(entries: List<JellyfinCatalogueEntry>): List<JellyfinCatalogueEntry> =
         if (entries.none { it.item.id == identity.itemId }) entries else entries.map {
-            if (it.item.id == identity.itemId) it.copy(item = apply(it.item), played = snapshot.played) else it
+            if (it.item.id == identity.itemId) it.copy(item = apply(it.item), played = snapshot.played, playedPercentage = snapshot.playedPercentage,
+                lastPlayedDate = snapshot.lastPlayedDate ?: it.lastPlayedDate) else it
         }
 }
 
-data class JellyfinProgressSnapshot(val positionTicks: Long?, val played: Boolean?, val playedPercentage: Double? = null) {
+data class JellyfinProgressSnapshot(val positionTicks: Long?, val played: Boolean?, val playedPercentage: Double? = null, val lastPlayedDate: String? = null) {
     val isAvailable: Boolean get() = positionTicks != null && positionTicks >= 0 && played != null
 }
 

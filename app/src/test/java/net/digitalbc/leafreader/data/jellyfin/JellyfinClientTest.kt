@@ -73,6 +73,43 @@ class JellyfinClientTest {
     }
 
     @Test
+    fun observedServerProgressRefreshesContinueRecencyWithoutInventingDates() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"Id":"resume","UserData":{"Played":false,
+            "PlaybackPositionTicks":40000,"PlayedPercentage":40,"LastPlayedDate":"2026-11-14T12:00:00Z"}}"""))
+        val snapshot = client.getProgress(JellyfinServerConfig(baseUrl(), true),
+            JellyfinAuth("token", "user", "server", "Reader"), "resume")
+        val entry = JellyfinCatalogueEntry(JellyfinItem("resume", "Fixture", false, "cbz"), "Book", false,
+            lastPlayedDate = "2026-11-10T00:00:00Z")
+        val update = JellyfinProgressUpdate(JellyfinItemIdentity("server", "user", "resume"), baseUrl(), snapshot, 1)
+        val refreshed = update.apply(listOf(entry)).single()
+        assertEquals("2026-11-14T12:00:00Z", refreshed.lastPlayedDate)
+        assertEquals(40000L, refreshed.item.playbackPositionTicks)
+        assertEquals(entry.lastPlayedDate, update.copy(snapshot = snapshot.copy(lastPlayedDate = null)).apply(listOf(entry)).single().lastPlayedDate)
+        assertEquals(entry, update.copy(identity = update.identity.copy(itemId = "another")).apply(listOf(entry)).single())
+    }
+
+    @Test
+    fun catalogueRetainsContinueMetadataAndOldSnapshotsStayReadable() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"Items":[{"Id":"resume","Name":"Continue fixture",
+            "Type":"Book","Container":"cbz","UserData":{"Played":false,"PlaybackPositionTicks":40000,
+            "PlayedPercentage":25.5,"LastPlayedDate":"2026-11-14T12:00:00Z"}}],"TotalRecordCount":1}"""))
+        val entry = client.getCatalogue(JellyfinServerConfig(baseUrl(), true),
+            JellyfinAuth("token", "user", "server", "Reader"), JellyfinCatalogueQuery("books")).entries.single()
+        assertEquals("2026-11-14T12:00:00Z", entry.lastPlayedDate)
+        assertEquals(25.5, entry.playedPercentage!!, 0.0)
+        assertEquals(entry, JellyfinSnapshots.decode(JellyfinSnapshots.encode(entry)))
+        val old = org.json.JSONObject(JellyfinSnapshots.encode(entry))
+        old.remove("lastPlayedDate"); old.remove("playedPercentage")
+        val restored = JellyfinSnapshots.decode(old.toString())
+        assertNull(restored.lastPlayedDate)
+        assertNull(restored.playedPercentage)
+        assertEquals(40000L, restored.item.playbackPositionTicks)
+        val request = server.takeRequest()
+        assertEquals("GET", request.method)
+        assertEquals("books", request.requestUrl!!.queryParameter("ParentId"))
+    }
+
+    @Test
     fun folderFallbackRequiresRealFolderAndSelectedLibraryAncestry() = runBlocking {
         val config = JellyfinServerConfig(baseUrl() + "/proxy", true)
         val auth = JellyfinAuth("token", "user", "server", "Reader")

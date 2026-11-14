@@ -25,7 +25,9 @@ internal fun LibraryTabs(selected: LibraryFilter, onSelect: (LibraryFilter) -> U
     val content: @Composable () -> Unit = {
         views.forEach { view ->
             Tab(selected = view == selected, onClick = { onSelect(view) },
-                modifier = Modifier.heightIn(min = 48.dp)) {
+                modifier = Modifier.heightIn(min = 48.dp),
+                selectedContentColor = MaterialTheme.colorScheme.tertiary,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant) {
                 Text(stringResource(when (view) {
                     LibraryFilter.ALL -> R.string.library_view_all
                     LibraryFilter.SERIES -> R.string.library_view_series
@@ -38,7 +40,7 @@ internal fun LibraryTabs(selected: LibraryFilter, onSelect: (LibraryFilter) -> U
     }
     val indicator: @Composable (List<TabPosition>) -> Unit = { positions ->
         TabRowDefaults.SecondaryIndicator(
-            Modifier.tabIndicatorOffset(positions[views.indexOf(selected)]), color = Ochre)
+            Modifier.tabIndicatorOffset(positions[views.indexOf(selected)]), height = 3.dp, color = MaterialTheme.colorScheme.tertiary)
     }
     if (largeType) ScrollableTabRow(selectedTabIndex = views.indexOf(selected), edgePadding = 0.dp,
         containerColor = MaterialTheme.colorScheme.background, contentColor = MaterialTheme.colorScheme.onBackground,
@@ -67,5 +69,7 @@ internal fun UnreadOnlyControl(checked: Boolean, onCheckedChange: (Boolean) -> U
 internal fun UnreadOnlyChip(onClear: () -> Unit) {
     AssistChip(onClick = onClear, label = { Text(stringResource(R.string.library_unread_only)) },
         trailingIcon = { Icon(Icons.Default.Close, stringResource(R.string.library_clear_unread)) },
-        modifier = Modifier.heightIn(min = 48.dp))
+        colors = AssistChipDefaults.assistChipColors(containerColor = Ochre,
+            labelColor = net.digitalbc.leafreader.ui.theme.Ink, trailingIconContentColor = net.digitalbc.leafreader.ui.theme.Ink),
+        border = null, modifier = Modifier.heightIn(min = 48.dp))
 }

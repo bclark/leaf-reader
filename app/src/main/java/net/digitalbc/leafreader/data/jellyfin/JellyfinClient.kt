@@ -203,7 +203,9 @@ class JellyfinClient(
                             seriesId = obj.textOrNull("SeriesId")?.takeUnless { it.replace("-", "").all { c -> c == '0' } },
                             volumeNumber = if (obj.isNull("ParentIndexNumber")) null else obj.getInt("ParentIndexNumber"),
                             issueNumber = if (obj.isNull("IndexNumber")) null else obj.getDouble("IndexNumber"),
-                            people = parsePeople(obj)))
+                            people = parsePeople(obj),
+                            lastPlayedDate = data?.textOrNull("LastPlayedDate"),
+                            playedPercentage = if (data == null || data.isNull("PlayedPercentage")) null else data.optDouble("PlayedPercentage").takeIf { it.isFinite() && it in 0.0..100.0 }))
                     }
                 }
                 val total = json.getInt("TotalRecordCount")
@@ -293,7 +295,7 @@ class JellyfinClient(
         }?.takeIf { it >= 0 }
         val percentage = (data?.opt("PlayedPercentage") as? Number)?.toDouble()
             ?.takeIf { it.isFinite() && it in 0.0..100.0 }
-        return JellyfinProgressSnapshot(ticks, data?.opt("Played") as? Boolean, percentage)
+        return JellyfinProgressSnapshot(ticks, data?.opt("Played") as? Boolean, percentage, data?.textOrNull("LastPlayedDate"))
     }
 
     suspend fun getItemDetails(

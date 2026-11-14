@@ -46,7 +46,7 @@ import java.util.zip.ZipOutputStream
 /** Production UI with synthetic local data. Never included in a release or owner package. */
 open class LibraryQaActivity : ComponentActivity() {
     override fun attachBaseContext(newBase: Context) {
-        val width = when (javaClass.simpleName) { "LibraryWideQaActivity" -> 840; "LibraryMediumQaActivity" -> 600; else -> 0 }
+        val width = when (javaClass.simpleName) { "LibraryWideQaActivity" -> 840; "LibraryMediumQaActivity" -> 600; "LibraryPhoneQaActivity", "LibraryLargeQaActivity" -> 390; else -> 0 }
         val font = if (javaClass.simpleName == "LibraryLargeQaActivity") 2f else 1f
         val metrics = newBase.resources.displayMetrics
         val config = Configuration(newBase.resources.configuration).apply {
@@ -64,13 +64,19 @@ open class LibraryQaActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         check(packageName == "net.digitalbc.leafreader.recoveryqa")
         enableEdgeToEdge()
+        // These options affect this synthetic Activity only, never device settings.
+        if (intent.getBooleanExtra("spanish", false)) {
+            resources.updateConfiguration(Configuration(resources.configuration).apply {
+                setLocale(java.util.Locale.forLanguageTag("es-MX"))
+            }, resources.displayMetrics)
+        }
         val scenario = intent.getStringExtra("scenario") ?: "mixed"
         check(scenario in setOf("mixed", "started", "completed", "empty", "conflict", "download", "benchmark", "metadata"))
         val app = application as ComicReaderApp
         lifecycleScope.launch {
             withContext(Dispatchers.IO) { seed(app, scenario) }
             setContent {
-                    ComicReaderTheme(mode = if (intent.getBooleanExtra("dark", false)) ThemeMode.DARK else ThemeMode.LIGHT) {
+                    ComicReaderTheme(mode = if (intent.getBooleanExtra("dark", false)) ThemeMode.DARK else ThemeMode.LIGHT, amoled = intent.getBooleanExtra("amoled", false)) {
                         Surface(Modifier.fillMaxSize()) {
                             when (scenario) {
                                 "conflict" -> ConflictFixture()
@@ -197,6 +203,7 @@ open class LibraryQaActivity : ComponentActivity() {
     }
 }
 
+class LibraryPhoneQaActivity : LibraryQaActivity()
 class LibraryLargeQaActivity : LibraryQaActivity()
 class LibraryMediumQaActivity : LibraryQaActivity()
 class LibraryWideQaActivity : LibraryQaActivity()

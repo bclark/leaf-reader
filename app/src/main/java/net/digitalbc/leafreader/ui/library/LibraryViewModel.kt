@@ -338,6 +338,8 @@ class LibraryViewModel(
         }
     }
 
+    suspend fun readableContinueComic(id: Long): ComicEntity? = repository.getReadableComic(id)
+
     fun openJellyfinDetail(item: JellyfinItem) {
         if (item.isFolder) return
         jellyfinDetailJob?.cancel()
@@ -461,7 +463,13 @@ class LibraryViewModel(
             return
         }
         if (!_importing.value) {
-            importJellyfinItems(listOf(details.item)) {
+            importJellyfinItems(listOf(details.item), onFailure = { error ->
+                viewModelScope.launch {
+                    if (detailGeneration == requestGeneration && _jellyfinDetail.value?.identity == state.identity) {
+                        _jellyfinDetail.update { it?.copy(failure = (error as? JellyfinException)?.kind ?: JellyfinFailureKind.UNKNOWN) }
+                    }
+                }
+            }) {
                 viewModelScope.launch {
                     if (detailGeneration == requestGeneration && importJob?.isCancelled != true &&
                         _jellyfinDetail.value?.identity == state.identity && !_importing.value) {
@@ -631,7 +639,7 @@ class LibraryViewModel(
         }
     }
 
-    fun importJellyfinItems(items: List<JellyfinItem>, onFinished: () -> Unit = {}) {
+    fun importJellyfinItems(items: List<JellyfinItem>, onFailure: (Throwable) -> Unit = {}, onFinished: () -> Unit = {}) {
         if (items.isEmpty()) return
         val selectedItems = items.toList()
         val session = repository.captureJellyfinImportSession()
@@ -666,6 +674,7 @@ class LibraryViewModel(
                         val err = result.exceptionOrNull()
                         if (err !is CancellationException) {
                             _message.value = err?.message ?: "Failed to import ${item.name}"
+                            if (err != null && repository.isCurrentJellyfinImportSession(session)) onFailure(err)
                         }
                     }
                 }

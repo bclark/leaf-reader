@@ -85,6 +85,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
@@ -195,6 +197,7 @@ fun LibraryScreen(
     onOpenMenu: () -> Unit,
     onOpenDrive: () -> Unit,
     onOpenJellyfin: () -> Unit = {},
+    onConnectJellyfin: () -> Unit = onOpenMenu,
     catalogue: JellyfinCatalogueViewModel? = null,
 ) {
     val comics by viewModel.comics.collectAsStateWithLifecycle()
@@ -310,6 +313,71 @@ fun LibraryScreen(
     val unreadFocus = remember { FocusRequester() }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
+    var menuExpanded by remember { mutableStateOf(false) }
+    val menuFocus = remember { FocusRequester() }
+    var continuingRemote by rememberSaveable { mutableStateOf<String?>(null) }
+    var continueDownloadStarted by rememberSaveable { mutableStateOf(false) }
+    var missingContinueIds by remember(catalogueState?.accountScope) { mutableStateOf(emptySet<String>()) }
+    var missingContinueCopies by remember { mutableStateOf(emptySet<Long>()) }
+    var checkingContinue by remember { mutableStateOf<Long?>(null) }
+    var continueLocalJob by remember { mutableStateOf<Job?>(null) }
+    val continueScope = rememberCoroutineScope()
+    val unreadableContinueMessage = androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_continue_unreadable)
+    val emptyLibrary = comics.isEmpty() && !viewModel.hasJellyfinConfig &&
+        searchQuery.isBlank() && !isSearchOpen && currentFilter != LibraryFilter.READING_LISTS && !isEditMode
+    val continueRemoteReachable = currentFilter != LibraryFilter.OFFLINE && catalogueState?.canContinueRemote == true
+    val continueEntries = catalogueState?.indexedEntries.orEmpty()
+    val projectedContinue by androidx.compose.runtime.key(catalogueState?.accountScope, catalogueState?.library?.id) {
+        produceState<List<ContinueReading>>(emptyList(), readableDownloads, downloadedCopies,
+            continueEntries, continueRemoteReachable, missingContinueIds, missingContinueCopies) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                continueReading(readableDownloads.filterNot { it.id in missingContinueCopies }, continueEntries,
+                    downloadedCopies, continueRemoteReachable, missingContinueIds)
+            }
+        }
+    }
+    // Apply safety removals immediately while the background projection catches up.
+    val continueCandidates = projectedContinue.filter { candidate ->
+        candidate.local?.let { it.id !in missingContinueCopies } ?: (continueRemoteReachable &&
+            candidate.remote?.item?.id !in missingContinueIds)
+    }
+    val continueFailureMessage = androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_continue_failed)
+    val currentContinueIntent by rememberUpdatedState(continuingRemote)
+    DisposableEffect(viewModel) {
+        onDispose {
+            // Keep the requested copy, but never replay a read intent after leaving Library.
+            if (currentContinueIntent != null) viewModel.closeJellyfinDetail()
+        }
+    }
+    LaunchedEffect(jellyfinDetail, continuingRemote, importing, isEditMode, isSearchOpen) {
+        if (continuingRemote != null) {
+            if (isEditMode || isSearchOpen) {
+                continuingRemote = null
+                viewModel.closeJellyfinDetail()
+                return@LaunchedEffect
+            }
+            val detail = jellyfinDetail
+            val ready = viewModel.consumeJellyfinRead()
+            when {
+                ready != null -> { continuingRemote = null; viewModel.closeJellyfinDetail(); onOpenComic(ready) }
+                detail?.failure != null -> {
+                    if (detail.failure == net.digitalbc.leafreader.data.jellyfin.JellyfinFailureKind.NOT_FOUND)
+                        missingContinueIds = missingContinueIds + continuingRemote!!
+                    continuingRemote = null
+                    viewModel.closeJellyfinDetail()
+                    viewModel.showMessage(continueFailureMessage)
+                }
+                detail?.details != null && !continueDownloadStarted -> {
+                    continueDownloadStarted = true
+                    viewModel.downloadJellyfinDetail(openWhenReady = true)
+                }
+                detail == null -> continuingRemote = null
+                detail.localCopyFailure && !detail.checkingLocal -> {
+                    continuingRemote = null; viewModel.closeJellyfinDetail()
+                }
+            }
+        }
+    }
     var isSearchFocused by remember { mutableStateOf(false) }
 
     BackHandler(enabled = isEditMode) {
@@ -356,7 +424,7 @@ fun LibraryScreen(
     val horizontalSpacing = if (actualColumns >= 4) 12.dp else 16.dp
     val verticalSpacing = if (actualColumns >= 4) 14.dp else 18.dp
 
-    if (jellyfinDetail != null) {
+    if (jellyfinDetail != null && continuingRemote == null) {
         JellyfinBrowserScreen(viewModel, onBack = { viewModel.closeJellyfinDetail() },
             onOpenComic = onOpenComic, onOpenLocal = { viewModel.closeJellyfinDetail() },
             onOpenSettings = onOpenMenu)
@@ -424,11 +492,12 @@ fun LibraryScreen(
                         }
                         Box(
                             Modifier
+                                .focusRequester(menuFocus)
                                 .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                                 .clickable(
                                     role = Role.Button,
                                     onClickLabel = "Open menu",
-                                    onClick = onOpenMenu,
+                                    onClick = { menuExpanded = true },
                                 ),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -445,6 +514,21 @@ fun LibraryScreen(
                                     tint = PaperWhite,
                                     modifier = Modifier.size(18.dp),
                                 )
+                            }
+                            androidx.compose.material3.DropdownMenu(expanded = menuExpanded, modifier = Modifier.width(250.dp),
+                                shape = RoundedCornerShape(14.dp), containerColor = MaterialTheme.colorScheme.surfaceVariant, onDismissRequest = {
+                                menuExpanded = false; menuFocus.requestFocus()
+                            }) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_select_comics)) },
+                                    leadingIcon = { Icon(Icons.Default.CheckCircle, null) },
+                                    enabled = comics.isNotEmpty(),
+                                    onClick = { menuExpanded = false; viewModel.setEditMode(true) })
+                                androidx.compose.material3.HorizontalDivider()
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_settings_more)) },
+                                    leadingIcon = { Icon(Icons.Default.Settings, null) },
+                                    onClick = { menuExpanded = false; onOpenMenu() })
                             }
                         }
                     }
@@ -541,7 +625,7 @@ fun LibraryScreen(
                 if (filter != LibraryFilter.OFFLINE) catalogue?.browseSavedCatalogue()
                 viewModel.setLibraryFilter(filter)
             }
-            if (unreadOnly) {
+            if (unreadOnly && !emptyLibrary) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), horizontalArrangement = Arrangement.End) {
                     UnreadOnlyChip {
                         viewModel.unreadOnly.value = false
@@ -577,7 +661,9 @@ fun LibraryScreen(
             val rowsReady = if (remoteMode) remoteRowsReady &&
                 ((currentFilter != LibraryFilter.READING_LISTS && !downloadedOnly) || localRowsReady)
                 else localRowsReady
-            if (rowsReady) {
+            if (emptyLibrary) {
+                LibraryEmpty(onAdd = { showSourceDialog = true }, onConnect = onConnectJellyfin, importing = importing)
+            } else if (rowsReady || (!isSearchOpen && !isEditMode && continueCandidates.isNotEmpty())) {
             gridPositions.SaveableStateProvider(gridKey) {
             // One constraint read for the screen, never one subcomposition per cover.
             BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -601,17 +687,10 @@ fun LibraryScreen(
                 columns = GridCells.Fixed(actualColumns),
                 state = gridState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 120.dp),
+                contentPadding = PaddingValues(start = if (gridWidth >= 600.dp) 32.dp else 18.dp, end = if (gridWidth >= 600.dp) 32.dp else 18.dp, top = 12.dp, bottom = if (isEditMode || importing) 120.dp else 18.dp),
                 horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
                 verticalArrangement = Arrangement.spacedBy(verticalSpacing),
             ) {
-                if (!isEditMode && !remoteMode && preparedLocalRows.selectableComicIds.isNotEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            androidx.compose.material3.TextButton(onClick = { viewModel.setEditMode(true) }, colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_edit)) }
-                        }
-                    }
-                }
                 if (isEditMode) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
@@ -645,6 +724,37 @@ fun LibraryScreen(
                             onRetry = { catalogue?.retryConnection() }, onSettings = onOpenMenu)
                     }
                 }
+                if (!isEditMode && !isSearchOpen && continueCandidates.isNotEmpty()) {
+                    item(key = "continue-reading", span = { GridItemSpan(maxLineSpan) }) {
+                        LibraryContinue(continueCandidates, continuingRemote?.let { "remote:$it" } ?: checkingContinue?.let { "local:$it" }, importProgress,
+                            onContinue = { candidate ->
+                                if (!importing && continuingRemote == null && checkingContinue == null) {
+                                    candidate.local?.let { comic ->
+                                        checkingContinue = comic.id
+                                        continueLocalJob = continueScope.launch {
+                                            try {
+                                                if (viewModel.readableContinueComic(comic.id) != null) onOpenComic(comic.id)
+                                                else {
+                                                    missingContinueCopies = missingContinueCopies + comic.id
+                                                    viewModel.showMessage(unreadableContinueMessage)
+                                                }
+                                            } finally { checkingContinue = null }
+                                        }
+                                    }
+                                    candidate.remote?.let {
+                                        continuingRemote = it.item.id
+                                        continueDownloadStarted = false
+                                        viewModel.openJellyfinDetail(it.item)
+                                    }
+                                }
+                            }, onCancel = {
+                                continueLocalJob?.cancel(); checkingContinue = null
+                                if (continuingRemote != null) {
+                                    viewModel.cancelImport(); viewModel.closeJellyfinDetail(); continuingRemote = null
+                                }
+                            }, loadCover = { item, width -> viewModel.loadJellyfinCover(item, width) })
+                    }
+                }
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -659,7 +769,7 @@ fun LibraryScreen(
                         }
                     }
                 }
-                if (remoteMode && catalogueState != null) {
+                if (rowsReady && remoteMode && catalogueState != null) {
                     mainCatalogueGrid(
                         state = if (downloadedOnly && (catalogueState.view != JellyfinCatalogueView.LISTS || catalogueState.collection != null)) catalogueState.copy(
                             entries = catalogueState.entries.filter { it.type.equals("BoxSet", true) || it.item.id in jellyfinBrowser.downloadedItemIds },
@@ -690,7 +800,7 @@ fun LibraryScreen(
                     )
                 }
 
-                if (displayedLocalItems.isEmpty() && !remoteMode) {
+                if (rowsReady && displayedLocalItems.isEmpty() && !remoteMode) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         if (unreadOnly) {
                             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -751,7 +861,7 @@ fun LibraryScreen(
                 if (remoteMode && currentFilter == LibraryFilter.READING_LISTS) {
                     item(span = { GridItemSpan(maxLineSpan) }) { Text("Leaf lists") }
                 }
-                items(displayedLocalItems, key = { item ->
+                items(if (rowsReady) displayedLocalItems else emptyList(), key = { item ->
                     when (item) {
                         is LibraryItem.SingleComic -> "comic-${item.comic.id}"
                         is LibraryItem.SeriesStack -> "series-${item.seriesName}-${item.volume.orEmpty()}"
@@ -776,7 +886,8 @@ fun LibraryScreen(
                                     if (isEditMode) {
                                         viewModel.toggleComicSelection(item.comic.id)
                                     } else {
-                                        comicOptionsTarget = item.comic
+                                        viewModel.setEditMode(true)
+                                        viewModel.toggleComicSelection(item.comic.id)
                                     }
                                 },
                             )
@@ -807,7 +918,7 @@ fun LibraryScreen(
 
                 val isListsFilter = currentFilter == LibraryFilter.READING_LISTS
 
-                if (searchQuery.isBlank() && !isEditMode && !unreadOnly) {
+                if (rowsReady && isListsFilter && searchQuery.isBlank() && !isEditMode && !unreadOnly) {
                     item {
                         AddTile(
                             importing = importing,
@@ -836,37 +947,6 @@ fun LibraryScreen(
                 }
             }
 
-            if (!isEditMode && !importing) {
-                val isListsFilter = currentFilter == LibraryFilter.READING_LISTS
-                ExtendedFloatingActionButton(
-                    onClick = {
-                        if (!importing) {
-                            if (isListsFilter) showCreateListDialog = true
-                            else showSourceDialog = true
-                        }
-                    },
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = DeepInk,
-                    shape = RoundedCornerShape(4.dp),
-                    elevation = FloatingActionButtonDefaults.elevation(6.dp),
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .navigationBarsPadding()
-                        .padding(20.dp),
-                    icon = {
-                        Icon(Icons.Default.Add, contentDescription = if (isListsFilter) "Create list" else "Add comic", tint = DeepInk)
-                    },
-                    text = {
-                        Text(
-                            text = if (isListsFilter) "CREATE LIST" else "ADD COMIC",
-                            fontFamily = Anton,
-                            fontSize = 14.sp,
-                            color = DeepInk,
-                            letterSpacing = 0.6.sp,
-                        )
-                    },
-                )
-            }
 
             Box(
                 modifier = Modifier
@@ -980,6 +1060,15 @@ fun LibraryScreen(
                 modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
             )
         }
+        if (!isEditMode && !emptyLibrary) LibraryBottomAction(
+            lists = currentFilter == LibraryFilter.READING_LISTS,
+            importing = importing || continuingRemote != null || checkingContinue != null,
+            onClick = {
+                if (!importing && continuingRemote == null) {
+                    if (currentFilter == LibraryFilter.READING_LISTS) showCreateListDialog = true
+                    else showSourceDialog = true
+                }
+            })
     }
 
     if (showSourceDialog) {
@@ -1050,8 +1139,7 @@ fun LibraryScreen(
                                     viewModel.setLibraryFilter(LibraryFilter.ALL)
                                     onOpenJellyfin()
                                 } else {
-                                    viewModel.showMessage("Configure your Jellyfin server in Menu first.")
-                                    onOpenMenu()
+                                    onConnectJellyfin()
                                 }
                             }
                             .padding(vertical = 12.dp, horizontal = 16.dp),

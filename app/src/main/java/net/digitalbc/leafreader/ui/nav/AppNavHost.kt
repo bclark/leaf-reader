@@ -88,6 +88,7 @@ fun AppNavHost() {
                     libraryVm.loadSmbDirectory("")
                     navController.navigate(Routes.DRIVE)
                 },
+                onConnectJellyfin = { navController.navigate("menu?section=jellyfin") },
                 onOpenJellyfin = {
                     libraryVm.setLibraryFilter(net.digitalbc.leafreader.ui.library.LibraryFilter.ALL)
                     catalogueVm.ensureRetry()
@@ -142,7 +143,9 @@ fun AppNavHost() {
                 }
             }
         }
-        composable(Routes.MENU) {
+        composable(Routes.MENU + "?section={section}", arguments = listOf(
+            navArgument("section") { type = NavType.StringType; defaultValue = "" },
+        )) { menuEntry ->
             val connectedOnEntry = rememberSaveable { libraryVm.hasJellyfinConfig }
             val amoled by app.amoledTheme.collectAsState()
             val themeMode by app.themeMode.collectAsState()
@@ -168,6 +171,7 @@ fun AppNavHost() {
                 onSetLandscapeSpread = app::setLandscapeSpread,
                 settings = app.settings,
                 repository = app.libraryRepository,
+                openJellyfinSetup = menuEntry.arguments?.getString("section") == "jellyfin",
                 onBack = {
                     if (connectedOnEntry != libraryVm.hasJellyfinConfig) {
                         if (!libraryVm.hasJellyfinConfig) libraryVm.ensureJellyfinLanding()

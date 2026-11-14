@@ -17,6 +17,7 @@ object JellyfinSnapshots {
         put("size", item.sizeBytes); put("image", item.imageTag)
         put("series", item.seriesName); put("year", item.productionYear)
         put("ticks", item.playbackPositionTicks); put("played", entry.played ?: JSONObject.NULL)
+        put("lastPlayedDate", entry.lastPlayedDate); put("playedPercentage", entry.playedPercentage)
         put("seriesId", entry.seriesId); put("volume", entry.volumeNumber); put("issue", entry.issueNumber)
         entry.folder?.let { put("folderId", it.id); put("folderName", it.name); put("folderLibrary", it.libraryId) }
         put("people", JSONArray(entry.people.map { person -> JSONObject().apply {
@@ -45,7 +46,8 @@ object JellyfinSnapshots {
                     fun field(key: String) = if (person.isNull(key)) null else person.getString(key)
                     add(JellyfinPerson(person.getString("name"), field("type"), field("role"), field("id")))
                 }
-            })
+            }, lastPlayedDate = text("lastPlayedDate"),
+            playedPercentage = if (obj.isNull("playedPercentage")) null else obj.getDouble("playedPercentage"))
     }
 
     fun page(page: JellyfinCataloguePage): String = JSONObject().apply {

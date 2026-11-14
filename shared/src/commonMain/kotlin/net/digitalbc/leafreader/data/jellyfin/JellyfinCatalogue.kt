@@ -10,7 +10,13 @@ data class JellyfinCatalogueEntry(
     val issueNumber: Double? = null,
     val folder: JellyfinFolderIdentity? = null,
     val people: List<JellyfinPerson> = emptyList(),
+    val lastPlayedDate: String? = null,
+    val playedPercentage: Double? = null,
 ) {
+    constructor(item: JellyfinItem, type: String, played: Boolean?, seriesId: String?,
+        volumeNumber: Int?, issueNumber: Double?, folder: JellyfinFolderIdentity?, people: List<JellyfinPerson>) :
+        this(item, type, played, seriesId, volumeNumber, issueNumber, folder, people, null, null)
+
     constructor(item: JellyfinItem, type: String, played: Boolean?) :
         this(item, type, played, null, null, null, null)
 

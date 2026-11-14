@@ -1,0 +1,6 @@
+<resources>
+    <string name="library_continue_reading">Continue reading</string>
+    <string name="library_continue_accessible">Continue reading, %1$s, %2$s</string>
+    <string name="library_continue_failed">Could not retrieve this comic. Try again when the server is available.</string>
+    <string name="library_continue_unreadable">This copy is no longer readable. Add it again to continue.</string>
+</resources>
