@@ -79,3 +79,10 @@ Independently rehashed all64 fresh test/lint reports. Both full and F-Droid AppD
 Reviewed exact current native symbol inventory: stripped upstream .symtab absent, .dynsym present; full symbol archive unavailable, exact R8 mappings retained. Qualified native_symbols_review passes under release-runbook allowance, preserving diagnostic limitations. No binary/source rebuild/symbol substitution. Corrected previous three evidence-backed acceptance statuses from passed to helper-required pass; evidence/limits retained. Six local gates now pass; offline/sync/privacy/notes and allpostPlay remain pending. Evidence: docs/local/android-release-prep-20261113/remaining-acceptance/about-migration-symbol-review.json.
 
 KEEP BUILDING. Q027artwork/B05independent recovery and privacy/publicsource/declarations/notes, actual network/two-client/cancellation/account/storage, spoken accessibility/largefont/contrast, devicebreadth/OStransfer and eventual separatelyauthorized Play-delivered acceptance remain. No upload/publication/push/merge/Done. Engineer waiting for owner Offline response, no automatic worker/retry.
+
+
+## Android S25 bounded offline/reconnect — 2026-11-14
+
+Current6480b62/canonical5d96f0a5/S25payload-equivalent3a27da2b: verified actual network loss, approvedfixture6→7/coldrestartlibrary7/reopenedreader7 and unreachablebanner. Owner restorednetwork; freshcatalogue/targetedapprovedfixtureSync returns withoutvisibleerror/conflict, Continuepage7 retained. Roundedserver4% is not exact independentpage/ticks/queuedack proof; sync/cancellation/two-client gate stays pending. Sevenboundedlocal gates pass includingoffline; no broadclosure. Prior device6/server7 prompt left unresolved; no silentchoice/reset. Phone staysonlinepage7; no unrelatedcomic/account/settings changes.
+
+[Exact observations and limitations](local/android-release-prep-20261113/remaining-acceptance/S25_NETWORK_20261114.md). KEEP BUILDING; independentclient/livecases, accessibility/devicebreadth/OStransfer and privacy/rights/recovery/distribution gates remain. Nativephase FINISH/released, no worker/build/emulator/upload/publication/Done.
