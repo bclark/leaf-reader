@@ -372,3 +372,50 @@ Physical baseline verification now covers distinct real Series groups, bounded v
 Bryan approved **All · Series · Lists · Offline** at the top of Library with a one-tap **Unread only** toolbar toggle and a removable chip while active. This supersedes the earlier main-header placement of Unread and Downloaded. The Offline tab uses the existing cross-source readable-copy rules and unreachable-launch fallback. The existing ability to narrow an opened Series or List to local copies remains part of the contract. Unread only applies within each view and carries across tabs.
 
 [Android and iOS handoff](../../../leaf-reader-design/docs/LIBRARY-OFFLINE-UNREAD.txt) and [approved Figma section](https://www.figma.com/design/fJAnpiOo1Mzr1rAVk09hRu?node-id=6-1638). Design approval is recorded. Implementation and candidate acceptance remain open.
+
+
+## Android Offline/Unread header development checkpoint · 2026-11-13 UTC
+
+The approved header is implemented in the isolated Android worktree at `21b3fac` plus uncommitted changes. All / Series / Lists / Offline, global Unread and removable chip are connected to native local/remote projections and detail filtering. Offline uses validated readable copies. List identity/membership/order and Continue availability/order are preserved. Compact S25 checks pass on exact debug `6d61e983…8fc69be` and optimized `ea8de8f0…d70d64` candidates for tabs, Unread, search/members/Back, peeled-cover preservation and scrolled tab/Menu restoration. Both flavor unit suites have 200 passes/one expected SMB-live skip, zero failures/errors, and both lints/assemblies pass.
+
+This contributes bounded Android evidence to JF-A01/A02/A04/A08/A09. Existing parity ledger and whole-feature acceptance states remain open. Native iOS results keep their separately recorded scope. Adaptive/accessibility/localization, unavailable local fixtures, unreachable cold launch/reconnect, broader lifecycle/two-client/upgrade/privacy/licensing/release checks remain pending. [Android exact-source handoff and regression history](../local/android-offline-unread-20261112/README.md), [engineering coordination](../ANDROID_ENG_NOTES.md). Shared board stays In Progress while the Android slice awaits review/integration.
+
+
+### Android header review correction · 2026-11-13 UTC
+
+The continuing Android review corrected exact-query saved-collection lookup for 30-record pages and independent Unread, with stable pagination scope and honest partial coverage. It also keeps local Series Continue/totals/Add membership available when Unread hides every displayed issue. The new cache regression was reproduced before the fix. Both flavor suites now have 201 passes/one expected skip, zero failures/errors, with both lints and debug/optimized assemblies passing. Optimized `f58e73ba…4b28ccf` is installed/checksum verified and passes the existing compact S25 header/peel/restoration/search journey. [Updated exact-source review and evidence limits](../local/android-offline-unread-20261112/review-followup/README.md). New offline-collection and empty-Unread local Series physical fixtures remain pending. Prior parity ledger/checklist states and native iOS evidence retain their recorded scope. Shared card remains In Progress.
+
+
+## Owner answers for T-02 and T-03 · 2026-11-13 02:04 UTC
+
+Bryan selected “Ask which position to keep” for Q-019/T-02. When unsent device progress differs from the server position, retain both and ask which to keep. This supersedes historical pending-decision statements, while implementation and two-client/device acceptance remain open.
+
+Bryan selected “Keep until manually removed” for Q-020/T-03. Read/Continue copies stay until manual removal. Explicit Downloads and device/Files/SMB originals remain protected. This authorizes the retention contract and its verification. Historical question/evidence records are preserved in Android engineering notes.
+
+## Android owner-decision implementation checkpoint · 2026-11-13
+
+Q-019/T-02 and Q-020/T-03 are implemented in the isolated Android candidate on reconciled3603b89 plus the frozen source in [final business verification](../local/android-eng-workthrough-20261113/final-business/verification.json). Shared144 tests pass; each Android flavor229total/228passed/one expected opt-in SMB-live skip; both lints0errors/87warnings. This is development evidence, not merged/shipped or whole-parity acceptance.
+
+Three-way sync reuses shared JellyfinSyncPolicy and a durable server/user/URL baseline. Raw missing progress stays unknown. Fresh choices reject changed remote/device/revision/account/consent/page-count state; readback confirms writes before exact-revision acknowledgment. Native device/Jellyfin/defer choices remain outside Reader and retained detail exposes explicit sync/review. Room8→9 stores independent nullable completion; new imports explicitly start incomplete unless the server says read. Optional portable v1 completed matches the existing iOS field. Shared extreme-tick conversion clamps in Long before narrowing, preventing malformed values from wrapping to another page; iOS native execution of this shared arithmetic change was not run by this Android task.
+
+Copies stay until manual removal. Remove download affects only managed Jellyfin archive/cover, keeps canonical history/link/list/pending work and never deletes server content. Re-download validates and rebinds the same row. Disk-reopen, rollback and commit-cancellation regressions pass. Local/SMB originals remain protected. Native synthetic removal verifies file absence with page/read/list/pending retained. A separate permanent library Delete keeps its existing intentional meaning.
+
+[Native fixtures](../local/android-eng-workthrough-20261113/native-fixtures/) cover both conflict callbacks/defer, real large-text scrolling, local Series/list totals under empty Unread, missing-copy Offline, native XML import/grouping/editing and adaptive controls. Logical600/840dp renders are not physical Fold acceptance. Real two-client/server/account/upgrade/transfer/ENOSPC/TalkBack/fluent-localization and final release gates remain at their recorded scope. HTTP reads narrow concurrent-server races; this is not an atomic multi-client server transaction guarantee. Existing parity rows/history remain open unless their complete native acceptance is separately evidenced.
+
+
+## First-launch handoff refinement · 2026-11-13
+
+Bryan requested the design onboarding handoff enter engineering workflow. [JF-A07 implementation queue](FIRST_LAUNCH_ONBOARDING.md) refines the first-run entry above: Open your first comic first, then optional Jellyfin card only through I use Jellyfin. This supersedes a Jellyfin-first presentation, not the existing manual connection/discovery/auth acceptance requirements. Native work is queued, not accepted; both parity cells and release gates remain open.
+
+
+## Series-first Library decision — 2026-11-14
+
+**OWNER DIRECTION / NOT YET IMPLEMENTED OR ACCEPTED.** Bryan: “I think for Leaf Reader, the default should be series. So maybe the top list should be series lists all and offline.” The cross-platform target is **Series · Lists · All · Offline**, with **Series as the default Library view**. This supersedes the All-first ordering in the 2026-11-12 Library header direction and earlier navigation examples, not the underlying content/source rules.
+
+- Preserve the already-approved **Unread only** toolbar toggle and removable active chip, applying within each view and carrying across tabs. Unread is not being removed or silently made a fifth tab.
+- Offline retains the existing cross-source readable-copy rules, local imports, downloaded Jellyfin copies and unreachable-launch fallback. Series-first must not strand offline/local-only readers or require a server to read a complete local copy.
+- Preserve Series/List local-copy narrowing, search/sort, source labels, reading progress, list membership, detail/reader back navigation and per-view state. This decision is tab ordering/default selection, not a data migration or feature removal.
+- Engineering interpretation: use Series when choosing the default Library destination. Do not force a jump back to Series during an active session or override explicit navigation/deep links/offline fallback. If a persisted last-selected tab conflicts with the requested default on a fresh launch, record that interaction before changing restoration semantics; Bryan has not specified a reset-on-every-launch policy.
+- Android and iOS should record this as a pending shared UI change against **JF-A01/JF-A04/JF-A09**: verify exact order and initial selection, connected/local-only/empty libraries, offline cold launch, Unread across tabs, Series/List offline narrowing, back/state retention, accessibility and phone/tablet layouts. Existing tests or design approval are not acceptance for this change; record exact source/build and new results separately.
+
+Documentation handoff only: no app-code change, test run, release-gate closure, commit or publication. Existing evidence/checklists remain authoritative and unchanged.
