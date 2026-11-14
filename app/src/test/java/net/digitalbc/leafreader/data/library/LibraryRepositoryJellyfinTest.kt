@@ -645,6 +645,121 @@ class LibraryRepositoryJellyfinTest {
     }
 
     @Test
+    fun disconnectCancelsHeldArchiveWithoutPublishingOrDeletingOtherCopies() = runBlocking {
+        val original = retainedComic(JellyfinItemIdentity("server", "user", "original"))
+        val beforeRows = comicDao.getAll()
+        val beforeBytes = File(original.filePath).readBytes()
+        credStore.saveAuth(JellyfinAuth("token-A", "user", "server", "Reader"))
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        val item = JellyfinItem("held-archive", "Held.cbz", false, container = "cbz")
+        val beforeFiles = ownedImportFiles()
+        server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.NO_RESPONSE))
+        val operation = async(Dispatchers.IO) { repository.importJellyfinComic(item) }
+        try {
+            assertEquals("/Items/held-archive/Download", takeRequest().path)
+            repository.disconnectJellyfin()
+            withTimeout(3_000) { operation.join() }
+            assertTrue("Disconnect must cancel the actual import job", operation.isCancelled)
+            assertEquals(beforeRows, comicDao.getAll())
+            assertTrue(beforeBytes.contentEquals(File(original.filePath).readBytes()))
+            assertEquals(beforeFiles, ownedImportFiles())
+            assertNull(linkDao.findLink("jellyfin", "server", "user", item.id))
+        } finally { operation.cancel(); operation.join() }
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun accountSwitchCancelsHeldBatchWithoutNavigationOrNewAccountRequests() = runBlocking {
+        kotlinx.coroutines.Dispatchers.setMain(kotlinx.coroutines.test.UnconfinedTestDispatcher())
+        val store = androidx.lifecycle.ViewModelStore()
+        try {
+            credStore.saveAuth(JellyfinAuth("token-A", "user-A", "server-A", "Reader"))
+            settings.jellyfinServerUrl = baseUrl()
+            settings.jellyfinAllowInsecureHttp = true
+            val item = JellyfinItem("first", "First.cbz", false, container = "cbz")
+            val identity = JellyfinItemIdentity("server-A", "user-A", item.id)
+            val vm = net.digitalbc.leafreader.ui.library.LibraryViewModel(repository, settings,
+                loadJellyfinDetails = { Result.success(net.digitalbc.leafreader.data.jellyfin.JellyfinItemDetails(identity, item)) })
+            store.put("held-batch", vm)
+            vm.openJellyfinDetail(item)
+            withTimeout(5_000) { vm.jellyfinDetail.first { it?.loading == false && !it.checkingLocal } }
+            val completed = AtomicBoolean(false)
+            server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.NO_RESPONSE))
+            server.enqueue(MockResponse().setBody("""{"AccessToken":"token-B","ServerId":"server-A","User":{"Id":"user-B","Name":"Other"}}"""))
+            vm.importJellyfinItems(listOf(item, item.copy(id = "second"))) { completed.set(true) }
+            assertEquals("/Items/first/Download", takeRequest().path)
+            assertTrue(repository.connectJellyfin(baseUrl(), true, "Other", "fixture-only").isSuccess)
+            assertEquals("/Users/AuthenticateByName", takeRequest().path)
+            withTimeout(3_000) { vm.importing.first { !it } }
+            assertFalse("Stale completion cannot navigate or refresh a new account", completed.get())
+            assertNull(vm.consumeJellyfinRead())
+            assertTrue(comicDao.getAll().isEmpty())
+            assertTrue(ownedImportFiles().none { it.endsWith(".part") })
+            assertEquals("user-B", repository.getJellyfinAuth()?.userId)
+            assertNull("No remaining selection may be requested using B", server.takeRequest(250, TimeUnit.MILLISECONDS))
+        } finally { clearModels(store); kotlinx.coroutines.Dispatchers.resetMain() }
+    }
+
+    @Test
+    fun sessionChangeDuringRelinkRollsBackReplacementAndKeepsHistory() = runBlocking {
+        val (item, id) = importedRetentionFixture("session-relink")
+        saveOffline(id, 3, false)
+        assertTrue(repository.removeJellyfinDownload(JellyfinItemIdentity("srv", "u", item.id)).isSuccess)
+        val beforeComic = comicDao.getById(id)
+        val beforePending = outboxDao.getPendingForComic(id)
+        val beforeFiles = ownedImportFiles()
+        val links = object : RemoteComicLinkDao by linkDao {
+            override suspend fun insert(link: net.digitalbc.leafreader.data.db.RemoteComicLinkEntity): Long {
+                val result = linkDao.insert(link)
+                repository.disconnectJellyfin()
+                return result
+            }
+        }
+        repository.jellyfinSyncScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
+        repository.observationScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
+        repository = LibraryRepository(RuntimeEnvironment.getApplication(), comicDao, settings, db.readingListDao(), db,
+            remoteComicLinkDao = links, jellyfinClient = JellyfinClient("session-relink"), jellyfinCredentialStore = credStore)
+        enqueueArchive()
+        val result = runCatching { repository.importJellyfinComic(item) }
+        assertTrue("Stale uncommitted publication must be cancelled", result.exceptionOrNull() is CancellationException)
+        takeRequest()
+        assertEquals(listOf(beforeComic), comicDao.getAll())
+        assertEquals(beforePending, outboxDao.getPendingForComic(id))
+        assertEquals(beforeFiles, ownedImportFiles())
+        assertEquals(id, linkDao.findLink("jellyfin", "srv", "u", item.id)?.comicId)
+    }
+
+    @Test
+    fun aCapturedSelectionCannotDownloadFromAnotherAccountOrServer() = runBlocking {
+        val other = MockWebServer()
+        other.start()
+        try {
+            for (differentServer in listOf(false, true)) {
+                credStore.saveAuth(JellyfinAuth("token-A", "user-A", "server-A", "Reader"))
+                settings.jellyfinServerUrl = baseUrl()
+                settings.jellyfinAllowInsecureHttp = true
+                val session = checkNotNull(repository.captureJellyfinImportSession())
+                credStore.saveAuth(JellyfinAuth("token-B", "user-B",
+                    if (differentServer) "server-B" else "server-A", "Other"))
+                if (differentServer) settings.jellyfinServerUrl = other.url("/").toString().trimEnd('/')
+                val result = runCatching {
+                    repository.importJellyfinComic(
+                        JellyfinItem("colliding-id", "Old selection.cbz", false, container = "cbz"), session = session)
+                }
+                assertTrue(result.exceptionOrNull() is CancellationException)
+                assertTrue(comicDao.getAll().isEmpty())
+            }
+            assertEquals(0, server.requestCount)
+            assertEquals(0, other.requestCount)
+        } finally { other.shutdown() }
+    }
+
+    private fun ownedImportFiles(): Set<String> = listOf("comics", "covers").flatMap { directory ->
+        File(RuntimeEnvironment.getApplication().filesDir, directory).listFiles()?.map { it.path }.orEmpty()
+    }.toSet()
+
+    @Test
     fun importPreservesDottedDisplayNamesAndStripsOnlyTheFileExtension() = runBlocking {
         credStore.saveAuth(JellyfinAuth("tok", "u", "srv", "Bryan"))
         settings.jellyfinServerUrl = baseUrl()

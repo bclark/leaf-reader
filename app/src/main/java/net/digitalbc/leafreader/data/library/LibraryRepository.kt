@@ -1236,17 +1236,40 @@ class LibraryRepository(
             }
         }
 
+    /** Captured when a selection is made; never rebuild it from a later account's credentials. */
+    class JellyfinImportSession internal constructor(
+        internal val config: JellyfinServerConfig,
+        internal val auth: JellyfinAuth,
+        internal val generation: Long,
+    )
+
+    fun captureJellyfinImportSession(): JellyfinImportSession? {
+        val generation = sessionGeneration.get()
+        val auth = jellyfinCredentialStore.loadAuth() ?: return null
+        val config = runCatching {
+            JellyfinServerConfig(settings.jellyfinServerUrl, settings.jellyfinAllowInsecureHttp)
+        }.getOrNull() ?: return null
+        return JellyfinImportSession(config, auth, generation)
+    }
+
+    fun isCurrentJellyfinImportSession(session: JellyfinImportSession?): Boolean =
+        session != null && syncSessionCurrent(session.config, session.auth, session.generation)
+
     suspend fun importJellyfinComic(
         item: JellyfinItem,
         onProgress: (JellyfinTransferProgress) -> Unit = {},
         isCancelled: () -> Boolean = { false },
+        session: JellyfinImportSession? = captureJellyfinImportSession(),
     ): Result<Long> = withContext(Dispatchers.IO) {
-        val auth = jellyfinCredentialStore.loadAuth()
-            ?: return@withContext Result.failure(IllegalStateException("Not logged in to Jellyfin"))
-        val serverUrl = settings.jellyfinServerUrl
-        if (serverUrl.isBlank()) {
-            return@withContext Result.failure(IllegalStateException("No Jellyfin server configured"))
+        if (session == null) return@withContext Result.failure(IllegalStateException("No active Jellyfin session"))
+        val auth = session.auth
+        val config = session.config
+        fun requireCurrentSession() {
+            if (!isCurrentJellyfinImportSession(session)) throw CancellationException("Jellyfin account changed")
         }
+        // Register the actual IO job, so disconnect interrupts a blocked OkHttp read too.
+        trackSessionJob(checkNotNull(currentCoroutineContext()[Job]))
+        requireCurrentSession()
 
         if (!item.isImportable) {
             return@withContext Result.failure(
@@ -1259,155 +1282,155 @@ class LibraryRepository(
             return@withContext Result.failure(IllegalStateException("Item is already being downloaded"))
         }
 
-        val config = try {
-            JellyfinServerConfig(serverUrl, settings.jellyfinAllowInsecureHttp)
-        } catch (e: Exception) {
-            activeJellyfinDownloads.remove(item.id)
-            return@withContext Result.failure(e)
-        }
-
-        // Check if already downloaded and file exists
-        val existingLink = remoteComicLinkDao?.findLink("jellyfin", auth.serverId, auth.userId, item.id)
-        val retainedComic = existingLink?.let { dao.getById(it.comicId) }
-        if (retainedComic != null) {
-            if (fileAvailability.isReadable(retainedComic, force = true)) {
-                activeJellyfinDownloads.remove(item.id)
-                return@withContext Result.success(retainedComic.id)
-            }
-        }
-
-        val token = UUID.randomUUID().toString()
-        val comicsDir = File(context.filesDir, "comics").apply { mkdirs() }
-        val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
-        val ext = item.fileExtension
-        val title = if (item.name.endsWith(".$ext", ignoreCase = true)) {
-            item.name.dropLast(ext.length + 1)
-        } else {
-            item.name
-        }
-        val partFile = File(comicsDir, "$token.part")
-        val dest = File(comicsDir, "$token.$ext")
-
-        var published = false
         try {
-            jellyfinClient.downloadToFile(
-                config = config,
-                auth = auth,
-                itemId = item.id,
-                partFile = partFile,
-                onProgress = onProgress,
-                isCancelled = isCancelled,
-            )
-
-            if (isCancelled()) {
-                partFile.delete()
-                throw CancellationException("Jellyfin import cancelled")
-            }
-
-            // Verify downloaded archive integrity before promoting
-            val detectedFormat = ComicArchiveFactory.detectFormat(partFile)
-            if (detectedFormat == ComicFormat.UNKNOWN) {
-                partFile.delete()
-                throw UnsupportedComicException("Downloaded file is not a supported comic or PDF archive")
-            }
-            try {
-                ComicArchiveFactory.open(partFile).use { archive ->
-                    if (archive.pageCount <= 0) {
-                        throw UnsupportedComicException("Downloaded archive contains no readable pages")
-                    }
-                    // Test reading the first page to ensure archive is not truncated
-                    archive.readPage(0)
+            // Check if already downloaded and file exists
+            val existingLink = remoteComicLinkDao?.findLink("jellyfin", auth.serverId, auth.userId, item.id)
+            val retainedComic = existingLink?.let { dao.getById(it.comicId) }
+            if (retainedComic != null) {
+                if (fileAvailability.isReadable(retainedComic, force = true)) {
+                    requireCurrentSession()
+                    return@withContext Result.success(retainedComic.id)
                 }
-            } catch (e: Exception) {
-                partFile.delete()
-                throw UnsupportedComicException("Downloaded comic archive is corrupt or truncated: ${e.message}")
             }
 
-            // Atomically rename .part file to final destination
-            if (!partFile.renameTo(dest)) {
-                partFile.copyTo(dest, overwrite = true)
-                partFile.delete()
+            val token = UUID.randomUUID().toString()
+            val comicsDir = File(context.filesDir, "comics").apply { mkdirs() }
+            val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
+            val ext = item.fileExtension
+            val title = if (item.name.endsWith(".$ext", ignoreCase = true)) {
+                item.name.dropLast(ext.length + 1)
+            } else {
+                item.name
             }
+            val partFile = File(comicsDir, "$token.part")
+            val dest = File(comicsDir, "$token.$ext")
 
-            val result = indexCopiedFile(dest, coversDir, token, title, source = "jellyfin")
-            if (result.isSuccess) {
-                val indexedId = result.getOrThrow()
-                var comicId = indexedId
+            var published = false
+            try {
+                jellyfinClient.downloadToFile(
+                    config = config,
+                    auth = auth,
+                    itemId = item.id,
+                    partFile = partFile,
+                    onProgress = onProgress,
+                    isCancelled = { isCancelled() || sessionGeneration.get() != session.generation },
+                )
+
+                requireCurrentSession()
+                if (isCancelled()) {
+                    partFile.delete()
+                    throw CancellationException("Jellyfin import cancelled")
+                }
+
+                // Verify downloaded archive integrity before promoting
+                val detectedFormat = ComicArchiveFactory.detectFormat(partFile)
+                if (detectedFormat == ComicFormat.UNKNOWN) {
+                    partFile.delete()
+                    throw UnsupportedComicException("Downloaded file is not a supported comic or PDF archive")
+                }
                 try {
-                    suspend fun linkAndAttach() {
-                    val previous = retainedComic?.let { dao.getById(it.id) }
-                    if (previous != null) {
-                        check(previous.source == "jellyfin" && db != null) { "Cannot replace a local original" }
-                        check(remoteComicLinkDao?.findLink("jellyfin", auth.serverId, auth.userId, item.id)?.comicId == previous.id)
-                        val indexed = checkNotNull(dao.getById(indexedId))
-                        check(dao.updateLocalFiles(previous.id, indexed.filePath, indexed.coverPath, indexed.format, indexed.pageCount) == 1)
-                        check(dao.delete(indexedId) == 1)
-                        comicId = previous.id
-                    }
-                    remoteComicLinkDao?.insert(
-                        RemoteComicLinkEntity(
-                            comicId = comicId,
-                            provider = "jellyfin",
-                            serverId = auth.serverId,
-                            userId = auth.userId,
-                            itemId = item.id,
-                            parentId = item.parentId,
-                            downloadedAt = System.currentTimeMillis(),
-                            remoteVersionTag = item.imageTag,
-                            remoteName = item.name,
-                        )
-                    )
-
-                    readingListDao?.getAllItems()?.filter {
-                        it.serverId == auth.serverId && it.userId == auth.userId && it.itemId == item.id
-                    }?.forEach { readingListDao.insertItem(it.copy(comicId = comicId)) }
-
-                    // Seed initial progress from Jellyfin if remote position or played status exists
-                    val importedComic = dao.getById(comicId)
-                    if (comicId == indexedId && importedComic != null && (item.playbackPositionTicks > 0L || item.played)) {
-                        val initialPage = JellyfinProgress.ticksToPage(item.playbackPositionTicks, importedComic.pageCount)
-                        dao.updateProgress(comicId, initialPage, 0, System.currentTimeMillis())
-                        if (item.played) dao.updateCompletion(comicId, true)
-                    }
-                    }
-                    withContext(NonCancellable) {
-                    if (db != null) db.withTransaction { linkAndAttach() } else linkAndAttach()
-                    published = true
-                    retainedComic?.let { old ->
-                        listOfNotNull(old.filePath, old.coverPath).forEach { path ->
-                            runCatching {
-                                val file = File(path).canonicalFile
-                                if (file.parentFile == comicsDir.canonicalFile || file.parentFile == coversDir.canonicalFile) file.delete()
-                            }
+                    ComicArchiveFactory.open(partFile).use { archive ->
+                        if (archive.pageCount <= 0) {
+                            throw UnsupportedComicException("Downloaded archive contains no readable pages")
                         }
+                        // Test reading the first page to ensure archive is not truncated
+                        archive.readPage(0)
                     }
-                    fileAvailability.invalidate()
-                    jellyfinCoverCache.clear()
-                    }
-                    return@withContext Result.success(comicId)
-                } catch (linkEx: Throwable) {
-                    // The transaction restores retained history; cleanup owns only the newly indexed row/files.
-                    if (!published) {
-                        dao.delete(indexedId)
+                } catch (e: Exception) {
+                    partFile.delete()
+                    throw UnsupportedComicException("Downloaded comic archive is corrupt or truncated: ${e.message}")
+                }
+
+                requireCurrentSession()
+                // Atomically rename .part file to final destination
+                if (!partFile.renameTo(dest)) {
+                    partFile.copyTo(dest, overwrite = true)
+                    partFile.delete()
+                }
+
+                withContext(NonCancellable) {
+                    requireCurrentSession()
+                    val result = indexCopiedFile(dest, coversDir, token, title, source = "jellyfin")
+                    if (result.isSuccess) {
+                        val indexedId = result.getOrThrow()
+                        var comicId = indexedId
+                        try {
+                            suspend fun linkAndAttach() {
+                                requireCurrentSession()
+                                val previous = retainedComic?.let { dao.getById(it.id) }
+                                if (previous != null) {
+                                    check(previous.source == "jellyfin" && db != null) { "Cannot replace a local original" }
+                                    check(remoteComicLinkDao?.findLink("jellyfin", auth.serverId, auth.userId, item.id)?.comicId == previous.id)
+                                    val indexed = checkNotNull(dao.getById(indexedId))
+                                    check(dao.updateLocalFiles(previous.id, indexed.filePath, indexed.coverPath, indexed.format, indexed.pageCount) == 1)
+                                    check(dao.delete(indexedId) == 1)
+                                    comicId = previous.id
+                                }
+                                remoteComicLinkDao?.insert(
+                                    RemoteComicLinkEntity(
+                                        comicId = comicId,
+                                        provider = "jellyfin",
+                                        serverId = auth.serverId,
+                                        userId = auth.userId,
+                                        itemId = item.id,
+                                        parentId = item.parentId,
+                                        downloadedAt = System.currentTimeMillis(),
+                                        remoteVersionTag = item.imageTag,
+                                        remoteName = item.name,
+                                    )
+                                )
+
+                                readingListDao?.getAllItems()?.filter {
+                                    it.serverId == auth.serverId && it.userId == auth.userId && it.itemId == item.id
+                                }?.forEach { readingListDao.insertItem(it.copy(comicId = comicId)) }
+
+                                // Seed initial progress from Jellyfin if remote position or played status exists
+                                val importedComic = dao.getById(comicId)
+                                if (comicId == indexedId && importedComic != null && (item.playbackPositionTicks > 0L || item.played)) {
+                                    val initialPage = JellyfinProgress.ticksToPage(item.playbackPositionTicks, importedComic.pageCount)
+                                    dao.updateProgress(comicId, initialPage, 0, System.currentTimeMillis())
+                                    if (item.played) dao.updateCompletion(comicId, true)
+                                }
+                            }
+                            if (db != null) db.withTransaction { linkAndAttach(); requireCurrentSession() }
+                            else { linkAndAttach(); requireCurrentSession() }
+                            published = true
+                            retainedComic?.let { old ->
+                                listOfNotNull(old.filePath, old.coverPath).forEach { path ->
+                                    runCatching {
+                                        val file = File(path).canonicalFile
+                                        if (file.parentFile == comicsDir.canonicalFile || file.parentFile == coversDir.canonicalFile) file.delete()
+                                    }
+                                }
+                            }
+                            fileAvailability.invalidate()
+                            jellyfinCoverCache.clear()
+                            Result.success(comicId)
+                        } catch (linkEx: Throwable) {
+                            // The transaction restores retained history; cleanup owns only the newly indexed row/files.
+                            if (!published) {
+                                dao.delete(indexedId)
+                                dest.delete()
+                                File(coversDir, "$token.jpg").delete()
+                            }
+                            throw linkEx
+                        }
+                    } else {
                         dest.delete()
                         File(coversDir, "$token.jpg").delete()
+                        result
                     }
-                    throw linkEx
                 }
-            } else {
-                dest.delete()
-                File(coversDir, "$token.jpg").delete()
+            } catch (t: Throwable) {
+                partFile.delete()
+                if (!published) {
+                    dest.delete()
+                    File(coversDir, "$token.jpg").delete()
+                }
+                if (t is CancellationException) throw t
+                Log.e(TAG, "Jellyfin download/import failed: ${t.message}")
+                Result.failure(t)
             }
-            result
-        } catch (t: Throwable) {
-            partFile.delete()
-            if (!published) {
-                dest.delete()
-                File(coversDir, "$token.jpg").delete()
-            }
-            if (t is CancellationException) throw t
-            Log.e(TAG, "Jellyfin download/import failed: ${t.message}")
-            Result.failure(t)
         } finally {
             activeJellyfinDownloads.remove(item.id)
         }

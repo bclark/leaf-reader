@@ -634,6 +634,7 @@ class LibraryViewModel(
     fun importJellyfinItems(items: List<JellyfinItem>, onFinished: () -> Unit = {}) {
         if (items.isEmpty()) return
         val selectedItems = items.toList()
+        val session = repository.captureJellyfinImportSession()
         val previousImport = importJob
         previousImport?.cancel()
         importJob = viewModelScope.launch(Dispatchers.IO) {
@@ -657,6 +658,7 @@ class LibraryViewModel(
                             _importProgress.value = overall
                         },
                         isCancelled = { !isActive },
+                        session = session,
                     )
                     if (result.isSuccess) {
                         importedCount++
@@ -671,10 +673,11 @@ class LibraryViewModel(
                 _importing.value = false
                 _importProgress.value = null
                 _importDetail.value = null
-                if (importedCount > 0) {
+                val currentSession = repository.isCurrentJellyfinImportSession(session)
+                if (importedCount > 0 && currentSession) {
                     _message.value = "Imported $importedCount ${if (importedCount == 1) "comic" else "comics"} from Jellyfin"
                 }
-                onFinished()
+                if (currentSession) onFinished()
             }
         }
     }
