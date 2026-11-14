@@ -939,3 +939,10 @@ KEEP BUILDING. Q027artwork/B05independent recovery and privacy/publicsource/decl
 Current6480b62/canonical5d96f0a5/S25payload-equivalent3a27da2b: verified actual network loss, approvedfixture6→7/coldrestartlibrary7/reopenedreader7 and unreachablebanner. Owner restorednetwork; freshcatalogue/targetedapprovedfixtureSync returns withoutvisibleerror/conflict, Continuepage7 retained. Roundedserver4% is not exact independentpage/ticks/queuedack proof; sync/cancellation/two-client gate stays pending. Sevenboundedlocal gates pass includingoffline; no broadclosure. Prior device6/server7 prompt left unresolved; no silentchoice/reset. Phone staysonlinepage7; no unrelatedcomic/account/settings changes.
 
 [Exact observations and limitations](docs/local/android-release-prep-20261113/remaining-acceptance/S25_NETWORK_20261114.md). KEEP BUILDING; independentclient/livecases, accessibility/devicebreadth/OStransfer and privacy/rights/recovery/distribution gates remain. Nativephase FINISH/released, no worker/build/emulator/upload/publication/Done.
+
+
+## Current source distribution packet / client acceptance — 2026-11-14
+
+Current6480b62 built-signed source archive freshly matches all216frozeninputs; fiveartifacts/mappings and pinned875f38a upstreamsource rehashed. New unpublished DISTRIBUTION_REVIEW_6480.md uses exactcurrentarchive/artifact identity and preserves priorcb7 evidence. About-only delta leaves priorprivacyflow analysis as supporting evidence, not owner/legal/declaration approval. No source/publicprivacy/Console mutation; Q027rights/B05independentrecovery remain.
+
+OwnerprovidedChrome approvedfixture session. Resumeonce returnedtodetail/noexactreader; afterreloadPlay/Markplayed/noResume. Potentialbrowserprogresschange requires freshLeafposition inspection/restoration before this test closes; noMarkplayed action, exactserverpage or two-clientpass. CurrentiOSlayoutbuild owns nativewindow; S25notaccessed. Sevenboundedlocalgates/KEEP BUILDING; broadergates/historypreserved. Evidence: docs/local/android-release-prep-20261113/remaining-acceptance/DISTRIBUTION_REVIEW_6480.md and browser-independent-6480-observation.json.
