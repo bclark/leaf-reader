@@ -65,18 +65,27 @@ synthetic QA APK built. Lint reported zero errors/fatal findings and the existin
 in each flavor. Some unchanged tasks reused exact-input Gradle results; this was not a forced
 fresh run of every task. Exact input and artifact hashes are in `validation-5-results.json`.
 
-The initial synthetic QA APK verified local direct resume/return at page 3 of 10, Continue in all
-four views, hiding during search/selection, menu dismissal and selection entry, Unread persistence,
-logical 840 dp wide layout, phone 390 dp at 200% text, and the empty/Add chooser. It exposed a
-Connect callback defect, corrected and compiled in the final source, awaiting a fresh native recheck. Captures
-from a previous APK do not validate a later source revision.
+Native synthetic checks on core commit `2014371` confirmed direct local resume at page 3/10,
+return to Library, Continue in all four views, search/selection hiding, Unread persistence, menu
+selection/Done, corrected empty Connect setup/Back, logical 600/840 dp widths, five-card horizontal
+scrolling and the fifth card opening its own comic at page 3/10. Phone light/dark/AMOLED and Spanish
+light plus 200% Spanish card/empty states were captured and visually inspected.
 
-Outstanding acceptance includes the corrected setup route, complete wide row scrolling/actions,
-600 dp and landscape geometry, Spanish and AMOLED, real TalkBack/keyboard behavior, physical
-S25/upgrade and real Jellyfin retrieval/cancellation/session-change scenarios. A logical-width
-fixture is not physical tablet/Fold acceptance. No owner app, real account or signed candidate
-was modified during synthetic QA. Shared constructor compatibility is retained; combined iOS
-integration still requires its own exact-source validation.
+AMOLED inspection found the title inheriting the muted surface-variant text role. The only
+subsequent runtime change explicitly uses `onSurface` for that title. Both debug APKs and the QA
+APK were rebuilt, lint remained at zero errors/fatal and 87 warnings each, and targeted AMOLED/light
+captures confirmed the correction. Native menu Back dismissal, normal Settings and more entry and
+Back return also passed on that rebuilt APK. Test/logic files remain byte-identical to the core
+commit; the full unit suite was not repeated for a one-line appearance correction. Exact delta,
+input/APK hashes and captured assertions are in the local `final-results.json` and
+`final-core-native-results.json` receipts. Failed attempts remain preserved separately.
+
+Outstanding acceptance includes real TalkBack/keyboard behavior, landscape and physical tablet/Fold
+geometry, physical S25/upgrade and real Jellyfin retrieval/cancellation/session-change scenarios on
+this source. A logical-width fixture is not physical tablet/Fold acceptance. No owner app, real
+account or signed candidate was modified during synthetic QA. No performance acceptance is inferred
+from these UI checks; release-like traces remain separate. Shared constructor compatibility is
+retained; combined iOS integration still requires its own exact-source validation.
 
 KEEP BUILDING. The broad [Leaf Delivery card](https://github.com/users/bclark/projects/1)
 remains In Progress until its acceptance gates are evidenced. No unit-test result implies Done,

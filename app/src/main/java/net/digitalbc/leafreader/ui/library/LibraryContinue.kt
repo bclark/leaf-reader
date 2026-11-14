@@ -88,7 +88,7 @@ private fun ContinueCard(candidate: ContinueReading, busy: Boolean, progress: Fl
         val text: @Composable ColumnScope.() -> Unit = {
             if (!wide) Text(stringResource(R.string.library_continue_reading).uppercase(Locale.getDefault()), fontFamily = Anton,
                 color = MaterialTheme.colorScheme.tertiary, fontSize = 14.sp)
-            Text(candidate.title, fontFamily = Anton, fontSize = 20.sp,
+            Text(candidate.title, fontFamily = Anton, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurface,
                 maxLines = if (largeType) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
             Text(pageLabel, fontFamily = Archivo, color = MaterialTheme.colorScheme.onSurfaceVariant)
             candidate.fraction?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth().height(4.dp), color = MaterialTheme.colorScheme.tertiary, trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)) }
