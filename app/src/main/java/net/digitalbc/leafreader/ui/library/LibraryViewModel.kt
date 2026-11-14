@@ -48,9 +48,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 enum class LibraryFilter(val label: String) {
-    ALL("ALL"),
     SERIES("SERIES"),
     READING_LISTS("LISTS"),
+    ALL("ALL"),
     OFFLINE("OFFLINE"),
 }
 
@@ -179,7 +179,7 @@ class LibraryViewModel(
     }
     val readableComics = repository.readableComics
 
-    private val _libraryFilter = MutableStateFlow(LibraryFilter.ALL)
+    private val _libraryFilter = MutableStateFlow(LibraryFilter.SERIES)
     val libraryFilter: StateFlow<LibraryFilter> = _libraryFilter.asStateFlow()
 
     fun refreshLibraryPreferences() {
