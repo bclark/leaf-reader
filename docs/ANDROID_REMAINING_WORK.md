@@ -105,3 +105,12 @@ Fix original auth/URL/generation binding using existing cancellation/session mac
 ## Android Series-first source prepared — 2026-11-14
 
 Explicitly ownerassigned navigation change implemented in isolatedcodex/android-series-first-20261114, commite6de63e from6480b62. Production enumorderSeries/Lists/All/Offline and initialSeries; existingUnread/back/explicitnavigation/offlinefallback/peel retained. ExistingAllfixtures explicitlyselectAll, defaultSeriesprojection checked by updatedexistingtest. Diffcheckpasses, but no newcompile/unit/device pass: iOSnativephase active/lockheld/xcodebuild1, waitforcoordinatedrelease. [Exact patch and validation scope](local/android-series-first-20261114/README.md). Current signed6480/S25unchanged; no gate transfer, live merge/install/upload/publication/Done. KEEP BUILDING.
+
+
+## Android independent nondevice validation — 2026-11-14
+
+Import-session repair9e85770 from6480b62 now reproduces3original failures and passes5focused checks, full250pass+1expectedSMBskip per flavor and zero-error lints/87warnings each. It scopes batches/actualIO cancellation/publication to the original session and protects committed retained copies. This fixes ANDROID-F01 only on that separate branch; current6480signed artifacts are unchanged.
+
+Series-firste6de63e separately passes246+1expectedskip per flavor, zero-error lints/87warnings, and both debug APK builds. No install/device acceptance. Initial shared144 results were cached; a subsequent forced fresh run passed144, with all56trackedshared/build inputs equivalent across both branches. One execution, not two. Exact original/fixed/functional reports retained separately; historical checklist not rewritten.
+
+Evidence: local/android-import-session-20261114/README.md and local/android-series-first-20261114/VALIDATION_20261114.md. Both branches remain independent; review/select exact combined source before a replacement signed candidate and fresh native acceptance. Current6480/S25 unchanged, broader live/account/storage/process-kill/accessibility/release gates remain open. KEEP BUILDING; nativewindow released, no worker/retry, merge/install/upload/publication/Done.
