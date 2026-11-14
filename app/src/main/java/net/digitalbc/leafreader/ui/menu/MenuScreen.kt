@@ -936,7 +936,7 @@ fun MenuScreen(
             )
             Spacer(Modifier.size(14.dp))
             Text(
-                "Leaf is an offline comic reader with on-device ML panel detection, interactive 3D page curl, network SMB drive support, and multi-format archives.",
+                "Leaf is an offline comic reader with whole-page reading, interactive 3D page curl, optional SMB and Jellyfin sources, and multi-format support.",
                 fontFamily = Archivo,
                 fontWeight = FontWeight.Medium,
                 fontSize = 13.sp,
