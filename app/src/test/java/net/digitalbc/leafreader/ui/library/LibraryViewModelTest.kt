@@ -1077,6 +1077,7 @@ class LibraryViewModelTest {
 
     @Test
     fun groupingMultipleIssuesIntoSeriesStackInAllFilter() = runBlocking {
+        viewModel.setLibraryFilter(LibraryFilter.ALL)
         val c1 = createComic(1, "Ultimate Spider-Man 01", series = "Ultimate Spider-Man", issueNumber = 1f)
         val c2 = createComic(2, "Ultimate Spider-Man 02", series = "Ultimate Spider-Man", issueNumber = 2f)
         fakeComicDao.setComics(listOf(c1, c2))
@@ -1095,6 +1096,7 @@ class LibraryViewModelTest {
 
     @Test
     fun singleIssueRemainsSingleComicInAllFilter() = runBlocking {
+        viewModel.setLibraryFilter(LibraryFilter.ALL)
         val c1 = createComic(1, "Batman Year One 01", series = "Batman", issueNumber = 1f)
         val c2 = createComic(2, "Watchmen Complete", series = null)
         fakeComicDao.setComics(listOf(c1, c2))
@@ -1109,13 +1111,11 @@ class LibraryViewModelTest {
     }
 
     @Test
-    fun seriesFilterReturnsAllSeriesStacksSorted() = runBlocking {
+    fun defaultLibraryShowsSeriesStacksSorted() = runBlocking {
         val c1 = createComic(1, "X-Men 01", series = "X-Men", issueNumber = 1f)
         val c2 = createComic(2, "Avengers 01", series = "Avengers", issueNumber = 1f)
         val c3 = createComic(3, "Avengers 02", series = "Avengers", issueNumber = 2f)
         fakeComicDao.setComics(listOf(c1, c2, c3))
-
-        viewModel.setLibraryFilter(LibraryFilter.SERIES)
 
         val items = withTimeout(3000) {
             viewModel.libraryItems.first { it.size == 2 }
@@ -1130,6 +1130,7 @@ class LibraryViewModelTest {
 
     @Test
     fun unreadFilterOnlyReturnsComicsWithLastPageZero() = runBlocking {
+        viewModel.setLibraryFilter(LibraryFilter.ALL)
         val unread = createComic(1, "Issue 1", series = "Unread standalone", pageCount = 20, lastPage = 0)
         val read = createComic(2, "Issue 2", series = "Read standalone", pageCount = 20, lastPage = 19)
         fakeComicDao.setComics(listOf(unread, read))
@@ -1148,6 +1149,7 @@ class LibraryViewModelTest {
 
     @Test
     fun allFilterIncludesListsAlongsideSeriesAndStandaloneComics() = runBlocking {
+        viewModel.setLibraryFilter(LibraryFilter.ALL)
         fakeComicDao.setComics(listOf(
             createComic(1, "Saga 01", series = "Saga", issueNumber = 1f),
             createComic(2, "Saga 02", series = "Saga", issueNumber = 2f),
@@ -1180,6 +1182,7 @@ class LibraryViewModelTest {
         assertTrue(occupied.await(3, java.util.concurrent.TimeUnit.SECONDS))
         val dispatcher = executor.asCoroutineDispatcher()
         val vm = LibraryViewModel(repository, settings, defaultDispatcher = dispatcher)
+        vm.setLibraryFilter(LibraryFilter.ALL)
         val store = ViewModelStore().apply { put("background-projection", vm) }
         val history = mutableListOf<List<LibraryItem>>()
         val observer = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
@@ -1205,6 +1208,7 @@ class LibraryViewModelTest {
 
     @Test
     fun allFilterFindsListsByNameEvenWithoutAnyComics() = runBlocking {
+        viewModel.setLibraryFilter(LibraryFilter.ALL)
         fakeReadingListDao.setListsAndItems(
             listOf(ReadingListEntity(10, "Favorites"), ReadingListEntity(11, "To explore")),
             emptyList(),
@@ -1247,6 +1251,7 @@ class LibraryViewModelTest {
 
     @Test
     fun searchQueryFiltersBothTitleAndSeries() = runBlocking {
+        viewModel.setLibraryFilter(LibraryFilter.ALL)
         val c1 = createComic(1, "Astonishing Tales 01", series = "X-Men", issueNumber = 1f)
         val c2 = createComic(2, "Amazing Fantasy 15", series = "Spider-Man", issueNumber = 15f)
         fakeComicDao.setComics(listOf(c1, c2))
