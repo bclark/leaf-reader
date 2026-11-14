@@ -6,12 +6,15 @@ struct JellyfinBrowserView: View {
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var model = JellyfinBrowserModel()
+    @StateObject var model = JellyfinBrowserModel()
     @State private var server = ""
     @State private var username = ""
     @State private var password = ""
     @State private var allowHTTP = false
+    @State private var didLoadConnectionForm = false
     @State private var openComic: OpenComic?
+    @State private var selectedBook: JellyfinBook?
+    @State private var showingDetails = false
     @Namespace private var readerNamespace
 
     var body: some View {
@@ -37,7 +40,7 @@ struct JellyfinBrowserView: View {
                     Section {
                         Text(model.connection?.username ?? "")
                         Text(model.connection?.baseURL.absoluteString ?? "").font(.footnote).foregroundStyle(.secondary)
-                        Text("Downloads stay in your library for offline reading. Reading progress is not synced to Jellyfin.")
+                        Text("Downloads stay in your library for offline reading. Use Sync reading position on a downloaded comic to exchange progress with Jellyfin.")
                             .font(.footnote)
                         Button("Disconnect", role: .destructive) { Task { await model.disconnect() } }.disabled(model.busy)
                     }
@@ -51,15 +54,16 @@ struct JellyfinBrowserView: View {
                             JellyfinBookRow(item: item, client: model.client,
                                 profileID: model.connection?.id ?? "", isLibrary: model.folders.isEmpty,
                                 downloaded: model.downloaded[item.id] != nil,
-                                isDisabled: model.busy || (!model.folders.isEmpty && item.isFolder != true && !item.supported),
+                                isDisabled: model.busy,
                                 activity: model.activeItemID == item.id ? model.activity : nil,
                                 transferred: model.transferred, total: model.total,
                                 cancel: { model.cancel() }) {
-                                if let url = model.downloaded[item.id], FileManager.default.fileExists(atPath: url.path) {
-                                    openComic = OpenComic(url: url)
-                                } else if item.isFolder == true || model.folders.isEmpty {
+                                if item.isFolder == true || model.folders.isEmpty {
                                     model.enter(item)
-                                } else { model.importBook(item, library: library) }
+                                } else {
+                                    selectedBook = item
+                                    showingDetails = true
+                                }
                             }
                         }
                         if model.hasMore { Button("Load more") { model.more() }.disabled(model.busy) }
@@ -88,6 +92,11 @@ struct JellyfinBrowserView: View {
             .background(settings.ground)
             .tint(Leaf.goldText)
             .navigationTitle("Jellyfin")
+            .navigationDestination(isPresented: $showingDetails) {
+                if let selectedBook {
+                    JellyfinDetailView(item: selectedBook, model: model)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") {
@@ -98,16 +107,21 @@ struct JellyfinBrowserView: View {
             }
             .interactiveDismissDisabled(model.busy)
             .task {
-                server = model.connection?.baseURL.absoluteString ?? ""
-                username = model.connection?.username ?? ""
-                allowHTTP = model.connection?.allowsHTTP ?? false
-                await model.restoreDownloads(library: library)
-                model.refresh()
+                // Restore once so reappearing does not overwrite an in-progress sign-in.
+                if !didLoadConnectionForm {
+                    server = model.connection?.baseURL.absoluteString ?? ""
+                    username = model.connection?.username ?? ""
+                    allowHTTP = model.connection?.allowsHTTP ?? false
+                    didLoadConnectionForm = true
+                    await model.restoreDownloads(library: library)
+                    model.refresh()
+                }
             }
-            .onChange(of: server) { value in
-                if value != model.connection?.baseURL.absoluteString { allowHTTP = false }
+            .onChange(of: model.connection?.id) { id in
+                // Keep consent while editing; disconnecting starts a fresh connection.
+                if id == nil { allowHTTP = false }
+                Task { await model.restoreDownloads(library: library) }
             }
-            .onChange(of: model.connection?.id) { _ in Task { await model.restoreDownloads(library: library) } }
             .onChange(of: scenePhase) { phase in if phase == .background { password = ""; model.cancel() } }
             .onDisappear { password = ""; model.cancel() }
             .comicReaderPresentation(item: $openComic, namespace: readerNamespace) { library.refresh() }
@@ -116,7 +130,7 @@ struct JellyfinBrowserView: View {
     }
 }
 
-private struct JellyfinActivityView: View {
+struct JellyfinActivityView: View {
     let activity: String
     let transferred: Int64
     let total: Int64
@@ -141,7 +155,7 @@ private struct JellyfinActivityView: View {
     }
 }
 
-private struct JellyfinBookRow: View {
+struct JellyfinBookRow: View {
     let item: JellyfinBook
     let client: JellyfinClient?
     let profileID: String
@@ -167,7 +181,7 @@ private struct JellyfinBookRow: View {
                     VStack(alignment: .leading) {
                         Text(item.name).foregroundStyle(Leaf.text)
                         if activity == nil && item.isFolder != true && !isLibrary {
-                            Text(downloaded ? "Read offline" : (item.supported ? "Download" : "Unsupported format"))
+                            Text(downloaded ? "Read offline" : "Details")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -190,7 +204,7 @@ private struct JellyfinBookRow: View {
             cover = thumbnail
         }
     }
-    nonisolated private static func thumbnail(_ data: Data) -> UIImage? {
+    nonisolated static func thumbnail(_ data: Data, maxPixel: Int = 160) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
@@ -199,7 +213,7 @@ private struct JellyfinBookRow: View {
               width.doubleValue * height.doubleValue <= JellyfinImportLimits.pixels,
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceThumbnailMaxPixelSize: 160
+                kCGImageSourceThumbnailMaxPixelSize: min(640, max(160, maxPixel))
               ] as CFDictionary) else { return nil }
         return UIImage(cgImage: image)
     }

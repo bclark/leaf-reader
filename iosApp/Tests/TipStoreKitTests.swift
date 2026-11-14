@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import StoreKit
 import StoreKitTest
 import Testing
@@ -32,8 +33,15 @@ struct TipStoreKitTests {
             // transaction can race quiet startup recovery and has no direct result to await.
             for id in TipCatalog.productIDs + [TipCatalog.productIDs[0]] {
                 print("Local tip test: purchasing tier")
+                let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+                print("Local tip fixture: activeScenes=\(scenes.filter { $0.activationState == .foregroundActive }.count), keyWindows=\(scenes.flatMap(\.windows).filter(\.isKeyWindow).count), paymentsAllowed=\(AppStore.canMakePayments)")
                 store.purchase(try #require(store.products.first { $0.id == id }))
-                try await wait { store.purchasingID == nil && store.notice == .thankYou }
+                do {
+                    try await wait { store.purchasingID == nil && store.notice == .thankYou }
+                } catch {
+                    print("Local tip fixture timeout: purchasing=\(store.purchasingID != nil), notice=\(String(describing: store.notice)), pending=\(store.pendingProductID != nil)")
+                    throw error
+                }
                 try await waitForFinished()
                 #expect(await unfinishedTipCount() == 0)
                 store.clearNotice()

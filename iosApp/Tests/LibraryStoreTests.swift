@@ -2,6 +2,7 @@ import XCTest
 import Testing
 import SwiftUI
 import UIKit
+import ZIPFoundation
 @testable import Leaf
 
 /// Unit and on-device UI integration tests for Library Stacking, Metadata Backfill,
@@ -296,7 +297,7 @@ final class LibraryStoreTests: XCTestCase {
             seriesName: "Invincible",
             volume: nil,
             library: store,
-            onDismiss: {}
+            onDismiss: {}, unreadOnly: .constant(false)
         )
         XCTAssertTrue(viewFresh.heroButtonText.hasPrefix("START:"), "Expected START: prefix when fresh, got \(viewFresh.heroButtonText)")
         XCTAssertEqual(viewFresh.shortActionLabel, "START")
@@ -308,7 +309,7 @@ final class LibraryStoreTests: XCTestCase {
             seriesName: "Invincible",
             volume: nil,
             library: store,
-            onDismiss: {}
+            onDismiss: {}, unreadOnly: .constant(false)
         )
         XCTAssertTrue(viewContinue.heroButtonText.hasPrefix("CONTINUE:"), "Expected CONTINUE: prefix when in progress, got \(viewContinue.heroButtonText)")
         XCTAssertEqual(viewContinue.shortActionLabel, "CONTINUE")
@@ -319,7 +320,7 @@ final class LibraryStoreTests: XCTestCase {
             seriesName: "Invincible",
             volume: nil,
             library: store,
-            onDismiss: {}
+            onDismiss: {}, unreadOnly: .constant(false)
         )
         XCTAssertTrue(viewAllRead.heroButtonText.hasPrefix("READ FROM START:"), "Expected READ FROM START: when all completed, got \(viewAllRead.heroButtonText)")
         XCTAssertEqual(viewAllRead.shortActionLabel, "RESTART")
@@ -356,7 +357,7 @@ final class LibraryStoreTests: XCTestCase {
         let detailFresh = ReadingListDetailView(
             listId: created.id,
             library: store,
-            onDismiss: {}
+            onDismiss: {}, unreadOnly: .constant(false)
         )
         XCTAssertEqual(detailFresh.heroButtonText, "START: Event Part 1")
 
@@ -369,7 +370,7 @@ final class LibraryStoreTests: XCTestCase {
         let detailAfterReorder = ReadingListDetailView(
             listId: created.id,
             library: store,
-            onDismiss: {}
+            onDismiss: {}, unreadOnly: .constant(false)
         )
         XCTAssertEqual(detailAfterReorder.heroButtonText, "START: Event Part 2")
         XCTAssertEqual(detailAfterReorder.shortActionLabel, "START")
@@ -402,7 +403,7 @@ final class LibraryStoreTests: XCTestCase {
 
     // MARK: - 6. Live Device UI Rendering Verification
 
-    func testComicStackCardReadingListCardAndDetailViewsRenderOnDevice() throws {
+    func testComicStackCardReadingListCardAndDetailViewsRenderOnDevice() async throws {
         let dp1 = try makeTestCbz(named: "Deadpool #01.cbz", pageCount: 6)
         let dp2 = try makeTestCbz(named: "Deadpool #02.cbz", pageCount: 6)
         let dp3 = try makeTestCbz(named: "Deadpool #03.cbz", pageCount: 6)
@@ -437,13 +438,13 @@ final class LibraryStoreTests: XCTestCase {
             seriesName: "Deadpool",
             volume: "1",
             library: store,
-            onDismiss: {}
+            onDismiss: {}, unreadOnly: .constant(false)
         ).environmentObject(settings)
 
         let listDetail = ReadingListDetailView(
             listId: list.id,
             library: store,
-            onDismiss: {}
+            onDismiss: {}, unreadOnly: .constant(false)
         ).environmentObject(settings)
 
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
@@ -462,7 +463,7 @@ final class LibraryStoreTests: XCTestCase {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             exp.fulfill()
         }
-        wait(for: [exp], timeout: 3.0)
+        await fulfillment(of: [exp], timeout: 3.0)
 
         XCTAssertNotNil(host.view.window)
         window.isHidden = true
@@ -489,6 +490,41 @@ private extension Data {
 @Suite(.serialized)
 @MainActor
 struct SeriesNameGroupingTests {
+    @Test func comicInfoEntitiesPersistAndGroupWithoutDoubleDecoding() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        var urls: [URL] = []
+        defer {
+            for url in urls { ComicMetadataStore.clear(url) }
+            try? FileManager.default.removeItem(at: root)
+        }
+        for issue in 1...2 {
+            let url = root.appendingPathComponent(UUID().uuidString + ".cbz")
+            urls.append(url)
+            let archive = try Archive(url: url, accessMode: .create)
+            let xml = Data("""
+                <ComicInfo><Series>Pepper&amp;Carrot</Series><Number>\(issue)</Number>
+                <Title>&lt;Tea&gt; &amp;amp; &#x1F955;</Title></ComicInfo>
+                """.utf8)
+            try archive.addEntry(with: "ComicInfo.xml", type: .file, uncompressedSize: Int64(xml.count)) {
+                position, size in xml.subdata(in: Int(position)..<Int(position) + size)
+            }
+            let metadata = ComicMetadataStore.parseAndStoreIfNeeded(url)
+            #expect(metadata.series == "Pepper&Carrot")
+            #expect(metadata.title == "<Tea> &amp; 🥕")
+            #expect(ComicMetadataStore.get(url) == metadata)
+            let saved = try #require(UserDefaults.standard.data(forKey: "leaf.comicMetadata.v1"))
+            let persisted = try JSONDecoder().decode([String: ComicMetadataRecord].self, from: saved)
+            #expect(persisted[url.lastPathComponent] == metadata)
+        }
+        let library = LibraryStore(directory: root)
+        #expect(library.comics(inSeries: "Pepper&Carrot").count == 2)
+        #expect(library.comics(inSeries: "Pepper&amp;Carrot").isEmpty)
+        ComicMetadataStore.updateSeries(for: urls, series: "Literal &amp;", volume: nil)
+        ComicMetadataStore.backfillMetadataIfNeeded(for: urls)
+        #expect(urls.allSatisfy { ComicMetadataStore.get($0)?.series == "Literal &amp;" })
+    }
+
     @Test func groupsAcrossVolumesAndKeepsVolumeMetadata() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

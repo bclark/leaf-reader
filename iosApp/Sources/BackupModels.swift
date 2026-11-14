@@ -71,6 +71,7 @@ struct BackupComic: Codable, Equatable {
     var lastSlot: Int
     var dateAdded: Int64
     var lastOpened: Int64
+    var completed: Bool? = nil
 
     init(
         title: String,
@@ -83,7 +84,8 @@ struct BackupComic: Codable, Equatable {
         lastPage: Int = 0,
         lastSlot: Int = 0,
         dateAdded: Int64 = 0,
-        lastOpened: Int64 = 0
+        lastOpened: Int64 = 0,
+        completed: Bool? = nil
     ) {
         self.title = title
         self.series = series
@@ -96,6 +98,7 @@ struct BackupComic: Codable, Equatable {
         self.lastSlot = lastSlot
         self.dateAdded = dateAdded
         self.lastOpened = lastOpened
+        self.completed = completed
     }
 }
 
@@ -104,6 +107,9 @@ struct BackupReadingListItem: Codable, Equatable {
     var series: String?
     var issueNumber: Double?
     var sortOrder: Int
+    var serverId: String? = nil
+    var userId: String? = nil
+    var itemId: String? = nil
 
     init(
         comicTitle: String,

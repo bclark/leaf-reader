@@ -1,6 +1,7 @@
 import UIKit
 import ImageIO
 import LeafShared
+import os
 
 /// Decodes comic pages to UIImages, downsampling very large scans and keeping recently viewed pages
 /// hot in an LRU cache so back/forward navigation is instant and memory stays bounded.
@@ -19,6 +20,7 @@ final class PageLoader {
     // when the current load and a prefetch race for it).
     private let lock = NSLock()
     private var sizeCache: [Int: CGSize] = [:]
+    private var memoryObserver: NSObjectProtocol?
 
     static let defaultMaxDimension = Int(PageConstants.shared.maxPageDimension)
 
@@ -26,6 +28,13 @@ final class PageLoader {
         self.archive = archive
         self.maxDimension = maxDimension
         cache.totalCostLimit = PageLoader.defaultCacheBytes()
+        memoryObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
+        ) { [weak self] _ in self?.cache.removeAllObjects() }
+    }
+
+    deinit {
+        if let memoryObserver { NotificationCenter.default.removeObserver(memoryObserver) }
     }
 
     var pageCount: Int { archive.pageCount }
@@ -72,6 +81,8 @@ final class PageLoader {
         if let hit = cache.object(forKey: key) { return hit }
         lock.lock(); defer { lock.unlock() }
         if let hit = cache.object(forKey: key) { return hit }
+        let interval = LeafPerformance.signposter.beginInterval("Page decode", id: LeafPerformance.signposter.makeSignpostID())
+        defer { LeafPerformance.signposter.endInterval("Page decode", interval) }
         guard let data = try? archive.readPage(index),
               let image = PageLoader.decodeSampled(data: data, maxDim: maxDimension) else { return nil }
         let cost = Int(image.size.width * image.size.height * image.scale * image.scale) * 4

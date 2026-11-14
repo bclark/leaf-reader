@@ -109,6 +109,11 @@ actor JellyfinImports {
         let title: String
         let versionHint: String?
         var pending: Bool
+
+        /// Profile IDs change after disconnect; remote identity is server + user + item.
+        func belongs(to connection: JellyfinConnection) -> Bool {
+            serverID == connection.serverID && userID == connection.userID
+        }
     }
     struct FileState: Codable { let version: Int; let records: [Record] }
     static let shared = JellyfinImports()

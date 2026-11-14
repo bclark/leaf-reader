@@ -6,6 +6,54 @@ import UIKit
 
 @Suite @MainActor
 struct AppearanceAndDismissTests {
+    // Widths cover dense outer-display grids through large inner-display/iPad cards.
+    @Test(arguments: [72.0, 140.0, 220.0, 301.0])
+    func landscapeCoverKeepsCardBounds(width: Double) throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 1200, height: 200)).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 1200, height: 200))
+        }
+        let artwork = LibraryCoverArtwork(image: image)
+            .aspectRatio(0.7, contentMode: .fit)
+        let renderer = ImageRenderer(content: artwork)
+        renderer.scale = 1
+        renderer.proposedSize = ProposedViewSize(width: width, height: nil)
+        let rendered = try #require(renderer.uiImage)
+        #expect(abs(rendered.size.width - width) <= 1)
+        #expect(abs(rendered.size.height - width / 0.7) <= 1)
+    }
+
+    @Test(arguments: [CGSize(width: 1200, height: 200), CGSize(width: 200, height: 1200)])
+    func coverArtworkDoesNotPaintIntoNeighboringCardGap(imageSize: CGSize) throws {
+        let image = UIGraphicsImageRenderer(size: imageSize).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(origin: .zero, size: imageSize))
+        }
+        let renderer = ImageRenderer(content:
+            HStack(spacing: 20) {
+                LibraryCoverArtwork(image: image)
+                    .aspectRatio(0.7, contentMode: .fit)
+                    .frame(width: 140)
+                Color.blue.frame(width: 140, height: 200)
+            }
+            .background(Color.green)
+        )
+        renderer.scale = 1
+        let output = try #require(renderer.cgImage)
+        #expect(output.width == 300)
+        #expect(output.height == 200)
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let gap = try #require(output.cropping(to: CGRect(x: 150, y: 100, width: 1, height: 1)))
+        try pixel.withUnsafeMutableBytes { bytes in
+            let context = try #require(CGContext(data: bytes.baseAddress, width: 1, height: 1,
+                bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(gap, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+        #expect(pixel[1] > pixel[0])
+        #expect(pixel[1] > pixel[2])
+    }
+
     @Test func nativeAppearanceCanClearForcedModeWithoutDismissing() async throws {
         let host = UIHostingController(rootView: Color.clear.leafAppearance(.dark))
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)

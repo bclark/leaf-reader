@@ -8,6 +8,9 @@ struct SeriesDetailView: View {
     let volume: String?
     @ObservedObject var library: LibraryStore
     let onDismiss: () -> Void
+    @Binding var unreadOnly: Bool
+    var searchQuery = ""
+    var availableCopies: Set<URL>? = nil
 
     @Namespace private var coverTransition
     @State private var openComic: OpenComic?
@@ -18,7 +21,7 @@ struct SeriesDetailView: View {
     @State private var comicToRemove: URL?
 
     private var seriesComics: [URL] {
-        library.comics(inSeries: seriesName)
+        library.comics(inSeries: seriesName).filter { availableCopies?.contains($0) ?? true }
     }
 
     private var completedCount: Int {
@@ -80,7 +83,7 @@ struct SeriesDetailView: View {
                                 .font(.system(size: 16, weight: .bold))
                                 .foregroundColor(Leaf.ink)
                             Text("ADD COMICS")
-                                .font(.anton(15))
+                                .font(.custom("Anton-Regular", size: 15, relativeTo: .headline))
                                 .tracking(0.8)
                                 .foregroundColor(Leaf.ink)
                         }
@@ -129,26 +132,30 @@ struct SeriesDetailView: View {
                     .frame(width: 38, height: 38)
                     .background(Leaf.cream.opacity(0.14))
                     .clipShape(Circle())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Back")
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(seriesName)
-                    .font(.anton(18))
+                    .font(.custom("Anton-Regular", size: 18, relativeTo: .headline))
                     .foregroundColor(Leaf.cream)
                     .lineLimit(1)
                 if let vol = volume, !vol.isEmpty {
                     Text(vol)
-                        .font(.archivo(11, weight: 600))
+                        .leafControlFont(11, weight: 600)
                         .foregroundColor(Leaf.creamMuted)
                 } else {
                     Text("SERIES COLLECTION")
-                        .font(.archivo(11, weight: 600))
+                        .leafControlFont(11, weight: 600)
                         .foregroundColor(Leaf.creamMuted)
                 }
             }
 
             Spacer()
+            UnreadFilterButton(isOn: $unreadOnly, onBrand: true)
         }
         .padding(.horizontal, 18)
         .padding(.top, 12)
@@ -163,9 +170,14 @@ struct SeriesDetailView: View {
 
         return ScrollView {
             VStack(spacing: 16) {
+                UnreadFilterChip(isOn: $unreadOnly)
                 heroCard
                 LazyVGrid(columns: gridColumns, spacing: cols >= 4 ? 14 : 18) {
-                    ForEach(seriesComics, id: \.self) { url in
+                    ForEach(seriesComics.filter {
+                        (!unreadOnly || !ReadingProgress.isCompleted($0)) &&
+                        LibraryBrowseState.matches(searchQuery, values: [$0.lastPathComponent,
+                            library.metadata[$0.lastPathComponent]?.title ?? "", seriesName])
+                    }, id: \.self) { url in
                         let isRead = ReadingProgress.isCompleted(url)
                         let lastPage = ReadingProgress.get(url)?.page ?? 0
                         SeriesIssueCard(
@@ -213,11 +225,11 @@ struct SeriesDetailView: View {
             : String(localized: "\(completedCount) OF \(seriesComics.count) READ")
         let progressFraction = seriesComics.isEmpty ? 0.0 : Double(completedCount) / Double(seriesComics.count)
 
-        return HStack(spacing: 12) {
+        return LeafAdaptiveControls(spacing: 12) {
             // Left: Unified Read Badge + Slim Progress Bar
             VStack(alignment: .leading, spacing: 6) {
                 Text(statusText)
-                    .font(.anton(12))
+                    .font(.custom("Anton-Regular", size: 12, relativeTo: .headline))
                     .tracking(0.5)
                     .foregroundColor(badgeColor)
                     .lineLimit(1)
@@ -262,6 +274,8 @@ struct SeriesDetailView: View {
                                         lineWidth: 1
                                     )
                             )
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
 
@@ -273,13 +287,14 @@ struct SeriesDetailView: View {
                                 Image(systemName: "play.fill")
                                     .font(.system(size: 12, weight: .bold))
                                 Text(shortActionLabel)
-                                    .font(.anton(13))
+                                    .font(.custom("Anton-Regular", size: 13, relativeTo: .headline))
                                     .tracking(0.6)
-                                    .lineLimit(1)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             .foregroundColor(Leaf.ink)
                             .padding(.horizontal, 12)
-                            .frame(height: 36)
+                            .padding(.vertical, 8)
+                            .frame(minHeight: 44)
                             .background(Leaf.ochre)
                             .clipShape(RoundedCornerShape(cornerRadius: 8))
                             .overlay(
@@ -323,7 +338,7 @@ struct SeriesDetailView: View {
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(addSearchQuery.isEmpty ? Leaf.secondaryText : Leaf.goldText)
                         TextField("SEARCH BY TITLE OR SERIES…", text: $addSearchQuery)
-                            .font(.archivo(13, weight: 600))
+                            .leafControlFont(13, weight: 600)
                             .foregroundColor(Leaf.text)
                             .tint(Leaf.goldText)
                             .textInputAutocapitalization(.characters)
@@ -332,6 +347,9 @@ struct SeriesDetailView: View {
                             Button { addSearchQuery = "" } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .foregroundColor(Leaf.secondaryText)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                                    .accessibilityLabel("CLEAR SEARCH")
                             }
                             .buttonStyle(.plain)
                         }
@@ -349,7 +367,7 @@ struct SeriesDetailView: View {
                     if availableComics.isEmpty {
                         VStack(spacing: 8) {
                             Text(q.isEmpty ? String(localized: "No other comics available to add.") : String(localized: "No comics matching “\(addSearchQuery)”"))
-                                .font(.archivo(13))
+                                .leafControlFont(13)
                                 .foregroundColor(Leaf.secondaryText)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -364,12 +382,12 @@ struct SeriesDetailView: View {
                                     SmallCoverThumb(url: url)
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(url.deletingPathExtension().lastPathComponent)
-                                            .font(.archivo(13, weight: 700))
+                                            .leafControlFont(13, weight: 700)
                                             .foregroundColor(Leaf.text)
                                             .lineLimit(1)
                                         if let s = library.metadata[url.lastPathComponent]?.series, !s.isEmpty {
                                             Text("Current: \(s)")
-                                                .font(.archivo(11))
+                                                .leafControlFont(11)
                                                 .foregroundColor(Leaf.secondaryText)
                                                 .lineLimit(1)
                                         }
@@ -475,9 +493,7 @@ struct SeriesIssueCard: View {
             ZStack(alignment: .bottom) {
                 Group {
                     if let cover {
-                        Image(uiImage: cover)
-                            .resizable()
-                            .scaledToFill()
+                        LibraryCoverArtwork(image: cover)
                     } else {
                         GeneratedCover(
                             title: url.deletingPathExtension().lastPathComponent,
@@ -500,6 +516,8 @@ struct SeriesIssueCard: View {
                                     .frame(width: 24, height: 24)
                                     .background(Leaf.deepInk.opacity(0.85))
                                     .clipShape(Circle())
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(Text("Remove from Series"))

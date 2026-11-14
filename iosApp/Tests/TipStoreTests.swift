@@ -12,9 +12,11 @@ private final class FakeTipClient: TipClient {
     var failure = false
     var purchaseCalls = 0
     var observerStarts = 0
+    var unfinishedCalls = 0
     var recovered: [TipVerification] = []
     var loadHook: (() async -> Void)?
     var purchaseHook: (() async -> Void)?
+    var unfinishedHook: (() async -> Void)?
     var continuation: AsyncStream<TipVerification>.Continuation?
 
     func products() async throws -> [TipProduct] {
@@ -32,7 +34,11 @@ private final class FakeTipClient: TipClient {
         observerStarts += 1
         return AsyncStream { continuation = $0 }
     }
-    func unfinished() async -> [TipVerification] { recovered }
+    func unfinished() async -> [TipVerification] {
+        unfinishedCalls += 1
+        await unfinishedHook?()
+        return recovered
+    }
 }
 
 @Suite @MainActor
@@ -50,6 +56,113 @@ struct TipStoreTests {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         #expect(condition())
+    }
+
+
+    @Test func purchaseWaitsForInitialRecoveryAndKeepsRapidTapsBusy() async throws {
+        let client = FakeTipClient()
+        var release: CheckedContinuation<Void, Never>?
+        client.unfinishedHook = { await withCheckedContinuation { release = $0 } }
+        let store = TipStore(client: client, defaults: defaults())
+        store.start()
+        try await settle { release != nil }
+        await store.loadProducts()
+        store.purchase(store.products[0])
+        store.purchase(store.products[1])
+        try await Task.sleep(nanoseconds: 20_000_000)
+        #expect(client.purchaseCalls == 0)
+        #expect(store.purchasingID == store.products[0].id)
+        client.unfinishedHook = nil
+        release?.resume(); release = nil
+        try await settle { store.purchasingID == nil }
+        #expect(client.purchaseCalls == 1)
+        await store.stopForTesting()
+    }
+
+    @Test func foregroundRecoveryDoesNotOverlapAnActivePurchase() async throws {
+        let client = FakeTipClient()
+        var release: CheckedContinuation<Void, Never>?
+        client.purchaseHook = { await withCheckedContinuation { release = $0 } }
+        let store = TipStore(client: client, defaults: defaults())
+        store.start()
+        try await settle { client.unfinishedCalls == 1 }
+        await store.loadProducts()
+        store.purchase(store.products[0])
+        try await settle { release != nil }
+        store.recover()
+        try await Task.sleep(nanoseconds: 20_000_000)
+        #expect(client.unfinishedCalls == 1)
+        client.purchaseHook = nil
+        release?.resume(); release = nil
+        try await settle { store.purchasingID == nil }
+        store.recover()
+        try await settle { client.unfinishedCalls >= 2 }
+        #expect(client.unfinishedCalls == 2)
+        await store.stopForTesting()
+    }
+
+    @Test func cancellationWhileWaitingForRecoveryNeverStartsACharge() async throws {
+        let client = FakeTipClient()
+        var release: CheckedContinuation<Void, Never>?
+        client.unfinishedHook = { await withCheckedContinuation { release = $0 } }
+        let store = TipStore(client: client, defaults: defaults())
+        store.start()
+        try await settle { release != nil }
+        await store.loadProducts()
+        store.purchase(store.products[0])
+        try await Task.sleep(nanoseconds: 20_000_000)
+        let teardown = Task { await store.stopForTesting() }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        client.unfinishedHook = nil
+        release?.resume(); release = nil
+        await teardown.value
+        #expect(client.purchaseCalls == 0)
+        #expect(store.purchasingID == nil)
+        #expect(store.pendingProductID == nil)
+        #expect(store.notice == nil)
+    }
+
+    @Test func oldRecoveryCannotEraseANewPendingPurchaseForTheSameProduct() async throws {
+        let client = FakeTipClient()
+        var release: CheckedContinuation<Void, Never>?
+        client.unfinishedHook = { await withCheckedContinuation { release = $0 } }
+        client.recovered = [.verified(VerifiedTip(id: 901, productID: TipCatalog.productIDs[0],
+            isConsumable: true, isRevoked: false, finish: {}))]
+        client.result = .pending
+        let prefs = defaults()
+        let store = TipStore(client: client, defaults: prefs)
+        store.start()
+        try await settle { release != nil }
+        await store.loadProducts()
+        store.purchase(store.products[0])
+        try await Task.sleep(nanoseconds: 20_000_000)
+        client.unfinishedHook = nil
+        release?.resume(); release = nil
+        try await settle { store.purchasingID == nil }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        #expect(store.pendingProductID == client.catalog[0].id)
+        #expect(store.notice == .pending)
+        #expect(TipStore(client: client, defaults: prefs).pendingProductID == client.catalog[0].id)
+        await store.stopForTesting()
+    }
+
+    @Test func restrictionChangedDuringRecoveryPreventsACharge() async throws {
+        let client = FakeTipClient()
+        var release: CheckedContinuation<Void, Never>?
+        client.unfinishedHook = { await withCheckedContinuation { release = $0 } }
+        let store = TipStore(client: client, defaults: defaults())
+        store.start()
+        try await settle { release != nil }
+        await store.loadProducts()
+        store.purchase(store.products[0])
+        try await Task.sleep(nanoseconds: 20_000_000)
+        client.canMakePayments = false
+        client.unfinishedHook = nil
+        release?.resume(); release = nil
+        try await settle { store.purchasingID == nil }
+        #expect(client.purchaseCalls == 0)
+        #expect(store.notice == .restricted)
+        await store.stopForTesting()
     }
 
     @Test func fixtureTeardownWaitsForInFlightTransactionHandler() async throws {

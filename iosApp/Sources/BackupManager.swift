@@ -54,7 +54,8 @@ enum BackupManager {
                     lastPage: lastPage,
                     lastSlot: lastSlot,
                     dateAdded: dateAdded,
-                    lastOpened: lastOpened
+                    lastOpened: lastOpened,
+                    completed: progress?.completionOverride
                 )
             )
         }
@@ -63,6 +64,12 @@ enum BackupManager {
         for list in readingLists {
             var items: [BackupReadingListItem] = []
             for (idx, filename) in list.itemFilenames.enumerated() {
+                if let remote = JellyfinListReference(token: filename) {
+                    var item = BackupReadingListItem(comicTitle: "", sortOrder: idx)
+                    item.serverId = remote.serverID; item.userId = remote.userID; item.itemId = remote.itemID
+                    items.append(item)
+                    continue
+                }
                 let meta = metadata[filename]
                 let comicUrl = comics.first { $0.lastPathComponent == filename }
                 let title = meta?.title ?? (comicUrl?.deletingPathExtension().lastPathComponent ?? filename)
@@ -244,7 +251,9 @@ enum BackupManager {
                     page: bComic.lastPage,
                     step: bComic.lastSlot,
                     total: max(actualTotal, bComic.pageCount),
-                    rtl: bComic.rightToLeft
+                    rtl: bComic.rightToLeft,
+                    completed: bComic.completed ?? Progress(page: bComic.lastPage, step: bComic.lastSlot,
+                        total: max(actualTotal, bComic.pageCount), rtl: bComic.rightToLeft).isCompleted
                 )
                 if bComic.lastOpened > 0 {
                     ReadingProgress.setOpenedAt(localUrl, timestamp: Double(bComic.lastOpened) / 1000.0)
@@ -284,6 +293,11 @@ enum BackupManager {
             // Find local matching files for each item
             var matchedFilenames: [String] = []
             for bItem in bList.items.sorted(by: { $0.sortOrder < $1.sortOrder }) {
+                if let server = bItem.serverId, let user = bItem.userId, let item = bItem.itemId,
+                   let reference = JellyfinListReference(serverID: server, userID: user, itemID: item) {
+                    if !matchedFilenames.contains(reference.token) { matchedFilenames.append(reference.token) }
+                    continue
+                }
                 // Find comic in local library
                 let dummyComic = BackupComic(
                     title: bItem.comicTitle,

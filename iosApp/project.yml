@@ -191,6 +191,20 @@ targets:
           - "-framework"
           - "LeafShared"
 
+  LeafHeaderUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: UITests
+    dependencies:
+      - target: Leaf
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Leaf
+        PRODUCT_BUNDLE_IDENTIFIER: net.digitalbc.leafreader.header-uitests
+
 schemes:
   Leaf:
     build:
@@ -200,6 +214,7 @@ schemes:
     test:
       targets:
         - LeafTests
+        - LeafHeaderUITests
     run:
       config: Debug
     archive:

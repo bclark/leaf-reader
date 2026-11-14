@@ -713,6 +713,7 @@ final class ReaderTurnTests: XCTestCase {
                     XCTAssertTrue(metalView.isHidden, "MetalCurlUIView must hide again once turn settles")
 
                     // 2. Interactive drag > 35% screen width -> commits forward turn to page index 2 (Page 3/6)
+                    coordinator.parent.onPanBegan(1)
                     coordinator.simulatePanChanged(CGSize(width: -viewport.width * 0.20, height: 0))
                     coordinator.simulatePanChanged(CGSize(width: -viewport.width * 0.50, height: 0))
                     hosting.view.layoutIfNeeded()
@@ -726,6 +727,7 @@ final class ReaderTurnTests: XCTestCase {
                         XCTAssertEqual(ReadingProgress.get(cbzURL)?.page, 2, "50% drag must commit turn to page index 2 (Page 3/6)")
 
                         // 3. Interactive drag < 35% screen width (15%) with low velocity -> snaps back, page remains 2
+                        coordinator.parent.onPanBegan(1)
                         coordinator.simulatePanChanged(CGSize(width: -viewport.width * 0.15, height: 0))
                         hosting.view.layoutIfNeeded()
                         coordinator.simulatePanEnded(
@@ -803,6 +805,7 @@ final class ReaderTurnTests: XCTestCase {
 
                 // In RTL Spread mode, page 0 is the standalone cover.
                 // Dragging from Left to Right (+50% width) advances forward in RTL to spread pages 1-2!
+                coordinator.parent.onPanBegan(1)
                 coordinator.simulatePanChanged(CGSize(width: viewport.width * 0.20, height: 0))
                 coordinator.simulatePanChanged(CGSize(width: viewport.width * 0.50, height: 0))
                 hosting.view.layoutIfNeeded()
@@ -823,6 +826,7 @@ final class ReaderTurnTests: XCTestCase {
                         XCTAssertEqual(ReadingProgress.get(cbzURL)?.page, 3, "RTL Left Third tap on spread 1-2 must advance to spread 3-4 (page index 3)")
 
                         // RTL backward drag (Right to Left -50% width) returns from spread 3-4 to spread 1-2 (firstPage = 1)
+                        coordinator.parent.onPanBegan(1)
                         coordinator.simulatePanChanged(CGSize(width: -viewport.width * 0.20, height: 0))
                         coordinator.simulatePanChanged(CGSize(width: -viewport.width * 0.50, height: 0))
                         hosting.view.layoutIfNeeded()
