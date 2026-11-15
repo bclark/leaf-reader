@@ -167,12 +167,16 @@ class JellyfinCatalogueViewModel(
                 val books = JellyfinLibraryEntry.comicLibraries(libraries).ifEmpty { libraries }
                 val selected = books.firstOrNull { it.id == _state.value.library?.id }
                     ?: JellyfinLibraryEntry.automaticLibrary(libraries)
+                // Finish the suspendable cache read before LibraryScreen can react to the library.
+                // Applying its default Series query cancels the current query job.
+                if (selected != null && index == null) {
+                    val saved = readIndex(selected.id)
+                    if (!valid(request, captured)) return@launch
+                    index = saved
+                }
                 _state.value = project(_state.value.copy(libraries = books, library = selected,
                     loading = false, error = null, loaded = true))
                 if (selected != null) {
-                    if (index == null) index = readIndex(selected.id)
-                    if (!valid(request, captured)) return@launch
-                    _state.value = project(_state.value)
                     startIndex(startup = true)
                     if (!_state.value.usesIndex && _state.value.view != JellyfinCatalogueView.DOWNLOADED) load()
                 } else _state.value = _state.value.copy(launchFailure = null, offline = false, loaded = true)
