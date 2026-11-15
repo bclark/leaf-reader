@@ -543,7 +543,8 @@ class LibraryRepository(
             outboxDao.getPendingForComic(entry.comicId)?.revision != entry.revision) return false
         jellyfinClient.reportProgress(config, auth, entry.itemId, entry.pageIndex)
         if (!syncSessionCurrent(config, auth, generation)) return false
-        if (entry.markPlayed != null || before.played != played) {
+        val updatesPlayed = entry.markPlayed != null || before.played != played
+        if (updatesPlayed) {
             val partial = jellyfinClient.getProgress(config, auth, entry.itemId)
             check(partial.isAvailable && partial.positionTicks == JellyfinProgress.pageToTicks(entry.pageIndex)) {
                 "The server has not confirmed the page position. Changes remain queued."
@@ -557,7 +558,16 @@ class LibraryRepository(
             jellyfinClient.markPlayedStatus(config, auth, entry.itemId, played)
         }
         if (!syncSessionCurrent(config, auth, generation)) return false
-        val confirmed = jellyfinClient.getProgress(config, auth, entry.itemId)
+        var confirmed = jellyfinClient.getProgress(config, auth, entry.itemId)
+        // Jellyfin's played/unplayed endpoint can clear the resume position.
+        // Restore this intent once, provided no newer local revision has replaced it.
+        if (updatesPlayed && entry.pageIndex > 0 && confirmed.positionTicks == 0L && confirmed.played == played) {
+            if (!syncSessionCurrent(config, auth, generation) ||
+                outboxDao.getPendingForComic(entry.comicId)?.revision != entry.revision) return false
+            jellyfinClient.reportProgress(config, auth, entry.itemId, entry.pageIndex)
+            if (!syncSessionCurrent(config, auth, generation)) return false
+            confirmed = jellyfinClient.getProgress(config, auth, entry.itemId)
+        }
         check(confirmed.isAvailable && confirmed.positionTicks == JellyfinProgress.pageToTicks(entry.pageIndex) &&
             confirmed.played == played) { "The server has not confirmed the reading state. Changes remain queued." }
         if (!syncSessionCurrent(config, auth, generation)) return false

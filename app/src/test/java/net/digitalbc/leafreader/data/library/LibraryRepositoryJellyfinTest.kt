@@ -1815,6 +1815,56 @@ class LibraryRepositoryJellyfinTest {
         assertEquals(0, server.requestCount)
     }
 
+    @Test
+    fun playedStatusResetStillAcknowledgesTheCompletedPage() = runBlocking {
+        verifyPlayedStatusReset(played = true, page = 9)
+    }
+
+    @Test
+    fun unreadStatusResetPreservesIntentAcrossRoutinePageTurns() = runBlocking {
+        verifyPlayedStatusReset(played = false, page = 6)
+    }
+
+    @Test
+    fun playedStatusResetDoesNotRestoreAnOlderRevision() = runBlocking {
+        val held = HeldProgress(hold = false).apply { resetPositionOnPlayed = true }
+        configureSync(held)
+        val comic = linkedComic("newer-reset")
+        saveOffline(comic, 6, played = false)
+        val initial = outboxDao.getPendingForComic(comic)!!
+        held.onPlayedWrite = { runBlocking { saveOffline(comic, 4) } }
+
+        repository.flushJellyfinOutbox()
+
+        val pending = outboxDao.getPendingForComic(comic)!!
+        assertEquals(initial.revision + 1, pending.revision)
+        assertEquals(4, pending.pageIndex)
+        assertEquals(false, pending.markPlayed)
+        assertEquals("Do not restore the superseded page after a status reset", 2, held.writes.size)
+        assertEquals(0L, held.position("newer-reset").positionTicks)
+    }
+
+    private suspend fun verifyPlayedStatusReset(played: Boolean, page: Int) {
+        val held = HeldProgress(hold = false).apply { resetPositionOnPlayed = true }
+        configureSync(held)
+        val item = "played-reset-$played"
+        held.position(item, 0, !played)
+        val comic = linkedComic(item)
+        saveOffline(comic, 0, played)
+        saveOffline(comic, page)
+        assertEquals(played, outboxDao.getPendingForComic(comic)!!.markPlayed)
+
+        repository.flushJellyfinOutbox()
+
+        assertNull("Both page and played state must be confirmed before acknowledging", outboxDao.getPendingForComic(comic))
+        assertEquals(page * 10_000L, held.position(item).positionTicks)
+        assertEquals(played, held.position(item).played)
+        assertProgress(takeRequest(), item, page)
+        assertPlayed(takeRequest(), item, "u", played)
+        assertProgress(takeRequest(), item, page)
+        assertEquals("Restore the page once after the status endpoint resets it", 3, held.writes.size)
+    }
+
     private fun refreshDaos() {
         comicDao = db.comicDao()
         linkDao = db.remoteComicLinkDao()

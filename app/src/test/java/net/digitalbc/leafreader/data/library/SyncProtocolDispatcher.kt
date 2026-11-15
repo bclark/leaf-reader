@@ -14,6 +14,8 @@ internal open class SyncProtocolDispatcher(private val queuedResponses: Boolean 
     val writes = CopyOnWriteArrayList<RecordedRequest>()
     @Volatile var acknowledgeWrites = true
     @Volatile var failNextPlayed = false
+    @Volatile var resetPositionOnPlayed = false
+    @Volatile var onPlayedWrite: (() -> Unit)? = null
     @Volatile var onProgressWrite: (() -> Unit)? = null
     @Volatile var onProgressRead: (() -> Unit)? = null
 
@@ -52,7 +54,13 @@ internal open class SyncProtocolDispatcher(private val queuedResponses: Boolean 
                 callback?.invoke()
             } else if (playedWrite) {
                 val item = segments.last()
-                positions[item] = position(item).copy(played = request.method == "POST")
+                positions[item] = position(item).copy(
+                    positionTicks = if (resetPositionOnPlayed) 0 else position(item).positionTicks,
+                    played = request.method == "POST",
+                )
+                val callback = onPlayedWrite
+                onPlayedWrite = null
+                callback?.invoke()
             }
         }
         return response
