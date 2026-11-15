@@ -678,49 +678,44 @@ class JellyfinClientTest {
     }
 
     @Test
-    fun reportProgressSendsCorrectTicksPayload() = runBlocking {
-        server.enqueue(MockResponse().setResponseCode(204))
-
-        val config = JellyfinServerConfig(baseUrl = baseUrl(), allowInsecureHttp = true)
-        val auth = JellyfinAuth("tok", "usr", "srv", "Bryan")
-        client.reportProgress(config, auth, itemId = "item-xyz", pageIndex = 14)
-
-        val recorded = server.takeRequest()
-        assertEquals("/Sessions/Playing/Progress", recorded.path)
-        assertEquals("POST", recorded.method)
-        val bodyStr = recorded.body.readUtf8()
-        val json = org.json.JSONObject(bodyStr)
-        assertEquals("item-xyz", json.getString("ItemId"))
-        assertEquals(140000L, json.getLong("PositionTicks"))
-        assertEquals(true, json.getBoolean("CanSeek"))
-        assertEquals(false, json.getBoolean("IsPaused"))
-        assertEquals("DirectPlay", json.getString("PlayMethod"))
-    }
-
-    @Test
-    fun markPlayedSendsPostToPlayedItems() = runBlocking {
+    fun progressStateWritesBothFieldsForTheAuthenticatedUser() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+        val config = JellyfinServerConfig(baseUrl(), true)
+        val auth = JellyfinAuth("tok", "usr", "srv", "Bryan")
+        client.writeProgressState(config, auth, "item-xyz", 14, played = true, updatedAt = 1_700_000_000_123L)
 
-        val config = JellyfinServerConfig(baseUrl = baseUrl(), allowInsecureHttp = true)
-        val auth = JellyfinAuth("tok", "usr-1", "srv", "Bryan")
-        client.markPlayedStatus(config, auth, itemId = "item-xyz", played = true)
-
-        val recorded = server.takeRequest()
-        assertEquals("/Users/usr-1/PlayedItems/item-xyz", recorded.path)
-        assertEquals("POST", recorded.method)
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/UserItems/item-xyz/UserData?userId=usr", request.path)
+        assertTrue(request.getHeader("Authorization")!!.contains("tok"))
+        val payload = org.json.JSONObject(request.body.readUtf8())
+        assertEquals(3, payload.length())
+        assertEquals("2023-11-14T22:13:20.123Z", payload.getString("LastPlayedDate"))
+        assertEquals(140000L, payload.getLong("PlaybackPositionTicks"))
+        assertTrue(payload.getBoolean("Played"))
     }
 
     @Test
-    fun markUnplayedSendsDeleteToPlayedItems() = runBlocking {
+    fun explicitUnreadWritesZeroPositionAndFalseTogether() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(204))
+        client.writeProgressState(JellyfinServerConfig(baseUrl(), true),
+            JellyfinAuth("tok", "usr-1", "srv", "Bryan"), "item-xyz", 0, played = false, updatedAt = 1_700_000_000_123L)
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/UserItems/item-xyz/UserData?userId=usr-1", request.path)
+        val payload = org.json.JSONObject(request.body.readUtf8())
+        assertEquals(2, payload.length())
+        assertEquals(0L, payload.getLong("PlaybackPositionTicks"))
+        assertFalse(payload.getBoolean("Played"))
+    }
 
-        val config = JellyfinServerConfig(baseUrl = baseUrl(), allowInsecureHttp = true)
-        val auth = JellyfinAuth("tok", "usr-1", "srv", "Bryan")
-        client.markPlayedStatus(config, auth, itemId = "item-xyz", played = false)
-
-        val recorded = server.takeRequest()
-        assertEquals("/Users/usr-1/PlayedItems/item-xyz", recorded.path)
-        assertEquals("DELETE", recorded.method)
+    @Test
+    fun failedStateWriteIsReportedToTheQueueCaller() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(503))
+        val result = runCatching { client.writeProgressState(JellyfinServerConfig(baseUrl(), true),
+            JellyfinAuth("tok", "usr-1", "srv", "Bryan"), "item-xyz", 4, played = false, updatedAt = 1_700_000_000_123L) }
+        assertTrue(result.isFailure)
+        assertEquals("/UserItems/item-xyz/UserData?userId=usr-1", server.takeRequest().path)
     }
     @Test fun authoritativeProgressDoesNotCoerceUnknownOrMalformedValues() = runBlocking {
         val config = JellyfinServerConfig(baseUrl(), true)

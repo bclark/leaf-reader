@@ -13,8 +13,9 @@ internal open class SyncProtocolDispatcher(private val queuedResponses: Boolean 
     private val positions = ConcurrentHashMap<String, JellyfinProgressSnapshot>()
     val writes = CopyOnWriteArrayList<RecordedRequest>()
     @Volatile var acknowledgeWrites = true
-    @Volatile var failNextPlayed = false
+    @Volatile var failNextStateWrite = false
     @Volatile var resetPositionOnPlayed = false
+    @Volatile var playedOnProgress: Boolean? = null
     @Volatile var onPlayedWrite: (() -> Unit)? = null
     @Volatile var onProgressWrite: (() -> Unit)? = null
     @Volatile var onProgressRead: (() -> Unit)? = null
@@ -38,17 +39,19 @@ internal open class SyncProtocolDispatcher(private val queuedResponses: Boolean 
         }
         val progressWrite = url.encodedPath == "/Sessions/Playing/Progress"
         val playedWrite = url.encodedPath.contains("/PlayedItems/")
-        if (progressWrite || playedWrite) writes += request
+        val stateWrite = request.method == "POST" && segments.size == 3 && segments[0] == "UserItems" && segments[2] == "UserData"
+        if (progressWrite || playedWrite || stateWrite) writes += request
         val response = if (queuedResponses) super.dispatch(request) else MockResponse().setResponseCode(204)
-        if (playedWrite && failNextPlayed) {
-            failNextPlayed = false
+        if ((playedWrite || stateWrite) && failNextStateWrite) {
+            failNextStateWrite = false
             return MockResponse().setResponseCode(500)
         }
         if (response.status.split(' ')[1].toInt() in 200..299 && acknowledgeWrites) {
-            if (progressWrite) {
+            if (progressWrite || stateWrite) {
                 val body = JSONObject(request.body.clone().readUtf8())
-                val item = body.getString("ItemId")
-                positions[item] = position(item).copy(positionTicks = body.getLong("PositionTicks"))
+                val item = if (stateWrite) segments[1] else body.getString("ItemId")
+                positions[item] = position(item).copy(positionTicks = body.getLong(if (stateWrite) "PlaybackPositionTicks" else "PositionTicks"),
+                    played = if (stateWrite) body.getBoolean("Played") else playedOnProgress ?: position(item).played)
                 val callback = onProgressWrite
                 onProgressWrite = null
                 callback?.invoke()

@@ -496,55 +496,26 @@ class JellyfinClient(
         }
     }
 
-    suspend fun reportProgress(
+    /** Update the complete intent together: session/played endpoints can reset each other. */
+    suspend fun writeProgressState(
         config: JellyfinServerConfig,
         auth: JellyfinAuth,
         itemId: String,
         pageIndex: Int,
-    ): Unit = withContext(Dispatchers.IO) {
-        val url = JellyfinEndpoints.sessionProgress(config.baseUrl)
-        val jsonPayload = JSONObject().apply {
-            put("ItemId", itemId)
-            put("PositionTicks", JellyfinProgress.pageToTicks(pageIndex))
-            put("CanSeek", true)
-            put("IsPaused", false)
-            put("PlayMethod", "DirectPlay")
-        }.toString()
-
-        val request = authorizedRequestBuilder(url, auth)
-            .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .build()
-
-        executeRequest(request) { response ->
-            if (!response.isSuccessful) {
-                mapHttpError(response.code, "Failed to report progress to Jellyfin")
-            }
-        }
-    }
-
-    suspend fun markPlayedStatus(
-        config: JellyfinServerConfig,
-        auth: JellyfinAuth,
-        itemId: String,
         played: Boolean,
+        updatedAt: Long,
     ): Unit = withContext(Dispatchers.IO) {
-        val url = if (played) {
-            JellyfinEndpoints.markPlayed(config.baseUrl, auth.userId, itemId)
-        } else {
-            JellyfinEndpoints.markUnplayed(config.baseUrl, auth.userId, itemId)
-        }
-
-        val requestBuilder = authorizedRequestBuilder(url, auth)
-        val request = if (played) {
-            requestBuilder.post(ByteArray(0).toRequestBody(null)).build()
-        } else {
-            requestBuilder.delete().build()
-        }
-
+        val url = JellyfinEndpoints.itemUserData(config.baseUrl, auth.userId, itemId)
+        val payload = JSONObject().apply {
+            put("PlaybackPositionTicks", JellyfinProgress.pageToTicks(pageIndex))
+            put("Played", played)
+            if (pageIndex > 0 || played) put("LastPlayedDate", java.time.Instant.ofEpochMilli(updatedAt).toString())
+        }.toString()
+        val request = authorizedRequestBuilder(url, auth)
+            .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
         executeRequest(request) { response ->
-            if (!response.isSuccessful) {
-                mapHttpError(response.code, "Failed to update played status on Jellyfin")
-            }
+            if (!response.isSuccessful) mapHttpError(response.code, "Failed to update reading state on Jellyfin")
         }
     }
 

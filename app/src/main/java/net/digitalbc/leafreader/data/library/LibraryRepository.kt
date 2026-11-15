@@ -527,7 +527,7 @@ class LibraryRepository(
                             checkNotNull(outboxDao.getPendingForComic(comicId))
                         }
                     }
-                    val confirmed = sendJellyfinProgress(config, auth, entry, localPlayed, remote, generation)
+                    val confirmed = sendJellyfinProgress(config, auth, entry, localPlayed, generation)
                     if (confirmed && syncSessionCurrent(config, auth, generation)) clearProgressConflict(comicId)
                     if (choice != null) check(confirmed) { "The device position changed. Review the updated choices." }
                 }
@@ -537,37 +537,13 @@ class LibraryRepository(
 
     /** A successful write is acknowledged only after a fresh read confirms the entire intent. */
     private suspend fun sendJellyfinProgress(config: JellyfinServerConfig, auth: JellyfinAuth,
-        entry: JellyfinSyncOutboxEntity, played: Boolean, before: JellyfinProgressSnapshot, generation: Long): Boolean {
+        entry: JellyfinSyncOutboxEntity, played: Boolean, generation: Long): Boolean {
         val outboxDao = checkNotNull(jellyfinSyncOutboxDao)
         if (!syncSessionCurrent(config, auth, generation) ||
             outboxDao.getPendingForComic(entry.comicId)?.revision != entry.revision) return false
-        jellyfinClient.reportProgress(config, auth, entry.itemId, entry.pageIndex)
+        jellyfinClient.writeProgressState(config, auth, entry.itemId, entry.pageIndex, played, entry.updatedAt)
         if (!syncSessionCurrent(config, auth, generation)) return false
-        val updatesPlayed = entry.markPlayed != null || before.played != played
-        if (updatesPlayed) {
-            val partial = jellyfinClient.getProgress(config, auth, entry.itemId)
-            check(partial.isAvailable && partial.positionTicks == JellyfinProgress.pageToTicks(entry.pageIndex)) {
-                "The server has not confirmed the page position. Changes remain queued."
-            }
-            if (!syncSessionCurrent(config, auth, generation)) return false
-            writeProgressBaseline(auth, config.baseUrl, entry.itemId, partial)
-            _progressUpdates.emit(JellyfinProgressUpdate(
-                JellyfinItemIdentity(auth.serverId, auth.userId, entry.itemId), config.baseUrl, partial, generation))
-            if (!syncSessionCurrent(config, auth, generation) ||
-                outboxDao.getPendingForComic(entry.comicId)?.revision != entry.revision) return false
-            jellyfinClient.markPlayedStatus(config, auth, entry.itemId, played)
-        }
-        if (!syncSessionCurrent(config, auth, generation)) return false
-        var confirmed = jellyfinClient.getProgress(config, auth, entry.itemId)
-        // Jellyfin's played/unplayed endpoint can clear the resume position.
-        // Restore this intent once, provided no newer local revision has replaced it.
-        if (updatesPlayed && entry.pageIndex > 0 && confirmed.positionTicks == 0L && confirmed.played == played) {
-            if (!syncSessionCurrent(config, auth, generation) ||
-                outboxDao.getPendingForComic(entry.comicId)?.revision != entry.revision) return false
-            jellyfinClient.reportProgress(config, auth, entry.itemId, entry.pageIndex)
-            if (!syncSessionCurrent(config, auth, generation)) return false
-            confirmed = jellyfinClient.getProgress(config, auth, entry.itemId)
-        }
+        val confirmed = jellyfinClient.getProgress(config, auth, entry.itemId)
         check(confirmed.isAvailable && confirmed.positionTicks == JellyfinProgress.pageToTicks(entry.pageIndex) &&
             confirmed.played == played) { "The server has not confirmed the reading state. Changes remain queued." }
         if (!syncSessionCurrent(config, auth, generation)) return false

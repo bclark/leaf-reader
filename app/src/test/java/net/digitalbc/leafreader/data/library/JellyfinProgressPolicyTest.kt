@@ -197,14 +197,14 @@ class JellyfinProgressPolicyTest {
         assertEquals(2, remote.writes.size)
     }
 
-    @Test fun partialPlayedFailureRetriesFromConfirmedPageWithoutLosingIntent() = runBlocking {
+    @Test fun failedCompletedIntentRetriesWithoutPartialServerState() = runBlocking {
         val id = comic("partial")
         baseline("partial", 0, false)
         saveOffline(id, 19, true)
-        remote.failNextPlayed = true
+        remote.failNextStateWrite = true
         repository.flushJellyfinOutbox()
         assertEquals(true, db.jellyfinSyncOutboxDao().getPendingForComic(id)!!.markPlayed)
-        assertEquals(JellyfinProgressSnapshot(190_000, false), remote.position("partial"))
+        assertEquals(JellyfinProgressSnapshot(0, false), remote.position("partial"))
         repository.flushJellyfinOutbox()
         assertNull(db.jellyfinSyncOutboxDao().getPendingForComic(id))
         assertEquals(JellyfinProgressSnapshot(190_000, true), remote.position("partial"))

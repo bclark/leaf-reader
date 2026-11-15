@@ -974,12 +974,12 @@ class LibraryRepositoryJellyfinTest {
 
         // Now take the progress sync request
         val recorded = takeRequest()
-        assertEquals("/Sessions/Playing/Progress", recorded.path)
+        assertEquals("/UserItems/sync-item-1/UserData?userId=u", recorded.path)
         assertEquals("POST", recorded.method)
         val bodyStr = recorded.body.readUtf8()
         val json = JSONObject(bodyStr)
-        assertEquals("sync-item-1", json.getString("ItemId"))
-        assertEquals(40000L, json.getLong("PositionTicks"))
+        assertFalse(json.getBoolean("Played"))
+        assertEquals(40000L, json.getLong("PlaybackPositionTicks"))
     }
 
     @Test
@@ -1011,9 +1011,8 @@ class LibraryRepositoryJellyfinTest {
         val comicId = result.getOrThrow()
         enableProgressFixture(comicId)
 
-        // Enqueue progress response and mark played response
+        // Enqueue the complete state-write response
         server.enqueue(MockResponse().setResponseCode(204))
-        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
 
         // Page 4 is the last page (5 pages total, 0-indexed)
         repository.syncJellyfinProgressDirect(comicId, page = 4)
@@ -1021,14 +1020,7 @@ class LibraryRepositoryJellyfinTest {
         // Download request
         takeRequest()
 
-        // 1. Progress request
-        val progressReq = takeRequest()
-        assertEquals("/Sessions/Playing/Progress", progressReq.path)
-
-        // 2. Mark played request
-        val playedReq = takeRequest()
-        assertEquals("/Users/u/PlayedItems/last-page-item", playedReq.path)
-        assertEquals("POST", playedReq.method)
+        assertProgress(takeRequest(), "last-page-item", 4, token = "tok", played = true)
     }
 
     @Test
@@ -1100,7 +1092,7 @@ class LibraryRepositoryJellyfinTest {
 
         val req = takeRequest()
         assertNotNull(req)
-        assertEquals("/Sessions/Playing/Progress", req?.path)
+        assertEquals("/UserItems/outbox-item-1/UserData?userId=u", req.path)
 
         // After successful sync, outbox entry should be deleted
         assertNull(outboxDao.getPendingForComic(comicId))
@@ -1145,7 +1137,7 @@ class LibraryRepositoryJellyfinTest {
 
         val flushedReq = takeRequest()
         assertNotNull(flushedReq)
-        assertEquals("/Sessions/Playing/Progress", flushedReq?.path)
+        assertEquals("/UserItems/retry-item-1/UserData?userId=u", flushedReq.path)
 
         // Outbox entry should now be deleted
         assertNull(outboxDao.getPendingForComic(comicId))
@@ -1215,8 +1207,10 @@ class LibraryRepositoryJellyfinTest {
 
         val progressReq = takeRequest()
         assertNotNull(progressReq)
-        assertEquals("/Sessions/Playing/Progress", progressReq?.path)
+        assertEquals("/UserItems/page0-item-1/UserData?userId=u", progressReq.path)
 
+        assertTrue(JSONObject(progressReq.body.readUtf8()).getBoolean("Played"))
+        assertTrue(progressServer.position("page0-item-1").played!!)
         // Drain authoritative readbacks and verify no DELETE was sent.
         while (server.takeRequest(100, TimeUnit.MILLISECONDS) != null) { }
         assertTrue(progressServer.writes.none { it.method == "DELETE" })
@@ -1226,7 +1220,7 @@ class LibraryRepositoryJellyfinTest {
     }
 
     @Test
-    fun explicitMarkUnreadSendsDeleteToPlayedItems() = runBlocking {
+    fun explicitMarkUnreadWritesBothStateFields() = runBlocking {
         val cbzBytes = createValidCbzBytes(pageCount = 5)
         server.enqueue(
             MockResponse()
@@ -1248,18 +1242,13 @@ class LibraryRepositoryJellyfinTest {
         takeRequest() // consume download
 
         server.enqueue(MockResponse().setResponseCode(204))
-        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
 
         // Explicit mark unread
         repository.syncJellyfinProgressDirect(comicId, page = 0, explicitPlayed = false)
 
-        val progressReq = takeRequest()
-        assertNotNull(progressReq)
+        assertProgress(takeRequest(), "unread-item-1", 0, token = "tok", played = false)
+        assertFalse(progressServer.position("unread-item-1").played!!)
 
-        val deleteReq = takeRequest()
-        assertNotNull(deleteReq)
-        assertEquals("/Users/u/PlayedItems/unread-item-1", deleteReq?.path)
-        assertEquals("DELETE", deleteReq?.method)
     }
 
     @Test
@@ -1424,20 +1413,13 @@ class LibraryRepositoryJellyfinTest {
         // Must preserve markPlayed = false instead of reverting to null!
         assertEquals("Routine page turn must preserve pending explicit markPlayed intent", false, updatedOutbox?.markPlayed)
 
-        // 3. Flush to server and verify both progress and PlayedItems DELETE are sent
+        // Flush the retained explicit unread intent and newer page together.
         server.enqueue(MockResponse().setResponseCode(204))
-        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
-
         repository.flushJellyfinOutbox()
+        assertProgress(takeRequest(), "intent-item-1", 1, token = "tok", played = false)
+        assertEquals(10000L, progressServer.position("intent-item-1").positionTicks)
+        assertFalse(progressServer.position("intent-item-1").played!!)
 
-        val progressReq = takeRequest()
-        assertNotNull(progressReq)
-        assertEquals("/Sessions/Playing/Progress", progressReq?.path)
-
-        val deleteReq = takeRequest()
-        assertNotNull(deleteReq)
-        assertEquals("/Users/u/PlayedItems/intent-item-1", deleteReq?.path)
-        assertEquals("DELETE", deleteReq?.method)
     }
 
     @Test
@@ -1485,11 +1467,10 @@ class LibraryRepositoryJellyfinTest {
             repository.flushJellyfinOutbox()
             assertNull(outboxDao.getPendingForComic(comic))
             assertProgress(takeRequest(), "race-item", 4)
-            assertProgress(takeRequest(), "race-item", page)
-            if (played != null) assertPlayed(takeRequest(), "race-item", "u", played)
+            assertProgress(takeRequest(), "race-item", page, played = played ?: false)
             assertEquals(page * 10_000L, held.position.get())
-            assertEquals(played, held.played.get())
-            assertEquals(if (played == null) 2 else 3, held.writes.size)
+            assertEquals(played ?: false, held.played.get())
+            assertEquals(2, held.writes.size)
         } finally {
             held.release.countDown()
             flush.cancel()
@@ -1566,8 +1547,7 @@ class LibraryRepositoryJellyfinTest {
                 withTimeout(5000) { held.cancelled.await() }
                 // Explicit flush also waits for the reconnect flush through the same mutex.
                 repository.flushJellyfinOutbox()
-                assertProgress(takeRequest(), "new-item", 2, token = "token-other")
-                assertPlayed(takeRequest(), "new-item", "other", true)
+                assertProgress(takeRequest(), "new-item", 2, token = "token-other", played = true, user = "other")
                 assertEquals("other", repository.getJellyfinAuth()?.userId)
                 assertEquals(0, outboxDao.countPendingForUser("srv", "other"))
             } else {
@@ -1578,7 +1558,7 @@ class LibraryRepositoryJellyfinTest {
             }
             assertEquals("Cancellation must retain unsent played intent and both rows", oldPending,
                 outboxDao.getPendingForUser("srv", "u"))
-            assertEquals(if (switchAccount) 3 else 1, held.writes.size)
+            assertEquals(if (switchAccount) 2 else 1, held.writes.size)
         } finally {
             held.release.countDown()
         }
@@ -1610,32 +1590,29 @@ class LibraryRepositoryJellyfinTest {
         assertEquals(2, comicDao.getById(comic)?.lastPage)
         assertEquals(pending, outboxDao.getPendingForComic(comic))
         repository.flushJellyfinOutbox()
-        assertProgress(takeRequest(), "durable-item", 2)
-        assertPlayed(takeRequest(), "durable-item", "u", false)
+        assertProgress(takeRequest(), "durable-item", 2, played = false)
         assertNull(outboxDao.getPendingForComic(comic))
     }
 
     @Test
-    fun failedPlayedStatusRetainsIntentUntilBothRequestsSucceed() = runBlocking {
+    fun failedStateWriteRetainsIntentUntilConfirmed() = runBlocking {
         val held = HeldProgress(hold = false)
         configureSync(held)
         held.position("retry-item", 0L, true)
         val comic = linkedComic("retry-item")
         saveOffline(comic, 0, false)
         val pending = outboxDao.getPendingForComic(comic)
-        held.failNextPlayed = true
+        held.failNextStateWrite = true
         repository.flushJellyfinOutbox()
         assertEquals(pending, outboxDao.getPendingForComic(comic))
-        assertProgress(takeRequest(), "retry-item", 0)
-        assertPlayed(takeRequest(), "retry-item", "u", false)
+        assertProgress(takeRequest(), "retry-item", 0, played = false)
         assertNull(held.played.get())
 
         repository.flushJellyfinOutbox()
-        assertProgress(takeRequest(), "retry-item", 0)
-        assertPlayed(takeRequest(), "retry-item", "u", false)
+        assertProgress(takeRequest(), "retry-item", 0, played = false)
         assertEquals(false, held.played.get())
         assertNull(outboxDao.getPendingForComic(comic))
-        assertEquals(4, held.writes.size)
+        assertEquals(2, held.writes.size)
     }
 
     @Test
@@ -1827,12 +1804,12 @@ class LibraryRepositoryJellyfinTest {
 
     @Test
     fun playedStatusResetDoesNotRestoreAnOlderRevision() = runBlocking {
-        val held = HeldProgress(hold = false).apply { resetPositionOnPlayed = true }
+        val held = HeldProgress(hold = false).apply { resetPositionOnPlayed = true; playedOnProgress = false }
         configureSync(held)
         val comic = linkedComic("newer-reset")
         saveOffline(comic, 6, played = false)
         val initial = outboxDao.getPendingForComic(comic)!!
-        held.onPlayedWrite = { runBlocking { saveOffline(comic, 4) } }
+        held.onProgressWrite = { runBlocking { saveOffline(comic, 4) } }
 
         repository.flushJellyfinOutbox()
 
@@ -1840,12 +1817,12 @@ class LibraryRepositoryJellyfinTest {
         assertEquals(initial.revision + 1, pending.revision)
         assertEquals(4, pending.pageIndex)
         assertEquals(false, pending.markPlayed)
-        assertEquals("Do not restore the superseded page after a status reset", 2, held.writes.size)
-        assertEquals(0L, held.position("newer-reset").positionTicks)
+        assertEquals("The in-flight write must not acknowledge newer local progress", 1, held.writes.size)
+        assertEquals(60_000L, held.position("newer-reset").positionTicks)
     }
 
     private suspend fun verifyPlayedStatusReset(played: Boolean, page: Int) {
-        val held = HeldProgress(hold = false).apply { resetPositionOnPlayed = true }
+        val held = HeldProgress(hold = false).apply { resetPositionOnPlayed = true; playedOnProgress = false }
         configureSync(held)
         val item = "played-reset-$played"
         held.position(item, 0, !played)
@@ -1859,10 +1836,6 @@ class LibraryRepositoryJellyfinTest {
         assertNull("Both page and played state must be confirmed before acknowledging", outboxDao.getPendingForComic(comic))
         assertEquals(page * 10_000L, held.position(item).positionTicks)
         assertEquals(played, held.position(item).played)
-        assertProgress(takeRequest(), item, page)
-        assertPlayed(takeRequest(), item, "u", played)
-        assertProgress(takeRequest(), item, page)
-        assertEquals("Restore the page once after the status endpoint resets it", 3, held.writes.size)
     }
 
     private fun refreshDaos() {
@@ -1943,18 +1916,18 @@ class LibraryRepositoryJellyfinTest {
 
     private fun assertProgress(
         request: RecordedRequest, item: String, page: Int, token: String = "token-u",
+        played: Boolean? = null, user: String = "u",
     ) {
         assertEquals("POST", request.method)
-        assertEquals("/Sessions/Playing/Progress", request.path)
+        assertEquals("/UserItems/$item/UserData?userId=$user", request.path)
         assertTrue(request.getHeader("Authorization")!!.contains(token))
         val payload = JSONObject(request.body.readUtf8())
-        assertEquals(item, payload.getString("ItemId"))
-        assertEquals(page * 10_000L, payload.getLong("PositionTicks"))
-    }
-
-    private fun assertPlayed(request: RecordedRequest, item: String, user: String, played: Boolean) {
-        assertEquals(if (played) "POST" else "DELETE", request.method)
-        assertEquals("/Users/$user/PlayedItems/$item", request.path)
+        val hasReadingDate = page > 0 || payload.getBoolean("Played")
+        assertEquals(if (hasReadingDate) 3 else 2, payload.length())
+        if (hasReadingDate) assertNotNull(java.time.Instant.parse(payload.getString("LastPlayedDate")))
+        assertEquals(page * 10_000L, payload.getLong("PlaybackPositionTicks"))
+        assertTrue(payload.get("Played") is Boolean)
+        if (played != null) assertEquals(played, payload.getBoolean("Played"))
     }
 
     private class HeldProgress(private val hold: Boolean = true) : SyncProtocolDispatcher() {
@@ -1968,7 +1941,7 @@ class LibraryRepositoryJellyfinTest {
         val client = JellyfinClient("sync-test", customHttpClient = OkHttpClient.Builder()
             .eventListener(object : EventListener() {
                 override fun callFailed(call: Call, ioe: IOException) {
-                    if (call.request().url.encodedPath == "/Sessions/Playing/Progress" && call.isCanceled()) {
+                    if (call.request().url.encodedPath.startsWith("/UserItems/") && call.request().url.encodedPath.endsWith("/UserData") && call.isCanceled()) {
                         cancelled.complete(Unit)
                     }
                 }
@@ -1986,14 +1959,15 @@ class LibraryRepositoryJellyfinTest {
             }
             val response = super.dispatch(request)
             if (response.status.split(' ')[1].toInt() in 200..299) {
-                if (path == "/Sessions/Playing/Progress") {
+                if (path.startsWith("/UserItems/") && path.endsWith("/UserData")) {
                     val json = JSONObject(request.body.clone().readUtf8())
-                    position.set(json.getLong("PositionTicks"))
+                    position.set(json.getLong("PlaybackPositionTicks"))
+                    played.set(json.getBoolean("Played"))
                     if (hold && first.compareAndSet(true, false)) {
                         started.complete(Unit)
                         if (!release.await(10, TimeUnit.SECONDS)) return MockResponse().setResponseCode(500)
                     }
-                } else if (path.contains("/PlayedItems/")) played.set(request.method == "POST")
+                }
             }
             return response
         }
