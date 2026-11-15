@@ -60,3 +60,16 @@ iosApp/Local.xcconfig
 # Local engineer/aux coordination notes (preserve locally; never commit)
 /docs/ANDROID_ENG_NOTES.md
 /docs/IOS_ENG_NOTES.md
+
+# Local resolved engineering history (preserve locally)
+/docs/ANDROID_ENG_ARCHIVE.md
+/docs/IOS_ENG_ARCHIVE.md
+
+# Local App Store copy and asset review reference (preserve; never commit)
+/docs/IOS_APP_STORE_LISTING.md
+
+# Local Google Play copy and release reference (preserve; never commit)
+/docs/ANDROID_PLAY_STORE_LISTING.md
+
+# Local assistant asset drafts, provenance and review notes (never commit)
+/docs/local/

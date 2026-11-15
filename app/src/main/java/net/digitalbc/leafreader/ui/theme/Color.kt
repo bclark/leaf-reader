@@ -13,6 +13,8 @@ val LeafAccent = Color(0xFFD4AF37)        // Accent Gold
 
 // Interface and Support
 val ComicRose = Color(0xFF935B6D)         // Warm accent / label
+val ComicErrorDark = Color(0xFFFFB4AB)    // High-contrast accessible error text on dark grounds (>9:1)
+val ComicErrorLight = Color(0xFFBA1A1A)   // High-contrast accessible error text on light grounds (>6:1)
 val PaperWhite = Color(0xFFF9F9FB)        // Light BG / Text
 val DeepInk = Color(0xFF14191C)           // Dark Mode BG
 val DeepInkSurface = Color(0xFF1E2529)    // Cards / bars in Dark Mode

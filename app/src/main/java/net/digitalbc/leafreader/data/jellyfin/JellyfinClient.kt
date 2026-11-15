@@ -1,12 +1,19 @@
 package net.digitalbc.leafreader.data.jellyfin
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.util.Log
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import okhttp3.Interceptor
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -16,6 +23,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.net.Proxy
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
@@ -40,13 +48,19 @@ class JellyfinClient(
     private val clientVersion: String = "0.3.7",
     private val customHttpClient: OkHttpClient? = null,
 ) {
-    private val okHttpClient: OkHttpClient = customHttpClient ?: OkHttpClient.Builder()
+    private val okHttpClient = (customHttpClient?.newBuilder() ?: OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS))
         .followRedirects(false)
         .followSslRedirects(false)
-        .addInterceptor(SafeRedirectInterceptor())
+        .build()
+
+    // Cleartext stays direct and validates the exact DNS results used for connection.
+    // HTTPS keeps its normal resolver/proxy behavior.
+    private val localHttpClient = okHttpClient.newBuilder()
+        .proxy(Proxy.NO_PROXY)
+        .dns(LocalNetworkDns(okHttpClient.dns))
         .build()
 
     suspend fun authenticate(
@@ -78,9 +92,10 @@ class JellyfinClient(
                 val userObj = json.getJSONObject("User")
                 val userId = userObj.getString("Id")
                 val userName = userObj.optString("Name", username)
-                val serverId = json.optString("ServerId", "").ifBlank {
-                    json.optJSONObject("SessionInfo")?.optString("ServerId", "") ?: "jellyfin-server"
-                }
+                val serverId = sequenceOf(json, json.optJSONObject("SessionInfo"))
+                    .mapNotNull { (it?.opt("ServerId") as? String)?.trim()?.takeIf(String::isNotEmpty) }
+                    .firstOrNull()
+                require(serverId != null && serverId != "jellyfin-server") { "Server identity is missing" }
 
                 JellyfinAuth(
                     accessToken = token,
@@ -134,6 +149,7 @@ class JellyfinClient(
         parentId: String?,
         startIndex: Int = 0,
         limit: Int = 100,
+        onProgress: ((String, JellyfinProgressSnapshot) -> Unit)? = null,
     ): JellyfinItemsResult = withContext(Dispatchers.IO) {
         val url = JellyfinEndpoints.userItems(
             baseUrl = config.baseUrl,
@@ -155,43 +171,205 @@ class JellyfinClient(
                 val itemsArray = json.optJSONArray("Items") ?: return@executeRequest JellyfinItemsResult(emptyList(), total, startIndex)
                 val items = mutableListOf<JellyfinItem>()
                 for (i in 0 until itemsArray.length()) {
-                    val obj = itemsArray.getJSONObject(i)
-                    val type = obj.optString("Type", "")
-                    val isFolder = obj.optBoolean("IsFolder", false) || type.equals("Folder", ignoreCase = true)
-                    val imageTags = obj.optJSONObject("ImageTags")
-                    val primaryTag = imageTags?.optString("Primary", null)
-
-                    val containerVal = if (obj.has("Container")) obj.getString("Container").ifBlank { null } else null
-                    val pathVal = if (obj.has("Path")) obj.getString("Path").ifBlank { null } else null
-                    val parentVal = if (obj.has("ParentId")) obj.getString("ParentId").ifBlank { null } else parentId
-                    val seriesVal = if (obj.has("SeriesName")) obj.getString("SeriesName").ifBlank { null } else null
-
-                    val userData = obj.optJSONObject("UserData")
-                    val playbackTicks = userData?.optLong("PlaybackPositionTicks", 0L) ?: 0L
-                    val played = userData?.optBoolean("Played", false) ?: false
-
-                    items.add(
-                        JellyfinItem(
-                            id = obj.getString("Id"),
-                            name = obj.optString("Name", "Untitled"),
-                            isFolder = isFolder,
-                            container = containerVal,
-                            sizeBytes = obj.optLong("Size", 0L),
-                            imageTag = primaryTag,
-                            path = pathVal,
-                            parentId = parentVal,
-                            seriesName = seriesVal,
-                            productionYear = if (obj.has("ProductionYear")) obj.getInt("ProductionYear") else null,
-                            playbackPositionTicks = playbackTicks,
-                            played = played,
-                        )
-                    )
+                    val value = itemsArray.getJSONObject(i)
+                    val item = parseItem(value, parentId)
+                    items.add(item)
+                    onProgress?.invoke(item.id, parseProgress(value))
                 }
                 JellyfinItemsResult(items = items, totalRecordCount = total, startIndex = startIndex)
             } catch (e: Exception) {
                 throw JellyfinException(JellyfinFailureKind.PARSE_ERROR, "Failed to parse library items", e)
             }
         }
+    }
+
+    /** Paginated metadata only. Unknown reading state must not become unread. */
+    suspend fun getCatalogue(
+        config: JellyfinServerConfig, auth: JellyfinAuth, query: JellyfinCatalogueQuery,
+    ): JellyfinCataloguePage = withContext(Dispatchers.IO) {
+        val request = authorizedRequestBuilder(query.url(config.baseUrl, auth.userId), auth).get().build()
+        val page = executeRequest(request) { response ->
+            if (!response.isSuccessful) mapHttpError(response.code, "Failed to load catalogue")
+            try {
+                val json = JSONObject(response.body?.string().orEmpty())
+                val array = json.getJSONArray("Items")
+                val entries = buildList {
+                    for (i in 0 until array.length()) {
+                        val obj = array.getJSONObject(i)
+                        val data = obj.optJSONObject("UserData")
+                        add(JellyfinCatalogueEntry(parseItem(obj),
+                            obj.optString("Type", ""),
+                            if (data == null || data.isNull("Played")) null else data.getBoolean("Played"),
+                            seriesId = obj.textOrNull("SeriesId")?.takeUnless { it.replace("-", "").all { c -> c == '0' } },
+                            volumeNumber = if (obj.isNull("ParentIndexNumber")) null else obj.getInt("ParentIndexNumber"),
+                            issueNumber = if (obj.isNull("IndexNumber")) null else obj.getDouble("IndexNumber"),
+                            people = parsePeople(obj),
+                            lastPlayedDate = data?.textOrNull("LastPlayedDate"),
+                            playedPercentage = if (data == null || data.isNull("PlayedPercentage")) null else data.optDouble("PlayedPercentage").takeIf { it.isFinite() && it in 0.0..100.0 }))
+                    }
+                }
+                val total = json.getInt("TotalRecordCount")
+                val start = json.optInt("StartIndex", query.startIndex)
+                require(start == query.startIndex && total >= 0 && entries.size <= query.limit)
+                val next = start + entries.size
+                require(entries.isNotEmpty() || next >= total) { "Server returned an empty page before the end" }
+                JellyfinCataloguePage(entries, next, total, next < total)
+            } catch (error: Exception) {
+                throw JellyfinException(JellyfinFailureKind.PARSE_ERROR, "Invalid catalogue page", error)
+            }
+        }
+        val visible = JellyfinCatalogueLogic.visible(page.entries,
+            if (query.collectionId != null) JellyfinCatalogueView.ALL else query.view)
+        val scoped = if (query.collectionId == null) visible else visible.filter { it.item.isImportable }.filter { entry ->
+            val ancestors = authorizedRequestBuilder(
+                JellyfinCatalogueQuery.ancestorsUrl(config.baseUrl, auth.userId, entry.item.id), auth,
+            ).get().build()
+            executeRequest(ancestors) { response ->
+                if (!response.isSuccessful) mapHttpError(response.code, "Cannot verify collection membership")
+                try {
+                    val array = org.json.JSONArray(response.body?.string().orEmpty())
+                    (0 until array.length()).any {
+                        array.getJSONObject(it).getString("Id").equals(query.libraryId, true)
+                    }
+                } catch (error: Exception) {
+                    throw JellyfinException(JellyfinFailureKind.PARSE_ERROR, "Invalid collection ancestry", error)
+                }
+            }
+        }
+        page.copy(entries = scoped)
+    }
+
+    /** Folder fallback is admitted only after authenticated selected-library ancestry validation. */
+    suspend fun getCatalogueFolder(
+        config: JellyfinServerConfig, auth: JellyfinAuth, libraryId: String, folderId: String,
+    ): JellyfinFolderIdentity? = withContext(Dispatchers.IO) {
+        if (folderId == libraryId) return@withContext null
+        val folderRequest = authorizedRequestBuilder(
+            JellyfinEndpoints.itemDetails(config.baseUrl, auth.userId, folderId), auth).get().build()
+        val folder = executeRequest(folderRequest) { response ->
+            if (response.code in listOf(403, 404)) return@executeRequest null
+            if (!response.isSuccessful) mapHttpError(response.code, "Cannot verify catalogue folder")
+            val obj = JSONObject(response.body?.string().orEmpty())
+            if (!obj.optString("Id").equals(folderId, true) || !obj.optBoolean("IsFolder", false)) null
+            else obj.textOrNull("Name")
+        } ?: return@withContext null
+        val ancestorsRequest = authorizedRequestBuilder(
+            JellyfinCatalogueQuery.ancestorsUrl(config.baseUrl, auth.userId, folderId), auth).get().build()
+        val belongs = executeRequest(ancestorsRequest) { response ->
+            if (response.code in listOf(403, 404)) return@executeRequest false
+            if (!response.isSuccessful) mapHttpError(response.code, "Cannot verify catalogue folder scope")
+            val array = org.json.JSONArray(response.body?.string().orEmpty())
+            (0 until array.length()).any { array.getJSONObject(it).optString("Id").equals(libraryId, true) }
+        }
+        if (belongs) JellyfinFolderIdentity(folderId, folder, libraryId) else null
+    }
+
+    /** Fetches metadata only; never downloads an archive or reports reading progress. */
+    /** Missing progress remains unknown, so synchronization cannot infer a reset from defaults. */
+    suspend fun getProgress(
+        config: JellyfinServerConfig,
+        auth: JellyfinAuth,
+        itemId: String,
+    ): JellyfinProgressSnapshot = withContext(Dispatchers.IO) {
+        val request = authorizedRequestBuilder(
+            JellyfinEndpoints.itemDetails(config.baseUrl, auth.userId, itemId), auth,
+        ).get().build()
+        executeRequest(request) { response ->
+            if (!response.isSuccessful) mapHttpError(response.code, "Could not read the server position")
+            try {
+                val item = JSONObject(response.body?.string().orEmpty())
+                require(item.getString("Id").equals(itemId, ignoreCase = true)) { "Unexpected progress item" }
+                parseProgress(item)
+            } catch (error: Exception) {
+                throw JellyfinException(JellyfinFailureKind.PARSE_ERROR, "Invalid server reading position", error)
+            }
+        }
+    }
+
+    private fun parseProgress(item: JSONObject): JellyfinProgressSnapshot {
+        val data = item.optJSONObject("UserData")
+        val ticks = when (val value = data?.opt("PlaybackPositionTicks")) {
+            is Long -> value
+            is Int -> value.toLong()
+            else -> null
+        }?.takeIf { it >= 0 }
+        val percentage = (data?.opt("PlayedPercentage") as? Number)?.toDouble()
+            ?.takeIf { it.isFinite() && it in 0.0..100.0 }
+        return JellyfinProgressSnapshot(ticks, data?.opt("Played") as? Boolean, percentage, data?.textOrNull("LastPlayedDate"))
+    }
+
+    suspend fun getItemDetails(
+        config: JellyfinServerConfig,
+        auth: JellyfinAuth,
+        itemId: String,
+    ): JellyfinItemDetails = withContext(Dispatchers.IO) {
+        val request = authorizedRequestBuilder(
+            JellyfinEndpoints.itemDetails(config.baseUrl, auth.userId, itemId), auth,
+        ).get().build()
+        executeRequest(request) { response ->
+            if (!response.isSuccessful) mapHttpError(response.code, "Failed to load comic details")
+            try {
+                val obj = JSONObject(response.body?.string().orEmpty())
+                val item = parseItem(obj)
+                require(item.id.equals(itemId, ignoreCase = true)) { "Unexpected detail item" }
+                val genres = obj.optJSONArray("Genres")
+                val userData = obj.optJSONObject("UserData")
+                JellyfinItemDetails(
+                    identity = JellyfinItemIdentity(auth.serverId, auth.userId, item.id),
+                    item = item,
+                    overview = obj.textOrNull("Overview"),
+                    people = parsePeople(obj),
+                    genres = buildList {
+                        for (i in 0 until (genres?.length() ?: 0)) {
+                            if (genres?.isNull(i) == false) {
+                                genres.optString(i).trim().takeIf { it.isNotEmpty() }?.let { add(it) }
+                            }
+                        }
+                    },
+                    indexNumber = if (obj.isNull("IndexNumber")) null else obj.getInt("IndexNumber"),
+                    parentIndexNumber = if (obj.isNull("ParentIndexNumber")) null else obj.getInt("ParentIndexNumber"),
+                    etag = obj.textOrNull("Etag"),
+                    playedPercentage = userData?.optDouble("PlayedPercentage")
+                        ?.takeIf { it.isFinite() && it in 0.0..100.0 },
+                    lastPlayedDate = userData?.textOrNull("LastPlayedDate"),
+                )
+            } catch (e: Exception) {
+                throw JellyfinException(JellyfinFailureKind.PARSE_ERROR, "Failed to parse comic details", e)
+            }
+        }
+    }
+
+    private fun parsePeople(obj: JSONObject): List<JellyfinPerson> = buildList {
+        val people = obj.optJSONArray("People") ?: return@buildList
+        for (i in 0 until people.length()) {
+            val person = people.optJSONObject(i) ?: continue
+            val name = person.textOrNull("Name") ?: continue
+            add(JellyfinPerson(name, person.textOrNull("Type"), person.textOrNull("Role"), person.textOrNull("Id")))
+        }
+    }
+
+    private fun JSONObject.textOrNull(key: String): String? =
+        if (isNull(key)) null else optString(key).trim().takeIf { it.isNotEmpty() }
+
+    private fun parseItem(obj: JSONObject, parentId: String? = null): JellyfinItem {
+        val source = obj.optJSONArray("MediaSources")?.optJSONObject(0)
+        val userData = obj.optJSONObject("UserData")
+        return JellyfinItem(
+            id = obj.getString("Id"),
+            name = obj.textOrNull("Name") ?: "Untitled",
+            isFolder = obj.optBoolean("IsFolder", false) ||
+                obj.optString("Type").equals("Folder", ignoreCase = true),
+            container = obj.textOrNull("Container") ?: source?.textOrNull("Container"),
+            sizeBytes = obj.optLong("Size", 0L).takeIf { it > 0L }
+                ?: (source?.optLong("Size", 0L) ?: 0L).coerceAtLeast(0L),
+            imageTag = obj.optJSONObject("ImageTags")?.textOrNull("Primary"),
+            path = obj.textOrNull("Path") ?: source?.textOrNull("Path"),
+            parentId = obj.textOrNull("ParentId") ?: parentId,
+            seriesName = obj.textOrNull("SeriesName"),
+            productionYear = if (obj.isNull("ProductionYear")) null else obj.getInt("ProductionYear"),
+            playbackPositionTicks = userData?.optLong("PlaybackPositionTicks", 0L) ?: 0L,
+            played = userData?.optBoolean("Played", false) ?: false,
+        )
     }
 
     suspend fun downloadToFile(
@@ -208,6 +386,10 @@ class JellyfinClient(
         val request = authorizedRequestBuilder(url, auth).get().build()
 
         val call = okHttpClient.newCall(request)
+        // Also interrupt a blocked headers/body read, not just the next copy-loop iteration.
+        val cancellation = launch(start = CoroutineStart.UNDISPATCHED) {
+            try { awaitCancellation() } finally { call.cancel() }
+        }
         try {
             val response = call.execute()
             response.use { res ->
@@ -277,6 +459,8 @@ class JellyfinClient(
             if (t is CancellationException) throw t
             if (t is JellyfinException) throw t
             throw mapNetworkException(t)
+        } finally {
+            cancellation.cancel()
         }
     }
 
@@ -296,66 +480,42 @@ class JellyfinClient(
         val request = authorizedRequestBuilder(url, auth).get().build()
 
         try {
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-                val bytes = response.body?.bytes() ?: return@withContext null
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            net.digitalbc.leafreader.data.library.CoverPerformanceTrace.event("network")
+            executeRequest(request) { response ->
+                if (!response.isSuccessful) return@executeRequest null
+                val bytes = response.body?.bytes() ?: return@executeRequest null
+                net.digitalbc.leafreader.data.library.CoverPerformanceTrace.decode {
+                    net.digitalbc.leafreader.data.library.CoverImageDecoder.decode(bytes, maxWidth)
+                }.also { net.digitalbc.leafreader.data.library.CoverPerformanceTrace.decoded(maxWidth, it) }
             }
-        } catch (e: Exception) {
-            Log.d(TAG, "Failed to load cover for item $itemId: ${e.message}")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            net.digitalbc.leafreader.data.library.CoverPerformanceTrace.event("failed")
             null
         }
     }
 
-    suspend fun reportProgress(
+    /** Update the complete intent together: session/played endpoints can reset each other. */
+    suspend fun writeProgressState(
         config: JellyfinServerConfig,
         auth: JellyfinAuth,
         itemId: String,
         pageIndex: Int,
-    ): Unit = withContext(Dispatchers.IO) {
-        val url = JellyfinEndpoints.sessionProgress(config.baseUrl)
-        val jsonPayload = JSONObject().apply {
-            put("ItemId", itemId)
-            put("PositionTicks", JellyfinProgress.pageToTicks(pageIndex))
-            put("CanSeek", true)
-            put("IsPaused", false)
-            put("PlayMethod", "DirectPlay")
-        }.toString()
-
-        val request = authorizedRequestBuilder(url, auth)
-            .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .build()
-
-        executeRequest(request) { response ->
-            if (!response.isSuccessful) {
-                mapHttpError(response.code, "Failed to report progress to Jellyfin")
-            }
-        }
-    }
-
-    suspend fun markPlayedStatus(
-        config: JellyfinServerConfig,
-        auth: JellyfinAuth,
-        itemId: String,
         played: Boolean,
+        updatedAt: Long,
     ): Unit = withContext(Dispatchers.IO) {
-        val url = if (played) {
-            JellyfinEndpoints.markPlayed(config.baseUrl, auth.userId, itemId)
-        } else {
-            JellyfinEndpoints.markUnplayed(config.baseUrl, auth.userId, itemId)
-        }
-
-        val requestBuilder = authorizedRequestBuilder(url, auth)
-        val request = if (played) {
-            requestBuilder.post(ByteArray(0).toRequestBody(null)).build()
-        } else {
-            requestBuilder.delete().build()
-        }
-
+        val url = JellyfinEndpoints.itemUserData(config.baseUrl, auth.userId, itemId)
+        val payload = JSONObject().apply {
+            put("PlaybackPositionTicks", JellyfinProgress.pageToTicks(pageIndex))
+            put("Played", played)
+            if (pageIndex > 0 || played) put("LastPlayedDate", java.time.Instant.ofEpochMilli(updatedAt).toString())
+        }.toString()
+        val request = authorizedRequestBuilder(url, auth)
+            .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
         executeRequest(request) { response ->
-            if (!response.isSuccessful) {
-                mapHttpError(response.code, "Failed to update played status on Jellyfin")
-            }
+            if (!response.isSuccessful) mapHttpError(response.code, "Failed to update reading state on Jellyfin")
         }
     }
 
@@ -371,12 +531,60 @@ class JellyfinClient(
             .header("X-Emby-Authorization", header)
     }
 
-    private inline fun <T> executeRequest(request: Request, block: (Response) -> T): T {
-        return try {
-            okHttpClient.newCall(request).execute().use(block)
-        } catch (t: Throwable) {
-            if (t is JellyfinException) throw t
-            throw mapNetworkException(t)
+    private sealed interface Hop<out T> {
+        data class Done<T>(val value: T) : Hop<T>
+        data class Redirect(val request: Request) : Hop<Nothing>
+    }
+
+    private suspend fun <T> executeRequest(request: Request, block: (Response) -> T): T {
+        var next = request
+        var redirectCount = 0
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val attempted = next
+            when (val hop = executeHop(attempted) { response ->
+                val redirect = if (response.isRedirect) redirectedRequest(attempted, response, redirectCount) else null
+                if (redirect != null) Hop.Redirect(redirect) else Hop.Done(block(response))
+            }) {
+                is Hop.Done -> return hop.value
+                is Hop.Redirect -> {
+                    next = hop.request
+                    redirectCount++
+                }
+            }
+        }
+    }
+
+    private suspend fun <T> executeHop(request: Request, block: (Response) -> T): T {
+        val transport = if (request.url.isHttps) okHttpClient else {
+            if (!JellyfinServerConfig.isLocalNetworkHost(request.url.host)) {
+                throw JellyfinException(JellyfinFailureKind.INVALID_CONFIGURATION,
+                    "Unencrypted HTTP requires a local Jellyfin destination")
+            }
+            localHttpClient
+        }
+        return suspendCancellableCoroutine { continuation ->
+            val call = transport.newCall(request)
+            continuation.invokeOnCancellation {
+                call.cancel()
+            }
+            call.enqueue(object : Callback {
+                override fun onResponse(call: Call, response: Response) {
+                    try {
+                        val result = response.use(block)
+                        continuation.resume(result)
+                    } catch (t: Throwable) {
+                        val mapped = if (t is JellyfinException) t else mapNetworkException(t)
+                        continuation.resumeWithException(mapped)
+                    }
+                }
+
+                override fun onFailure(call: Call, e: IOException) {
+                    if (continuation.isCancelled) return
+                    val mapped = if (e is JellyfinException) e else mapNetworkException(e)
+                    continuation.resumeWithException(mapped)
+                }
+            })
         }
     }
 
@@ -392,6 +600,7 @@ class JellyfinClient(
     }
 
     private fun mapNetworkException(t: Throwable): JellyfinException {
+        if (t is JellyfinException) return t
         val kind = when (t) {
             is SocketTimeoutException -> JellyfinFailureKind.TIMEOUT
             is UnknownHostException -> JellyfinFailureKind.UNAVAILABLE
@@ -401,85 +610,33 @@ class JellyfinClient(
         return JellyfinException(kind, t.message ?: "Network operation failed", t)
     }
 
-    private class SafeRedirectInterceptor : Interceptor {
-        override fun intercept(chain: Interceptor.Chain): Response {
-            var request = chain.request()
-            var response = chain.proceed(request)
-            var redirectCount = 0
-
-            while (response.isRedirect) {
-                if (redirectCount >= MAX_REDIRECTS) {
-                    response.close()
-                    throw JellyfinException(JellyfinFailureKind.INVALID_CONFIGURATION, "Too many redirects")
-                }
-                redirectCount++
-
-                // Never follow redirects on POST requests (prevent credential or payload leaking)
-                if (request.method.equals("POST", ignoreCase = true)) {
-                    response.close()
-                    throw JellyfinException(
-                        JellyfinFailureKind.AUTHENTICATION,
-                        "Redirect on POST request rejected for credential security (HTTP ${response.code})"
-                    )
-                }
-
-                val location = response.header("Location")
-                if (location.isNullOrBlank()) {
-                    return response
-                }
-
-                val targetUrl = request.url.resolve(location)
-                if (targetUrl == null) {
-                    response.close()
-                    throw JellyfinException(JellyfinFailureKind.INVALID_CONFIGURATION, "Invalid redirect Location: $location")
-                }
-
-                // Block HTTPS -> HTTP downgrade
-                if (request.url.isHttps && !targetUrl.isHttps) {
-                    response.close()
-                    throw JellyfinException(
-                        JellyfinFailureKind.INVALID_CONFIGURATION,
-                        "Insecure HTTPS-to-HTTP redirect downgrade rejected"
-                    )
-                }
-
-                val isSameOrigin = request.url.scheme.equals(targetUrl.scheme, ignoreCase = true) &&
-                        request.url.host.equals(targetUrl.host, ignoreCase = true) &&
-                        request.url.port == targetUrl.port
-
-                val nextRequestBuilder = request.newBuilder().url(targetUrl)
-
-                // If cross-origin, strip sensitive headers
-                if (!isSameOrigin) {
-                    nextRequestBuilder
-                        .removeHeader("Authorization")
-                        .removeHeader("X-Emby-Authorization")
-                        .removeHeader("X-MediaBrowser-Token")
-                }
-
-                // If the redirect target is unencrypted HTTP, ensure it is restricted to local network
-                if (!targetUrl.isHttps && !JellyfinServerConfig.isLocalNetworkHost(targetUrl.host)) {
-                    response.close()
-                    throw JellyfinException(
-                        JellyfinFailureKind.INVALID_CONFIGURATION,
-                        "Redirect to unencrypted HTTP on remote host rejected: ${targetUrl.host}"
-                    )
-                }
-
-                response.close()
-                request = nextRequestBuilder.build()
-                response = chain.proceed(request)
+    private fun redirectedRequest(request: Request, response: Response, redirectCount: Int): Request? {
+        if (redirectCount >= 3) {
+            throw JellyfinException(JellyfinFailureKind.INVALID_CONFIGURATION, "Too many redirects")
+        }
+        if (request.method.equals("POST", ignoreCase = true)) {
+            throw JellyfinException(JellyfinFailureKind.AUTHENTICATION,
+                "Redirect on POST request rejected for credential security (HTTP "+response.code+")")
+        }
+        val location = response.header("Location")?.takeIf { it.isNotBlank() } ?: return null
+        val targetUrl = request.url.resolve(location)
+            ?: throw JellyfinException(JellyfinFailureKind.INVALID_CONFIGURATION, "Invalid redirect Location")
+        if (request.url.isHttps && !targetUrl.isHttps) {
+            throw JellyfinException(JellyfinFailureKind.INVALID_CONFIGURATION,
+                "Insecure HTTPS-to-HTTP redirect downgrade rejected")
+        }
+        if (!targetUrl.isHttps && !JellyfinServerConfig.isLocalNetworkHost(targetUrl.host)) {
+            throw JellyfinException(JellyfinFailureKind.INVALID_CONFIGURATION,
+                "Redirect to unencrypted HTTP on remote host rejected")
+        }
+        val sameOrigin = request.url.scheme == targetUrl.scheme &&
+            request.url.host == targetUrl.host && request.url.port == targetUrl.port
+        return request.newBuilder().url(targetUrl).apply {
+            if (!sameOrigin) {
+                removeHeader("Authorization")
+                removeHeader("X-Emby-Authorization")
+                removeHeader("X-MediaBrowser-Token")
             }
-
-            return response
-        }
-
-        companion object {
-            private const val MAX_REDIRECTS = 3
-        }
-    }
-
-    companion object {
-        private const val TAG = "JellyfinClient"
+        }.build()
     }
 }

@@ -26,6 +26,7 @@ final class ComicImportPipeline: @unchecked Sendable {
     struct Imported: Sendable {
         let url: URL
         let metadata: ComicMetadataRecord
+        let pageCount: Int
     }
 
     private let queue = DispatchQueue(label: "leaf.comic-import", qos: .userInitiated)
@@ -41,6 +42,7 @@ final class ComicImportPipeline: @unchecked Sendable {
 
     func importFile(from source: URL, originalName: String, expectedBytes: Int64?,
                     collision: ComicImportCollision,
+                    beforePublish: @escaping @Sendable (URL) throws -> Void = { _ in },
                     phase: @escaping @Sendable (ComicImportPhase) -> Void) async throws -> Imported {
         let cancellation = OperationCancellation()
         return try await withTaskCancellationHandler {
@@ -50,7 +52,7 @@ final class ComicImportPipeline: @unchecked Sendable {
                     continuation.resume(with: Result {
                         try self.prepareAndPublish(source: source, name: originalName,
                             expectedBytes: expectedBytes, collision: collision,
-                            cancellation: cancellation, phase: phase)
+                            cancellation: cancellation, beforePublish: beforePublish, phase: phase)
                     })
                 }
             }
@@ -59,6 +61,7 @@ final class ComicImportPipeline: @unchecked Sendable {
 
     private func prepareAndPublish(source: URL, name: String, expectedBytes: Int64?,
                                    collision: ComicImportCollision, cancellation: OperationCancellation,
+                                   beforePublish: @Sendable (URL) throws -> Void,
                                    phase: @Sendable (ComicImportPhase) -> Void) throws -> Imported {
         try cancellation.check()
         guard !name.isEmpty, name != ".", name != "..", !name.hasPrefix("."),
@@ -119,7 +122,11 @@ final class ComicImportPipeline: @unchecked Sendable {
         let namedPrepared = staging.appendingPathComponent(destination.lastPathComponent)
         if namedPrepared != prepared { try fm.moveItem(at: prepared, to: namedPrepared) }
         let metadata = ComicMetadataStore.parseDefault(for: namedPrepared)
+        let pageCount = try CbzArchive(url: namedPrepared).pageCount
         phase(.publishing)
+        try cancellation.check()
+        // Journal the collision-resolved filename before the atomic commit.
+        try beforePublish(destination)
         try cancellation.check()
         // POSIX rename atomically replaces a file on the same filesystem. A failed rename
         // leaves the existing comic untouched. Never unlink the destination beforehand.
@@ -127,7 +134,7 @@ final class ComicImportPipeline: @unchecked Sendable {
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
         // Publication is the commit point: callers must finish metadata even if cancelled now.
-        return Imported(url: destination, metadata: metadata)
+        return Imported(url: destination, metadata: metadata, pageCount: pageCount)
     }
 
     private static func copy(_ source: URL, to destination: URL, cancellation: OperationCancellation) throws {

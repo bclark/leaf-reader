@@ -24,6 +24,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import kotlin.math.roundToInt
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -39,6 +42,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +56,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.booleanResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import net.digitalbc.leafreader.R
@@ -115,10 +121,16 @@ fun MenuScreen(
     onSetLandscapeSpread: (Boolean) -> Unit = {},
     settings: AppSettings,
     repository: LibraryRepository? = null,
+    openJellyfinSetup: Boolean = false,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val menuScroll = rememberScrollState()
+    var jellyfinOffset by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(openJellyfinSetup, jellyfinOffset) {
+        if (openJellyfinSetup) jellyfinOffset?.let { menuScroll.scrollTo(it) }
+    }
     var smbHost by remember { mutableStateOf(settings.smbHost) }
     var smbShare by remember { mutableStateOf(settings.smbShare) }
     var smbUsername by remember { mutableStateOf(settings.smbUsername) }
@@ -277,7 +289,7 @@ fun MenuScreen(
             Column(
                 Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(menuScroll)
                     .navigationBarsPadding()
                     .padding(horizontal = 24.dp)
                     .padding(top = 16.dp, bottom = 28.dp),
@@ -536,6 +548,28 @@ fun MenuScreen(
 
             Spacer(Modifier.size(32.dp))
 
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).heightIn(min = 48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween) {
+                var rightToLeft by remember { mutableStateOf(settings.defaultRightToLeft) }
+                val directionLabel = stringResource(R.string.library_default_rtl)
+                Text(directionLabel, modifier = Modifier.weight(1f),
+                    fontFamily = Archivo, color = MaterialTheme.colorScheme.onSurface)
+                Switch(checked = rightToLeft,
+                    modifier = Modifier.semantics { contentDescription = directionLabel },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Ink,
+                        checkedTrackColor = MaterialTheme.colorScheme.tertiary,
+                        checkedBorderColor = MaterialTheme.colorScheme.tertiary,
+                        uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        uncheckedTrackColor = Ink,
+                        uncheckedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ), onCheckedChange = {
+                    settings.defaultRightToLeft = it
+                    rightToLeft = it
+                })
+            }
+
             // ---- SMB Drive -----------------------------------------------------------
             SectionLabel("SMB DRIVE")
             Spacer(Modifier.size(10.dp))
@@ -638,7 +672,9 @@ fun MenuScreen(
             Spacer(Modifier.size(32.dp))
 
             // ---- Jellyfin Server -----------------------------------------------------
-            SectionLabel(stringResource(R.string.jellyfin_server_section))
+            androidx.compose.foundation.layout.Box(Modifier.onGloballyPositioned {
+                jellyfinOffset = it.positionInParent().y.roundToInt()
+            }) { SectionLabel(stringResource(R.string.jellyfin_server_section)) }
             Spacer(Modifier.size(10.dp))
             Column(
                 Modifier
@@ -912,7 +948,7 @@ fun MenuScreen(
             )
             Spacer(Modifier.size(14.dp))
             Text(
-                "Leaf is an offline comic reader with on-device ML panel detection, interactive 3D page curl, network SMB drive support, and multi-format archives.",
+                "Leaf is an offline comic reader with whole-page reading, interactive 3D page curl, optional SMB and Jellyfin sources, and multi-format support.",
                 fontFamily = Archivo,
                 fontWeight = FontWeight.Medium,
                 fontSize = 13.sp,
@@ -946,8 +982,34 @@ fun MenuScreen(
                 modifier = Modifier.clickable(onClick = openUpstream).padding(top = 2.dp),
             )
 
+            Spacer(Modifier.size(14.dp))
+            Text(
+                "Screenshot comics: Pepper&Carrot by David Revoy, licensed under CC BY 4.0. Comics are not included with Leaf.",
+                fontFamily = Archivo,
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(
+                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.peppercarrot.com/"))) },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text("Read Pepper&Carrot", fontFamily = Archivo)
+            }
+            TextButton(
+                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.davidrevoy.com/"))) },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text("David Revoy’s website", fontFamily = Archivo)
+            }
+            TextButton(
+                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://creativecommons.org/licenses/by/4.0/"))) },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text("CC BY 4.0 license", fontFamily = Archivo)
+            }
+
             Spacer(Modifier.size(18.dp))
-            LinkRow("Privacy policy — Leaf collects no data.") {
+            LinkRow(stringResource(R.string.privacy_policy)) {
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_URL)))
             }
             Spacer(Modifier.size(8.dp))
@@ -1056,10 +1118,18 @@ fun MenuScreen(
     }
 
     if (showLicensesDialog) {
-        val licensesText = remember {
-            runCatching {
-                context.assets.open("THIRD_PARTY_NOTICES.md").bufferedReader().use { it.readText() }
-            }.getOrDefault("Failed to load third-party notices.")
+        val loadingNotices = stringResource(R.string.loading)
+        val failedNotices = stringResource(R.string.notices_load_failed)
+        val licensesText by androidx.compose.runtime.produceState(loadingNotices, context, failedNotices) {
+            value = withContext(Dispatchers.IO) {
+                runCatching {
+                    val files = listOf("THIRD_PARTY_NOTICES.md") +
+                        context.assets.list("THIRD_PARTY_LICENSES").orEmpty().sorted().map { "THIRD_PARTY_LICENSES/$it" }
+                    files.joinToString("\n\n") { path ->
+                        context.assets.open(path).bufferedReader().use { it.readText() }
+                    }
+                }.getOrDefault(failedNotices)
+            }
         }
         AlertDialog(
             onDismissRequest = { showLicensesDialog = false },
@@ -1182,9 +1252,12 @@ fun MenuScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        text = "• ${preview.totalComicsInBackup} comics in backup (${preview.matchingComicsCount} match existing library)\n" +
+                        text = "• ${preview.totalComicsInBackup} comics in backup (${preview.matchingComicsCount} safely match existing library)\n" +
                                 "• ${preview.readingListsCount} reading lists\n" +
-                                "• App settings: ${if (preview.hasSettings) "Included" else "None"}",
+                                "• App settings: ${if (preview.hasSettings) "Included" else "None"}\n" +
+                                "• Skipping ${preview.totalComicsInBackup - preview.matchingComicsCount} comics and " +
+                                "${preview.skippedReadingListItemsCount} list items with missing or ambiguous matches. " +
+                                "Their local progress and list membership will be kept.",
                         fontFamily = Archivo,
                         fontSize = 13.sp,
                         lineHeight = 19.sp,

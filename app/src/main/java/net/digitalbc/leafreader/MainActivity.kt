@@ -1,6 +1,8 @@
 package net.digitalbc.leafreader
 
 import android.os.Bundle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -21,7 +23,28 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        val app = application as ComicReaderApp
+        finishStartup(application as ComicReaderApp)
+    }
+
+    private fun finishStartup(app: ComicReaderApp) {
+        lifecycleScope.launch {
+            val recovery = app.libraryRepository.recoverPendingBackupPreferences()
+            if (recovery.isFailure) {
+                android.app.AlertDialog.Builder(this@MainActivity)
+                    .setTitle("Finish restoring Leaf")
+                    .setMessage("Leaf couldn't finish loading your saved preferences. Retry before opening your library.")
+                    .setPositiveButton("Retry") { _, _ -> finishStartup(app) }
+                    .setNegativeButton("Close") { _, _ -> finish() }
+                    .setCancelable(false)
+                    .show()
+                return@launch
+            }
+            app.refreshRestoredPreferences()
+            showLibrary(app)
+        }
+    }
+
+    private fun showLibrary(app: ComicReaderApp) {
         LauncherIcons.apply(this, app.settings.launcherIcon)
         setContent {
             val amoled by app.amoledTheme.collectAsState()

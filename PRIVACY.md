@@ -70,3 +70,37 @@ Deleting the app removes its local app data, but iOS Keychain items may survive 
 We will publish updates to this policy with a revised date when Leaf's practices change.
 
 Privacy contact: Bryan Clark / DigitalBC — bclark@digitalbc.net.
+
+---
+
+## Development candidate disclosures
+
+The following sections record local development candidates pending final review and separately authorized publication.
+
+### iOS Jellyfin feature candidate
+
+The iOS Jellyfin feature adds optional connections to a server you choose. Sign-in sends your username and password to that server; Leaf retains the resulting access token in the device-only, non-synchronizing Keychain, not the password. Browsing, cover requests and downloads send the token and a random installation identifier to the configured server. In the development candidate, connected startup and the main library request catalogue metadata and visible covers from that server; the explicit Jellyfin browser remains available. Browsing does not download comic archives or flush pending progress writes. Your server may keep its own access logs.
+
+HTTPS uses normal certificate validation. Local HTTP requires an explicit choice and sends credentials and content without encryption. Disconnect removes the saved token and stops the session; downloaded comics stay in your local library. Tokens are excluded from Leaf exports and portable backups. Local server/item identifiers are stored separately to associate downloaded files with their source.
+
+In the current development candidate, choosing **Sync reading position** on a downloaded comic explicitly reads and updates that comic’s page position and read/unread status on your configured Jellyfin account. A conflict preserves both positions until you choose one; you can keep both for now. Sync does not send the comic file, local library lists, ratings or favorites, and does not run in the background or while reading offline. Failed or unconfirmed updates remain pending for a later explicit retry. Downloaded comics remain readable offline. This candidate is separate from previously published builds; this implementation work has not uploaded or published a release or this policy.
+
+The iOS development candidate caches lightweight catalogue metadata privately, scoped to the server and account, separately from complete downloaded comics. Remote Leaf list membership can be saved before downloading; portable backups can include server/account/item identifiers, but exclude tokens and server filesystem paths. Read downloads a complete retained copy before opening it. An unreachable server switches the library to Downloaded with an explanation and retry; offline reading remains available. No automatic eviction or discovery is added.
+
+In the iOS development candidate, foreground catalogue refresh and search query metadata already indexed by the configured Jellyfin server. Leaf pages through lightweight metadata while the library is open and may validate folder ancestry for grouping. Refresh does not trigger a server scan or download archives. Cached metadata can include previously loaded collections and historical item/folder identities to preserve downloaded and list context. Removing a retained copy keeps unsent local reading intent; it does not send a server update.
+
+The iOS development candidate also caches previously loaded descriptions and structured creator credits. Selecting a creator requests matching comics within the selected Jellyfin library using a person identifier or credited name. Saved detail and creator-result metadata is scoped to the account and server, excludes server filesystem paths and credentials, and can be shown offline with stale or incomplete coverage identified. This lookup does not change the server library or reading progress.
+
+### Android Jellyfin development candidate — 13 November 2026
+
+In connected Android development builds, Leaf opens the configured Jellyfin comic catalogue when starting a new app session. Library metadata and visible covers are requested from that server using the saved authentication token. The startup catalogue request does not download comic archives, change saved reading positions or flush pending progress updates. Offline remains available for local reading when the server is unavailable, and local-only startup makes no Jellyfin requests.
+
+Connected All, Series and Lists views, with an independent Unread only filter, request paginated catalogue metadata, search results, covers and, when opening collections, book ancestry from the configured server. These catalogue requests do not reconcile saved positions or flush pending progress updates. Choosing Read for a remote-only comic downloads and validates the complete archive before opening it; you can cancel. Offline shows validated readable copies already on the device across import sources. Read-triggered copies follow the existing retained-import behavior; no automatic eviction or server collection edits are added.
+
+Android retains its existing user-configured Jellyfin reading-progress queue and browser/import behavior; reading changes and queued retries can communicate with the configured server when those features are used. The new catalogue landing screen does not add a background sync service, automatic cache eviction, telemetry or requests to a developer-operated server. This development wording does not establish a published Android release or a hosted-policy update.
+
+Android may retain lightweight catalogue and list metadata in the app’s private database, separately from downloaded comic files. While the library is open, Leaf incrementally indexes metadata from the configured server, validates folder ancestry for Series grouping, and refreshes on request or a throttled return to the foreground. Refresh reads Jellyfin’s existing index; it does not trigger a server scan or download comic archives. Cached metadata supports offline browsing and search, with incomplete coverage labelled. Failed or partial refreshes preserve cached entries; a complete successful scoped refresh can remove stale catalogue metadata without deleting retained comics, list membership or reading history. Saved catalogue pages are scoped to the configured server and account and can be shown during connection failures; signing in as another account does not expose the previous account’s remote metadata. Adding a remote comic to a Leaf list does not download it. User-initiated portable backups can include these list references, titles and server/account/item identifiers, but not authentication tokens or server filesystem paths. Removing a downloaded copy preserves its Leaf list membership.
+
+Android also caches previously loaded descriptions and structured creator credits. Selecting a creator requests matching comics within the selected library using a person identifier or credited name. These account/server-scoped metadata requests do not change the server library or send reading progress. Saved metadata can be shown with stale or incomplete coverage identified. The Google Play flavor omits external tip links; the F-Droid flavor can open optional Ko-fi support externally.
+
+The Android Library now offers All, Series, Lists and Offline, with one Unread only filter that carries across views. Offline availability requires a validated complete local copy. Cached metadata, cover images and incomplete transfers do not qualify. This development wording awaits review with the selected final release scope and separately authorized hosted-policy/Console updates.

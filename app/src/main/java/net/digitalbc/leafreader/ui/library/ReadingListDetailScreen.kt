@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -63,6 +64,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -91,9 +93,24 @@ fun ReadingListDetailScreen(
     viewModel: LibraryViewModel,
     onOpenComic: (Long) -> Unit,
     onBack: () -> Unit,
+    offlineDownloads: Boolean = false,
 ) {
     val readingList by viewModel.observeReadingList(listId).collectAsStateWithLifecycle(initialValue = null)
-    val listComics by viewModel.observeComicsForList(listId).collectAsStateWithLifecycle(initialValue = emptyList())
+    val memberFlow = remember(listId, viewModel.jellyfinBrowsePositionKey(null)) { viewModel.observeListMembers(listId) }
+    val allMembers by memberFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val requestedDownloads by viewModel.downloadedOnly.collectAsStateWithLifecycle()
+    val downloadedOnly = requestedDownloads || offlineDownloads
+    val readable by viewModel.readableComics.collectAsStateWithLifecycle()
+    val unreadOnly by viewModel.unreadOnly.collectAsStateWithLifecycle()
+    val scopedMembers = if (downloadedOnly) allMembers.filter { member ->
+        readable.any { it.id == member.comic?.id }
+    } else allMembers
+    val members = if (unreadOnly) scopedMembers.filter {
+        it.comic?.let { comic -> comic.isUnread } ?: (it.remote?.played == false)
+    } else scopedMembers
+    val listComics = scopedMembers.mapNotNull { it.comic }
+    val detail by viewModel.jellyfinDetail.collectAsStateWithLifecycle()
+    var selectedMember by remember { mutableStateOf<LibraryViewModel.ListMember?>(null) }
     val allComics by viewModel.comics.collectAsStateWithLifecycle()
     val libraryColumns by viewModel.libraryColumns.collectAsStateWithLifecycle()
 
@@ -108,8 +125,8 @@ fun ReadingListDetailScreen(
     }
     val actualColumns = libraryColumns.coerceIn(2, availableColumns.last())
 
-    val allCompleted = listComics.isNotEmpty() && listComics.all { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-    val nextUnread = listComics.firstOrNull { it.pageCount > 0 && it.lastPage < it.pageCount - 1 }
+    val allCompleted = scopedMembers.isNotEmpty() && scopedMembers.size == listComics.size && listComics.all { it.isCompleted }
+    val nextUnread = listComics.firstOrNull { it.pageCount > 0 && !it.isCompleted }
         ?: listComics.firstOrNull()
 
     val continueButtonText = when {
@@ -128,6 +145,31 @@ fun ReadingListDetailScreen(
 
     var selectedComicForOptions by remember { mutableStateOf<ComicEntity?>(null) }
     var comicToRemove by remember { mutableStateOf<ComicEntity?>(null) }
+
+    if (detail != null) {
+        JellyfinBrowserScreen(viewModel, onBack = { viewModel.closeJellyfinDetail() },
+            onOpenComic = onOpenComic, onOpenLocal = { viewModel.closeJellyfinDetail() }, onOpenSettings = {})
+        return
+    }
+    selectedMember?.let { member ->
+        AlertDialog(onDismissRequest = { selectedMember = null },
+            title = { Text(member.comic?.title ?: member.remote?.item?.name ?: "Unavailable comic") },
+            text = {
+                Column {
+                    Text(if (member.comic != null) "Downloaded copy" else if (member.remote != null)
+                        "Jellyfin · connection needed to read" else "Unavailable for the current account. Membership is preserved.")
+                    TextButton(onClick = {
+                        viewModel.editListMember(listId, member.reference.referenceKey, -1); selectedMember = null
+                    }) { Text("Move earlier") }
+                    TextButton(onClick = {
+                        viewModel.editListMember(listId, member.reference.referenceKey, 1); selectedMember = null
+                    }) { Text("Move later") }
+                    TextButton(onClick = {
+                        viewModel.editListMember(listId, member.reference.referenceKey); selectedMember = null
+                    }) { Text("Remove from Leaf list") }
+                }
+            }, confirmButton = { TextButton(onClick = { selectedMember = null }) { Text("Close") } })
+    }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // App Bar
@@ -225,6 +267,15 @@ fun ReadingListDetailScreen(
                 horizontalArrangement = Arrangement.spacedBy(if (actualColumns >= 4) 12.dp else 16.dp),
                 verticalArrangement = Arrangement.spacedBy(if (actualColumns >= 4) 14.dp else 18.dp),
             ) {
+                item(span = { GridItemSpan(actualColumns) }) {
+                    Column {
+                        androidx.compose.material3.FilterChip(selected = downloadedOnly, enabled = !offlineDownloads,
+                            onClick = { viewModel.downloadedOnly.value = !downloadedOnly },
+                            label = { Text("Downloaded only") }, modifier = Modifier.heightIn(min = 48.dp))
+                        UnreadOnlyControl(unreadOnly, { viewModel.unreadOnly.value = it })
+                        Text("${allMembers.size} list members · ${members.size} shown")
+                    }
+                }
                 // Hero Card Header (Compact, Uncluttered Status Row)
                 item(span = { GridItemSpan(actualColumns) }) {
                     Card(
@@ -248,11 +299,13 @@ fun ReadingListDetailScreen(
                                     .padding(end = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                val completedCount = listComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-                                val statusText = if (listComics.isEmpty()) {
-                                    "0 COMICS"
+                                val completedCount = listComics.count { it.isCompleted }
+                                val statusText = if (members.isEmpty()) {
+                                    "0 SHOWN"
+                                } else if (scopedMembers.size != listComics.size) {
+                                    "${scopedMembers.size} MEMBERS · LOCAL STATUS PARTIAL"
                                 } else {
-                                    "$completedCount OF ${listComics.size} READ"
+                                    "$completedCount OF ${scopedMembers.size} READ"
                                 }
                                 Box(
                                     modifier = Modifier
@@ -276,8 +329,8 @@ fun ReadingListDetailScreen(
                                 }
 
                                 if (listComics.isNotEmpty()) {
-                                    val completedCount = listComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-                                    val progressFraction = completedCount.toFloat() / listComics.size
+                                    val completedCount = listComics.count { it.isCompleted }
+                                    val progressFraction = completedCount.toFloat() / scopedMembers.size.coerceAtLeast(1)
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -295,8 +348,8 @@ fun ReadingListDetailScreen(
                                 }
                             }
 
-                            // Right Row: Mark Read/Unread Book Icon + Compact Start/Continue Pill
-                            if (listComics.isNotEmpty()) {
+                            // Bulk actions apply only when every visible member is a local copy.
+                            if (listComics.isNotEmpty() && scopedMembers.size == listComics.size && !downloadedOnly) {
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -367,7 +420,7 @@ fun ReadingListDetailScreen(
                 }
 
                 // Empty State or Comics Grid
-                if (listComics.isEmpty()) {
+                if (members.isEmpty()) {
                     item(span = { GridItemSpan(actualColumns) }) {
                         Box(
                             modifier = Modifier
@@ -377,13 +430,13 @@ fun ReadingListDetailScreen(
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text(
-                                    text = "THIS LIST IS EMPTY",
+                                    text = if (unreadOnly) "NO UNREAD MEMBERS" else if (downloadedOnly) "NO DOWNLOADED MEMBERS" else "THIS LIST IS EMPTY",
                                     fontFamily = Anton,
                                     fontSize = 16.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                                 Text(
-                                    text = "Tap + ADD COMICS in the bottom corner to curate your reading order.",
+                                    text = if (downloadedOnly) "Turn off Downloaded only to see every member. Your list is unchanged." else "Tap + ADD COMICS in the bottom corner to curate your reading order.",
                                     fontFamily = Archivo,
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -392,156 +445,30 @@ fun ReadingListDetailScreen(
                         }
                     }
                 } else {
-                    itemsIndexed(listComics, key = { _, comic -> comic.id }) { index, comic ->
-                        val cover = rememberCover(comic.coverPath)
-                        val started = comic.lastPage > 0
-                        val progressFraction = if (comic.pageCount > 0) comic.lastPage.toFloat() / comic.pageCount else 0f
-
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .combinedClickable(
+                    itemsIndexed(members, key = { _, member -> member.reference.referenceKey }) { _, member ->
+                        Column {
+                            Text("#${member.reference.sortOrder + 1}", fontFamily = Anton,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            val comic = member.comic
+                            val remote = member.remote
+                            when {
+                                comic != null -> ComicCard(comic = comic, columns = actualColumns,
+                                    isEditMode = false, isSelected = false,
                                     onClick = { onOpenComic(comic.id) },
-                                    onLongClick = { selectedComicForOptions = comic },
-                                )
-                        ) {
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(0.7f)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .border(if (actualColumns >= 4) 2.dp else 3.dp, Color.Transparent, RoundedCornerShape(4.dp))
-                                    .comicShadow(offset = if (actualColumns >= 4) 3.dp else 5.dp, color = Color(0xB3000000))
-                            ) {
-                                if (cover != null) {
-                                    Image(
-                                        cover,
-                                        contentDescription = comic.title,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop,
-                                    )
-                                }
-
-                                // Sequence Number Badge (#1, #2, etc.)
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.TopStart)
-                                        .padding(6.dp)
-                                        .clip(RoundedCornerShape(3.dp))
-                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
-                                        .border(1.dp, Ochre, RoundedCornerShape(3.dp))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "#${index + 1}",
-                                        fontFamily = Anton,
-                                        fontSize = if (actualColumns >= 4) 9.sp else 10.5.sp,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                    )
-                                }
-
-                                // Top-Right Quick Remove Button (X)
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(6.dp)
-                                        .size(24.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
-                                        .clickable { comicToRemove = comic },
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = "Remove from reading list",
-                                        tint = ComicRose,
-                                        modifier = Modifier.size(14.dp),
-                                    )
-                                }
-
-                                // Bottom Reorder Affordances
-                                Row(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .padding(bottom = if (actualColumns >= 4) 10.dp else 12.dp, end = 6.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                ) {
-                                    if (index > 0) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(22.dp)
-                                                .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
-                                                .clickable { viewModel.moveReadingListItem(listId, comic.id, -1) },
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            Icon(
-                                                Icons.Default.ArrowUpward,
-                                                contentDescription = "Move earlier in reading order",
-                                                tint = MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.size(12.dp),
-                                            )
-                                        }
-                                    }
-                                    if (index < listComics.size - 1) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(22.dp)
-                                                .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
-                                                .clickable { viewModel.moveReadingListItem(listId, comic.id, 1) },
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            Icon(
-                                                Icons.Default.ArrowDownward,
-                                                contentDescription = "Move later in reading order",
-                                                tint = MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.size(12.dp),
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // Bottom Progress Bar
-                                Box(
-                                    Modifier
-                                        .align(Alignment.BottomCenter)
-                                        .fillMaxWidth()
-                                        .height(if (actualColumns >= 4) 5.dp else 7.dp)
-                                        .background(MaterialTheme.colorScheme.surface)
-                                ) {
-                                    Box(
-                                        Modifier
-                                            .fillMaxHeight()
-                                            .fillMaxWidth(if (started) progressFraction else 0f)
-                                            .background(Ochre)
-                                    )
+                                    onLongClick = { selectedComicForOptions = comic })
+                                remote != null -> ComicCard(remote = remote, columns = actualColumns,
+                                    remoteSubtitle = "Jellyfin · not downloaded",
+                                    onClick = { viewModel.openJellyfinDetail(remote.item) },
+                                    onLongClick = { selectedMember = member },
+                                    loadRemoteCover = { viewModel.loadJellyfinCover(it) })
+                                else -> androidx.compose.material3.OutlinedButton(
+                                    onClick = { selectedMember = member },
+                                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp)) {
+                                    Text("Unavailable comic\nMembership preserved")
                                 }
                             }
-
-                            Text(
-                                text = comic.title,
-                                fontFamily = Archivo,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = if (actualColumns >= 4) 10.sp else 12.sp,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(top = if (actualColumns >= 4) 6.dp else 9.dp),
-                            )
-
-                            Text(
-                                text = if (started) {
-                                    "${(progressFraction * 100).toInt()}% · pg ${comic.lastPage + 1}/${comic.pageCount}"
-                                } else {
-                                    "${comic.pageCount} pages"
-                                },
-                                fontFamily = Archivo,
-                                fontSize = if (actualColumns >= 4) 8.5.sp else 9.5.sp,
-                                color = if (started) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 2.dp),
-                            )
+                            TextButton(onClick = { selectedMember = member },
+                                modifier = Modifier.heightIn(min = 48.dp)) { Text("List options") }
                         }
                     }
                 }
@@ -580,7 +507,7 @@ fun ReadingListDetailScreen(
     // Long-Press Options Dialog for an Issue
     selectedComicForOptions?.let { comic ->
         val comicIndex = listComics.indexOfFirst { it.id == comic.id }
-        val isRead = comic.pageCount > 0 && comic.lastPage >= comic.pageCount - 1
+        val isRead = comic.isCompleted
         AlertDialog(
             onDismissRequest = { selectedComicForOptions = null },
             title = {

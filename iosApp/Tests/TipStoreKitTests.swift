@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import StoreKit
 import StoreKitTest
 import Testing
@@ -22,52 +23,61 @@ struct TipStoreKitTests {
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = TipStore(defaults: defaults)
-        store.start()
-        await store.loadProducts()
-        #expect(store.products.map(\.id) == TipCatalog.productIDs)
-        #expect(store.products.allSatisfy { !$0.price.isEmpty && $0.isConsumable })
+        try await withDrainedStore(store) {
+            store.start()
+            await store.loadProducts()
+            #expect(store.products.map(\.id) == TipCatalog.productIDs)
+            #expect(store.products.allSatisfy { !$0.price.isEmpty && $0.isConsumable })
 
-        // Exercise the same direct purchase path as the picker. An externally injected
-        // transaction can race quiet startup recovery and has no direct result to await.
-        for id in TipCatalog.productIDs + [TipCatalog.productIDs[0]] {
-            print("Local tip test: purchasing tier")
-            store.purchase(try #require(store.products.first { $0.id == id }))
-            try await wait { store.purchasingID == nil && store.notice == .thankYou }
+            // Exercise the same direct purchase path as the picker. An externally injected
+            // transaction can race quiet startup recovery and has no direct result to await.
+            for id in TipCatalog.productIDs + [TipCatalog.productIDs[0]] {
+                print("Local tip test: purchasing tier")
+                let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+                print("Local tip fixture: activeScenes=\(scenes.filter { $0.activationState == .foregroundActive }.count), keyWindows=\(scenes.flatMap(\.windows).filter(\.isKeyWindow).count), paymentsAllowed=\(AppStore.canMakePayments)")
+                store.purchase(try #require(store.products.first { $0.id == id }))
+                do {
+                    try await wait { store.purchasingID == nil && store.notice == .thankYou }
+                } catch {
+                    print("Local tip fixture timeout: purchasing=\(store.purchasingID != nil), notice=\(String(describing: store.notice)), pending=\(store.pendingProductID != nil)")
+                    throw error
+                }
+                try await waitForFinished()
+                #expect(await unfinishedTipCount() == 0)
+                store.clearNotice()
+            }
+            #expect(session.allTransactions().count == 4)
+            #expect(await unfinishedTipCount() == 0)
+
+            print("Local tip test: starting approval scenario")
+            session.askToBuyEnabled = true
+            store.purchase(try #require(store.products.first))
+            try await wait { store.purchasingID == nil }
+            #expect(store.notice == .pending)
+            let pending = try #require(session.allTransactions().first { $0.pendingAskToBuyConfirmation })
+            #expect(store.notice != .thankYou)
+            print("Local tip test: approving pending transaction")
+            try session.approveAskToBuyTransaction(identifier: pending.identifier)
+            try await wait { store.notice == .thankYou }
             try await waitForFinished()
             #expect(await unfinishedTipCount() == 0)
+
             store.clearNotice()
+            print("Local tip test: refunding approved purchase")
+            let purchased = try #require(session.allTransactions().filter { $0.state == .purchased }
+                .max { $0.purchaseDate < $1.purchaseDate })
+            try session.refundTransaction(identifier: purchased.identifier)
+            try await Task.sleep(nanoseconds: 300_000_000)
+            #expect(store.notice != .thankYou)
+
+            // Local fixture prices are test values, not Apple's live Mexico price mapping.
+            session.storefront = "MEX"
+            session.locale = Locale(identifier: "es_MX")
+            await store.loadProducts()
+            #expect(store.products.count == 3)
+            #expect(store.products.allSatisfy { !$0.price.isEmpty })
+            #expect(store.products.map(\.name) == ["Propina pequeña", "Propina mediana", "Propina grande"])
         }
-        #expect(session.allTransactions().count == 4)
-        #expect(await unfinishedTipCount() == 0)
-
-        print("Local tip test: starting approval scenario")
-        session.askToBuyEnabled = true
-        store.purchase(try #require(store.products.first))
-        try await wait { store.purchasingID == nil }
-        #expect(store.notice == .pending)
-        let pending = try #require(session.allTransactions().first { $0.pendingAskToBuyConfirmation })
-        #expect(store.notice != .thankYou)
-        print("Local tip test: approving pending transaction")
-        try session.approveAskToBuyTransaction(identifier: pending.identifier)
-        try await wait { store.notice == .thankYou }
-        try await waitForFinished()
-        #expect(await unfinishedTipCount() == 0)
-
-        store.clearNotice()
-        print("Local tip test: refunding approved purchase")
-        let purchased = try #require(session.allTransactions().filter { $0.state == .purchased }
-            .max { $0.purchaseDate < $1.purchaseDate })
-        try session.refundTransaction(identifier: purchased.identifier)
-        try await Task.sleep(nanoseconds: 300_000_000)
-        #expect(store.notice != .thankYou)
-
-        // Local fixture prices are test values, not Apple's live Mexico price mapping.
-        session.storefront = "MEX"
-        session.locale = Locale(identifier: "es_MX")
-        await store.loadProducts()
-        #expect(store.products.count == 3)
-        #expect(store.products.allSatisfy { !$0.price.isEmpty })
-        #expect(store.products.map(\.name) == ["Propina pequeña", "Propina mediana", "Propina grande"])
     }
 
     @Test func unfinishedTransactionRecoversWithoutCatalogOrThankYou() async throws {
@@ -80,21 +90,33 @@ struct TipStoreKitTests {
             session.clearTransactions()
             session.resetToDefaultState()
         }
-        try session.buyProduct(productIdentifier: TipCatalog.productIDs[1])
+        _ = try await session.buyProduct(identifier: TipCatalog.productIDs[1])
         for _ in 0..<100 {
             if await unfinishedTipCount() == 1 { break }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
-        #expect(await unfinishedTipCount() == 1)
+        try #require(await unfinishedTipCount() == 1, "Recovery fixture must exist before exercising recovery")
         let suiteName = "LeafStoreKitTests." + UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = TipStore(defaults: defaults)
-        store.recover()
-        try await waitForFinished()
-        #expect(await unfinishedTipCount() == 0)
-        #expect(store.products.isEmpty)
-        #expect(store.notice == nil)
+        try await withDrainedStore(store) {
+            store.recover()
+            try await waitForFinished()
+            #expect(await unfinishedTipCount() == 0)
+            #expect(store.products.isEmpty)
+            #expect(store.notice == nil)
+        }
+    }
+
+    private func withDrainedStore(_ store: TipStore, operation: () async throws -> Void) async throws {
+        do {
+            try await operation()
+        } catch {
+            await store.stopForTesting()
+            throw error
+        }
+        await store.stopForTesting()
     }
 
     private func wait(_ condition: () -> Bool) async throws {
@@ -116,9 +138,17 @@ struct TipStoreKitTests {
     }
 
     private func waitForFinished() async throws {
+        // StoreKit's async unfinished sequence can briefly be empty before a newly
+        // purchased transaction appears. Require settled emptiness, not one early sample.
+        var emptySamples = 0
+        var counts: [Int] = []
         for _ in 0..<100 {
-            if await unfinishedTipCount() == 0 { return }
+            let count = await unfinishedTipCount()
+            counts.append(count)
+            emptySamples = count == 0 ? emptySamples + 1 : 0
+            if emptySamples == 5 { return }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
+        try #require(emptySamples == 5, "Unfinished transactions did not settle: \(counts)")
     }
 }

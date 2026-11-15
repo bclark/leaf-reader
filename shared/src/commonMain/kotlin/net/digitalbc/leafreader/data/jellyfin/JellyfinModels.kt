@@ -195,8 +195,9 @@ object JellyfinProgress {
         (pageIndex.coerceAtLeast(0).toLong()) * TICKS_PER_PAGE
 
     fun ticksToPage(ticks: Long, maxPages: Int? = null): Int {
-        val page = (ticks / TICKS_PER_PAGE).toInt()
-        return if (maxPages != null && maxPages > 0) page.coerceIn(0, maxPages - 1) else page.coerceAtLeast(0)
+        val page = (ticks / TICKS_PER_PAGE).coerceAtLeast(0L)
+        val maximum = if (maxPages != null && maxPages > 0) (maxPages - 1).toLong() else Int.MAX_VALUE.toLong()
+        return page.coerceAtMost(maximum).toInt()
     }
 }
 
@@ -230,8 +231,15 @@ object JellyfinEndpoints {
         return "$base?${params.joinToString("&")}"
     }
 
+    /** Current user-library detail route; available alongside the legacy route in Jellyfin 10.10. */
+    fun itemDetails(baseUrl: String, userId: String, itemId: String): String =
+        "${baseUrl.trimEnd('/')}/Items/$itemId?UserId=$userId"
+
     fun itemDownload(baseUrl: String, itemId: String): String =
         "${baseUrl.trimEnd('/')}/Items/$itemId/Download"
+
+    fun itemUserData(baseUrl: String, userId: String, itemId: String): String =
+        "${baseUrl.trimEnd('/')}/UserItems/$itemId/UserData?userId=$userId"
 
     fun sessionProgress(baseUrl: String): String =
         "${baseUrl.trimEnd('/')}/Sessions/Playing/Progress"

@@ -144,6 +144,18 @@ final class TipStore: ObservableObject {
         purchaseTask?.cancel()
     }
 
+    #if DEBUG
+    /// Fixture teardown must drain observers before SKTestSession resets shared transactions.
+    func stopForTesting() async {
+        let tasks = [listener, recovery, purchaseTask].compactMap { $0 }
+        tasks.forEach { $0.cancel() }
+        for task in tasks { await task.value }
+        listener = nil
+        recovery = nil
+        purchaseTask = nil
+    }
+    #endif
+
     func start() {
         guard listener == nil else { return }
         let stream = client.updates()
@@ -157,7 +169,8 @@ final class TipStore: ObservableObject {
     }
 
     func recover() {
-        guard recovery == nil else { return }
+        // The listener covers active updates; a scan must not overlap a direct purchase.
+        guard recovery == nil, purchasingID == nil else { return }
         let client = client
         recovery = Task { [weak self] in
             let results = await client.unfinished()
@@ -188,8 +201,8 @@ final class TipStore: ObservableObject {
         guard purchasingID == nil, pendingProductID == nil,
               catalogState == .ready, products.contains(product) else { return }
         guard client.canMakePayments else { notice = .restricted; return }
+        let priorRecovery = recovery
         purchasingID = product.id
-        completedActivePurchase = false
         notice = nil
         // Owned by the store, not the sheet: dismissal cannot cancel a charge or its handling.
         purchaseTask = Task {
@@ -197,6 +210,13 @@ final class TipStore: ObservableObject {
                 purchasingID = nil
                 purchaseTask = nil
             }
+            // Drain any earlier recovery before starting a charge.
+            await priorRecovery?.value
+            guard !Task.isCancelled else { return }
+            guard client.canMakePayments else { notice = .restricted; return }
+            // Recovery may have handled an older transaction for this product.
+            completedActivePurchase = false
+            notice = nil
             do {
                 switch try await client.purchase(product.id) {
                 case .success(let result):

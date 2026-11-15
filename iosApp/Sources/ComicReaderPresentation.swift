@@ -7,7 +7,7 @@ struct OpenComic: Identifiable {
     let cover: UIImage?
     var id: String { url.absoluteString }
 
-    init(url: URL) {
+    @MainActor init(url: URL) {
         self.url = url
         opensAtCover = (ReadingProgress.get(url)?.page ?? 0) == 0
         cover = opensAtCover ? CoverLoader.cachedCover(for: url) : nil

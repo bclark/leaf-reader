@@ -105,6 +105,33 @@ object ComicMetadataParser {
 
     private fun extractTag(xml: String, tag: String): String? {
         val regex = Regex("""<$tag>(.*?)</$tag>""", RegexOption.DOT_MATCHES_ALL)
-        return regex.find(xml)?.groupValues?.get(1)?.trim()?.ifEmpty { null }
+        return regex.find(xml)?.groupValues?.get(1)?.let { content ->
+            // CDATA is literal; entity replacement is a single pass so &amp;amp;
+            // becomes the legitimate text &amp;, never a second decoded ampersand.
+            Regex("""<!\[CDATA\[(.*?)]]>|&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|apos);""",
+                RegexOption.DOT_MATCHES_ALL).replace(content) { match ->
+                if (match.value.startsWith("<![CDATA[")) match.groupValues[1]
+                else when (val entity = match.groupValues[2]) {
+                    "amp" -> "&"
+                    "lt" -> "<"
+                    "gt" -> ">"
+                    "quot" -> "\""
+                    "apos" -> "'"
+                    else -> {
+                        val code = if (entity.startsWith("#x")) entity.drop(2).toIntOrNull(16)
+                            else entity.drop(1).toIntOrNull()
+                        // XML 1.0 character range; preserve malformed references verbatim.
+                        if (code == null || !(code == 9 || code == 10 || code == 13 ||
+                                code in 0x20..0xD7FF || code in 0xE000..0xFFFD || code in 0x10000..0x10FFFF)) {
+                            match.value
+                        } else if (code <= 0xFFFF) code.toChar().toString()
+                        else {
+                            val supplementary = code - 0x10000
+                            "${(0xD800 + (supplementary shr 10)).toChar()}${(0xDC00 + (supplementary and 0x3FF)).toChar()}"
+                        }
+                    }
+                }
+            }
+        }?.trim()?.ifEmpty { null }
     }
 }

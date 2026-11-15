@@ -2,6 +2,7 @@ import Foundation
 import LeafShared
 import Testing
 import UIKit
+import SwiftUI
 import PDFKit
 import ZIPFoundation
 @testable import Leaf
@@ -80,15 +81,17 @@ struct SmbFoundationTests {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
-    private func comic(in directory: URL, name: String = "Source.cbz") throws -> URL {
+    private func comic(in directory: URL, name: String = "Source.cbz", pages: Int = 1, color: UIColor = .red) throws -> URL {
         let folder = directory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let image = UIGraphicsImageRenderer(size: CGSize(width: 20, height: 30)).image { context in
-            UIColor.red.setFill()
+            color.setFill()
             context.fill(CGRect(x: 0, y: 0, width: 20, height: 30))
         }
-        try #require(image.pngData()).write(to: folder.appendingPathComponent("page1.png"))
+        for page in 1...pages {
+            try #require(image.pngData()).write(to: folder.appendingPathComponent("page\(page).png"))
+        }
         let output = directory.appendingPathComponent(name)
         try FileManager.default.zipItem(at: folder, to: output, shouldKeepParent: false)
         return output
@@ -292,6 +295,8 @@ struct SmbFoundationTests {
         let destination = try await store.importComicAwaitingCompletion(from: source)
         defer { store.delete(destination) }
         let original = try Data(contentsOf: destination)
+        let cached = await CoverLoader.load(for: destination)
+        let revision = CoverLoader.shared.revisions(for: [destination])
         ReadingProgress.set(destination, page: 3, step: -1, total: 8, rtl: false)
         let broken = root.appendingPathComponent("broken.cbz")
         try Data("PK\u{03}\u{04}truncated".utf8).write(to: broken)
@@ -300,6 +305,8 @@ struct SmbFoundationTests {
         }
         #expect(try Data(contentsOf: destination) == original)
         #expect(ReadingProgress.get(destination)?.page == 3)
+        #expect(CoverLoader.shared.revisions(for: [destination]) == revision)
+        #expect(await CoverLoader.load(for: destination).cover?.pngData() == cached.cover?.pngData())
         #expect(!store.importing)
     }
 
@@ -315,7 +322,9 @@ struct SmbFoundationTests {
         defer { store.deleteReadingList(id: list.id); store.comics.forEach(store.delete) }
         let replaced = try await store.importComicAwaitingCompletion(from: source, collision: .replace)
         #expect(replaced == first)
-        #expect(ReadingProgress.get(first)?.page == 2)
+        #expect(ReadingProgress.get(first)?.page == 0)
+        #expect(ReadingProgress.get(first)?.total == 1)
+        #expect(ReadingProgress.get(first)?.rtl == true)
         #expect(ComicMetadataStore.get(first)?.series == "Custom")
         #expect(store.readingLists.first(where: { $0.id == list.id })?.itemFilenames == [first.lastPathComponent])
         let second = try await store.importComicAwaitingCompletion(from: source, collision: .keepBoth)
@@ -324,6 +333,150 @@ struct SmbFoundationTests {
         await #expect(throws: ComicImportError.self) {
             try await store.importComicAwaitingCompletion(from: source, collision: .cancel)
         }
+    }
+
+    @Test func replacementRefreshesCoverCountAndDurableProgressBeforeReaderOpens() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try comic(in: root, name: UUID().uuidString + ".cbz", pages: 5)
+        let replacement = try comic(in: root, name: "Replacement.cbz", pages: 2, color: .blue)
+        let libraryDirectory = root.appendingPathComponent("Comics")
+        let store = LibraryStore(directory: libraryDirectory)
+        let destination = try await store.importComicAwaitingCompletion(from: source)
+        defer { store.delete(destination) }
+        let old = await CoverLoader.load(for: destination)
+        #expect(old.pageCount == 5)
+        ReadingProgress.set(destination, page: 3, step: 2, total: 5, rtl: true)
+        let oldReader = PageLoader(archive: try CbzArchive(url: destination))
+        _ = oldReader.loadPage(0)
+        let revision = CoverLoader.shared.revisions(for: [destination])
+        _ = try await store.importComicAwaitingCompletion(from: replacement,
+            originalName: destination.lastPathComponent, collision: .replace)
+        #expect(CoverLoader.shared.revisions(for: [destination]) != revision)
+        let new = await CoverLoader.load(for: destination)
+        #expect(new.pageCount == 2)
+        #expect(new.cover?.pngData() != old.cover?.pngData())
+        let reopenedStore = LibraryStore(directory: libraryDirectory)
+        #expect(reopenedStore.comics.contains(destination))
+        #expect(ReadingProgress.get(destination)?.page == 1)
+        #expect(ReadingProgress.get(destination)?.total == 2)
+        #expect(ReadingProgress.get(destination)?.step == -1)
+        #expect(ReadingProgress.get(destination)?.rtl == true)
+        let data = try #require(UserDefaults.standard.data(forKey: "leaf.progress.v1"))
+        let saved = try #require(JSONSerialization.jsonObject(with: data) as? [String: [String: Any]])
+        #expect(saved[destination.lastPathComponent]?["total"] as? Int == 2)
+        // An open old loader retains its old archive snapshot; the reader's revision guard
+        // prevents that snapshot from writing progress back after publication.
+        #expect(oldReader.pageCount == 5)
+    }
+
+    @Test func visibleReaderReloadsReplacementAndCannotRestoreOldProgress() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try comic(in: root, name: UUID().uuidString + ".cbz", pages: 5)
+        let replacement = try comic(in: root, name: "Replacement.cbz", pages: 2, color: .blue)
+        let store = LibraryStore(directory: root.appendingPathComponent("Comics"))
+        let destination = try await store.importComicAwaitingCompletion(from: source)
+        defer { store.delete(destination) }
+        ReadingProgress.set(destination, page: 3, step: -1, total: 5, rtl: false)
+        ReadingProgress.setOpenedAt(destination, timestamp: 0)
+        let settings = LeafSettings()
+        let hosting = UIHostingController(rootView: AnyView(ReaderView(comicURL: destination).environmentObject(settings)))
+        let size = CGSize(width: 390, height: 844)
+        let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        window.rootViewController = hosting
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        for _ in 0..<100 {
+            if ReadingProgress.openedAt(destination) > 0 { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        try #require(ReadingProgress.openedAt(destination) > 0)
+        _ = try await store.importComicAwaitingCompletion(from: replacement,
+            originalName: destination.lastPathComponent, collision: .replace)
+        func coordinator(in view: UIView) -> ReaderGestures.Coordinator? {
+            if view.accessibilityIdentifier == "ReaderGestureView" {
+                for recognizer in view.gestureRecognizers ?? [] {
+                    if let result = recognizer.delegate as? ReaderGestures.Coordinator { return result }
+                }
+            }
+            return view.subviews.lazy.compactMap { coordinator(in: $0) }.first
+        }
+        // A backward turn after reload must operate on the new two-page archive.
+        for _ in 0..<30 {
+            if ReadingProgress.get(destination)?.page == 0 { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+            hosting.view.layoutIfNeeded()
+            coordinator(in: hosting.view)?.simulateTap(at: CGPoint(x: 30, y: 400), in: size)
+        }
+        #expect(ReadingProgress.get(destination)?.page == 0)
+        hosting.rootView = AnyView(EmptyView())
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(ReadingProgress.get(destination)?.total == 2)
+        #expect(ReadingProgress.get(destination)?.page == 0)
+    }
+
+    @Test func cancelledReplacementPreservesCachedContentAndProgress() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try comic(in: root, name: UUID().uuidString + ".cbz", pages: 3)
+        let replacement = try comic(in: root, name: "Replacement.cbz", color: .blue)
+        let store = LibraryStore(directory: root.appendingPathComponent("Comics"))
+        let destination = try await store.importComicAwaitingCompletion(from: source)
+        defer { store.delete(destination) }
+        let original = try Data(contentsOf: destination)
+        let cached = await CoverLoader.load(for: destination)
+        let revision = CoverLoader.shared.revisions(for: [destination])
+        ReadingProgress.set(destination, page: 1, step: -1, total: 3, rtl: true)
+        let publishing = AsyncStream<Void>.makeStream()
+        let resume = DispatchSemaphore(value: 0)
+        let task = Task {
+            try await store.importComicAwaitingCompletion(from: replacement,
+                originalName: destination.lastPathComponent, collision: .replace, phase: { phase in
+                    if case .publishing = phase {
+                        publishing.continuation.yield(())
+                        publishing.continuation.finish()
+                        resume.wait()
+                    }
+                })
+        }
+        for await _ in publishing.stream { break }
+        task.cancel()
+        resume.signal()
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(try Data(contentsOf: destination) == original)
+        #expect(ReadingProgress.get(destination)?.page == 1)
+        #expect(CoverLoader.shared.revisions(for: [destination]) == revision)
+        #expect(await CoverLoader.load(for: destination).cover?.pngData() == cached.cover?.pngData())
+    }
+
+    @Test func completedSinglePageReplacementRetainsCompletion() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try comic(in: root, name: UUID().uuidString + ".cbz", pages: 3)
+        let replacement = try comic(in: root, name: "One.cbz")
+        let store = LibraryStore(directory: root.appendingPathComponent("Comics"))
+        let destination = try await store.importComicAwaitingCompletion(from: source)
+        defer { store.delete(destination) }
+        ReadingProgress.set(destination, page: 2, step: -1, total: 3, rtl: false)
+        _ = try await store.importComicAwaitingCompletion(from: replacement,
+            originalName: destination.lastPathComponent, collision: .replace)
+        #expect(ReadingProgress.get(destination)?.total == 1)
+        #expect(ReadingProgress.isCompleted(destination))
+        ReadingProgress.setOpenedAt(destination, timestamp: 0)
+        let hosting = UIHostingController(rootView: AnyView(ReaderView(comicURL: destination).environmentObject(LeafSettings())))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = hosting
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        for _ in 0..<100 {
+            if ReadingProgress.openedAt(destination) > 0 { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        try #require(ReadingProgress.openedAt(destination) > 0)
+        hosting.rootView = AnyView(EmptyView())
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(ReadingProgress.isCompleted(destination))
     }
 
     @Test func pdfAndMisnamedZipImport() async throws {

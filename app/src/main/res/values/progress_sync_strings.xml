@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sync_positions_differ">Reading positions differ</string>
+    <string name="sync_choose_position">Choose which reading position to keep for %1$s.</string>
+    <string name="sync_device">This device</string>
+    <string name="sync_server">Jellyfin</string>
+    <string name="sync_position_state">Page %1$d of %2$d · %3$s</string>
+    <string name="sync_read">Read</string>
+    <string name="sync_not_completed">Not completed</string>
+    <string name="sync_use_device">Use device position</string>
+    <string name="sync_use_server">Use Jellyfin position</string>
+    <string name="sync_keep_both">Keep both for now</string>
+    <string name="sync_review_positions">Review reading positions</string>
+    <string name="sync_choice_retry">Could not save your choice. Positions may have changed. Review the current choices and retry.</string>
+    <string name="sync_reading_position">Sync reading position</string>
+    <string name="remove_download">Remove download</string>
+    <string name="remove_download_explanation">Remove this device’s copy? Your reading position, lists and queued sync will be kept. You can download it again from Jellyfin.</string>
+    <string name="remove_download_failed">Could not remove this download. Your reading history and lists are kept. Try again.</string>
+</resources>

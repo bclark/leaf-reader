@@ -59,6 +59,7 @@ object BackupManager {
             cObj.put("lastSlot", comic.lastSlot)
             cObj.put("dateAdded", comic.dateAdded)
             cObj.put("lastOpened", comic.lastOpened)
+            comic.completionOverride?.let { cObj.put("completed", it) }
             comicsArray.put(cObj)
         }
         root.put("comics", comicsArray)
@@ -73,6 +74,15 @@ object BackupManager {
             val itemsArray = JSONArray()
             val items = itemsByListId[list.id] ?: emptyList()
             for (item in items) {
+                if (item.itemId != null && item.serverId != null && item.userId != null) {
+                    itemsArray.put(JSONObject().apply {
+                        put("comicTitle", item.title ?: "Jellyfin item")
+                        put("sortOrder", item.sortOrder)
+                        put("serverId", item.serverId); put("userId", item.userId); put("itemId", item.itemId)
+                        put("libraryId", item.libraryId); put("remoteSnapshot", item.snapshot)
+                    })
+                    continue
+                }
                 val targetComic = comicsById[item.comicId] ?: continue
                 val iObj = JSONObject()
                 iObj.put("comicTitle", targetComic.title)
@@ -148,6 +158,7 @@ object BackupManager {
                     lastSlot = lastSlot,
                     dateAdded = dateAdded,
                     lastOpened = lastOpened,
+                    completed = if (cObj.isNull("completed")) null else cObj.getBoolean("completed"),
                 )
             }
         }
@@ -171,7 +182,20 @@ object BackupManager {
                             iObj.getDouble("issueNumber").toFloat()
                         } else null
                         val sortOrder = iObj.optInt("sortOrder", j)
-                        items += BackupReadingListItem(comicTitle, itemSeries, itemIssue, sortOrder)
+                        val remoteItem = iObj.optString("itemId").takeIf { it.isNotBlank() && it != "null" }
+                        val server = iObj.optString("serverId").takeIf { it.isNotBlank() && it != "null" }
+                        val user = iObj.optString("userId").takeIf { it.isNotBlank() && it != "null" }
+                        if (remoteItem != null || server != null || user != null) {
+                            require(remoteItem != null && server != null && user != null) { "Incomplete remote list identity" }
+                        }
+                        val snapshot = if (iObj.isNull("remoteSnapshot")) null else iObj.getString("remoteSnapshot")
+                        snapshot?.let {
+                            require(net.digitalbc.leafreader.data.jellyfin.JellyfinSnapshots.decode(it).item.id == remoteItem) {
+                                "Remote list snapshot identity mismatch"
+                            }
+                        }
+                        items += BackupReadingListItem(comicTitle, itemSeries, itemIssue, sortOrder,
+                            server, user, remoteItem, if (iObj.isNull("libraryId")) null else iObj.getString("libraryId"), snapshot)
                     }
                 }
                 readingLists += BackupReadingList(name, createdAt, items)
@@ -188,39 +212,56 @@ object BackupManager {
         )
     }
 
-    /** Matches a backup comic record to an existing comic in the library. */
+    /** Returns only a unique match; an ambiguous stronger match must not fall back to a guess. */
     fun findMatchingComic(backup: BackupComic, localComics: List<ComicEntity>): ComicEntity? {
-        // 1. Exact match on title and pageCount
-        val byTitleAndPages = localComics.firstOrNull {
+        val byTitleAndPages = localComics.filter {
             it.title.equals(backup.title, ignoreCase = true) && it.pageCount == backup.pageCount
         }
-        if (byTitleAndPages != null) return byTitleAndPages
+        if (byTitleAndPages.isNotEmpty()) return byTitleAndPages.singleOrNull()
 
-        // 2. Exact match on title only
-        val byTitle = localComics.firstOrNull {
+        val byTitle = localComics.filter {
             it.title.equals(backup.title, ignoreCase = true)
         }
-        if (byTitle != null) return byTitle
+        if (byTitle.isNotEmpty()) return byTitle.singleOrNull()
 
-        // 3. Match on series + volume + issueNumber
         if (!backup.series.isNullOrBlank() && backup.issueNumber != null) {
-            val bySeriesIssue = localComics.firstOrNull {
+            return localComics.filter {
                 it.series.equals(backup.series, ignoreCase = true) &&
-                (backup.volume.isNullOrBlank() || it.volume.equals(backup.volume, ignoreCase = true)) &&
-                it.issueNumber == backup.issueNumber
-            }
-            if (bySeriesIssue != null) return bySeriesIssue
+                    (backup.volume.isNullOrBlank() || it.volume.equals(backup.volume, ignoreCase = true)) &&
+                    it.issueNumber == backup.issueNumber
+            }.singleOrNull()
         }
-
         return null
     }
 
+    /** Reject every colliding payload record, independent of payload order or conflict strategy. */
+    fun matchComics(
+        backups: List<BackupComic>,
+        localComics: List<ComicEntity>,
+    ): List<Pair<BackupComic, ComicEntity>> {
+        val matches = backups.mapNotNull { backup ->
+            findMatchingComic(backup, localComics)?.let { backup to it }
+        }
+        val targetCounts = matches.groupingBy { it.second.id }.eachCount()
+        return matches.filter { targetCounts[it.second.id] == 1 }
+    }
+
+    fun findMatchingListComic(item: BackupReadingListItem, localComics: List<ComicEntity>): ComicEntity? =
+        findMatchingComic(
+            BackupComic(
+                title = item.comicTitle,
+                series = item.series,
+                issueNumber = item.issueNumber,
+                format = "",
+                pageCount = 0,
+            ),
+            localComics,
+        )
+
     fun createPreview(payload: BackupPayload, currentComics: List<ComicEntity>): BackupPreview {
-        var matching = 0
-        for (backup in payload.comics) {
-            if (findMatchingComic(backup, currentComics) != null) {
-                matching++
-            }
+        val matching = matchComics(payload.comics, currentComics).size
+        val skippedListItems = payload.readingLists.sumOf { list ->
+            list.items.count { it.itemId == null && findMatchingListComic(it, currentComics) == null }
         }
         return BackupPreview(
             version = payload.version,
@@ -228,6 +269,7 @@ object BackupManager {
             appVersion = payload.appVersion,
             totalComicsInBackup = payload.comics.size,
             matchingComicsCount = matching,
+            skippedReadingListItemsCount = skippedListItems,
             readingListsCount = payload.readingLists.size,
             hasSettings = payload.settings != null,
         )

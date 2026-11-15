@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -57,6 +58,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -85,8 +87,13 @@ fun SeriesDetailScreen(
     viewModel: LibraryViewModel,
     onOpenComic: (Long) -> Unit,
     onBack: () -> Unit,
+    offlineDownloads: Boolean = false,
 ) {
     val allComics by viewModel.comics.collectAsStateWithLifecycle()
+    val readable by viewModel.readableComics.collectAsStateWithLifecycle()
+    val requestedDownloads by viewModel.downloadedOnly.collectAsStateWithLifecycle()
+    val downloadedOnly = requestedDownloads || offlineDownloads
+    val unreadOnly by viewModel.unreadOnly.collectAsStateWithLifecycle()
     val libraryColumns by viewModel.libraryColumns.collectAsStateWithLifecycle()
 
     val configuration = LocalConfiguration.current
@@ -100,8 +107,8 @@ fun SeriesDetailScreen(
     }
     val actualColumns = libraryColumns.coerceIn(2, availableColumns.last())
 
-    val seriesComics = remember(allComics, seriesName, volume) {
-        allComics.filter {
+    val scopedComics = remember(allComics, seriesName, volume, downloadedOnly, readable) {
+        allComics.filter { (!downloadedOnly || readable.any { copy -> copy.id == it.id }) &&
             it.series.equals(seriesName, ignoreCase = true) &&
             (volume.isNullOrBlank() || it.volume.equals(volume, ignoreCase = true))
         }.sortedWith(
@@ -110,12 +117,13 @@ fun SeriesDetailScreen(
         )
     }
 
-    val allCompleted = seriesComics.isNotEmpty() && seriesComics.all { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-    val nextUnread = seriesComics.firstOrNull { it.pageCount > 0 && it.lastPage < it.pageCount - 1 }
-        ?: seriesComics.firstOrNull()
+    val seriesComics = if (unreadOnly) scopedComics.filter { it.isUnread } else scopedComics
+    val allCompleted = scopedComics.isNotEmpty() && scopedComics.all { it.isCompleted }
+    val nextUnread = scopedComics.firstOrNull { it.pageCount > 0 && !it.isCompleted }
+        ?: scopedComics.firstOrNull()
 
     val continueButtonText = when {
-        allCompleted && seriesComics.isNotEmpty() -> "READ FROM START: ${seriesComics.first().title.uppercase()}"
+        allCompleted -> "READ FROM START: ${scopedComics.first().title.uppercase()}"
         nextUnread != null && nextUnread.lastPage > 0 -> "CONTINUE: ${nextUnread.title.uppercase()}"
         nextUnread != null -> "START: ${nextUnread.title.uppercase()}"
         else -> null
@@ -188,6 +196,15 @@ fun SeriesDetailScreen(
                 horizontalArrangement = Arrangement.spacedBy(if (actualColumns >= 4) 12.dp else 16.dp),
                 verticalArrangement = Arrangement.spacedBy(if (actualColumns >= 4) 14.dp else 18.dp),
             ) {
+                item(span = { GridItemSpan(actualColumns) }) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween) {
+                        UnreadOnlyControl(unreadOnly, { viewModel.unreadOnly.value = it })
+                        androidx.compose.material3.FilterChip(selected = downloadedOnly, enabled = !offlineDownloads,
+                            onClick = { viewModel.downloadedOnly.value = !downloadedOnly },
+                            label = { Text("Downloaded only") }, modifier = Modifier.heightIn(min = 48.dp))
+                    }
+                }
                 // Hero Card Header (Compact, Uncluttered Status Row)
                 item(span = { GridItemSpan(actualColumns) }) {
                     Card(
@@ -211,11 +228,11 @@ fun SeriesDetailScreen(
                                     .padding(end = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                val completedCount = seriesComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-                                val statusText = if (seriesComics.isEmpty()) {
+                                val completedCount = scopedComics.count { it.isCompleted }
+                                val statusText = if (scopedComics.isEmpty()) {
                                     "0 ISSUES"
                                 } else {
-                                    "$completedCount OF ${seriesComics.size} READ"
+                                    "$completedCount OF ${scopedComics.size} READ"
                                 }
                                 Box(
                                     modifier = Modifier
@@ -238,9 +255,9 @@ fun SeriesDetailScreen(
                                     )
                                 }
 
-                                if (seriesComics.isNotEmpty()) {
-                                    val completedCount = seriesComics.count { it.pageCount > 0 && it.lastPage >= it.pageCount - 1 }
-                                    val progressFraction = completedCount.toFloat() / seriesComics.size
+                                if (scopedComics.isNotEmpty()) {
+                                    val completedCount = scopedComics.count { it.isCompleted }
+                                    val progressFraction = completedCount.toFloat() / scopedComics.size
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -259,7 +276,7 @@ fun SeriesDetailScreen(
                             }
 
                             // Right Row: Mark Read/Unread Book Icon + Compact Start/Continue Pill
-                            if (seriesComics.isNotEmpty()) {
+                            if (scopedComics.isNotEmpty()) {
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -287,7 +304,7 @@ fun SeriesDetailScreen(
                                     }
 
                                     // Compact Start / Continue Action Pill
-                                    val targetComic = if (allCompleted) seriesComics.first() else (nextUnread ?: seriesComics.first())
+                                    val targetComic = if (allCompleted) scopedComics.first() else (nextUnread ?: scopedComics.first())
                                     val shortActionLabel = when {
                                         allCompleted -> "RESTART"
                                         targetComic.lastPage > 0 -> "CONTINUE"
@@ -329,6 +346,12 @@ fun SeriesDetailScreen(
                     }
                 }
 
+                if (unreadOnly && seriesComics.isEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_no_unread))
+                    }
+                }
+
                 items(seriesComics, key = { it.id }) { comic ->
                     SeriesComicItem(
                         comic = comic,
@@ -367,8 +390,8 @@ fun SeriesDetailScreen(
     }
 
     if (showAddComicsDialog) {
-        val availableComics = remember(allComics, seriesComics) {
-            val seriesComicIds = seriesComics.map { it.id }.toSet()
+        val availableComics = remember(allComics, scopedComics) {
+            val seriesComicIds = scopedComics.map { it.id }.toSet()
             allComics.filter { it.id !in seriesComicIds }
         }
 
@@ -482,7 +505,7 @@ fun SeriesDetailScreen(
     }
 
     selectedComicForOptions?.let { comic ->
-        val isRead = comic.pageCount > 0 && comic.lastPage >= comic.pageCount - 1
+        val isRead = comic.isCompleted
         AlertDialog(
             onDismissRequest = { selectedComicForOptions = null },
             title = {
@@ -624,14 +647,24 @@ private fun SeriesComicItem(
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(4.dp)
-                    .size(22.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
-                    .clickable(onClick = onRemove),
-                contentAlignment = Alignment.Center,
+                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    .clickable(
+                        role = Role.Button,
+                        onClickLabel = "Remove from series",
+                        onClick = onRemove,
+                    ),
+                contentAlignment = Alignment.TopEnd,
             ) {
-                Icon(Icons.Default.Close, contentDescription = "Remove from series", tint = ComicRose, modifier = Modifier.size(13.dp))
+                Box(
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Remove from series", tint = ComicRose, modifier = Modifier.size(13.dp))
+                }
             }
 
             Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(progressHeight).background(MaterialTheme.colorScheme.surface)) {

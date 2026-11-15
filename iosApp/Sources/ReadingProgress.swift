@@ -3,16 +3,22 @@ import UIKit
 
 /// Per-comic reading progress (resume point + total), persisted in UserDefaults keyed by the
 /// comic's filename — the iOS counterpart to Android's Room-backed resume (page *and* panel).
-struct Progress: Codable, Equatable {
+struct Progress: Codable, Equatable, Sendable {
     var page: Int
     var step: Int      // -1 = whole page, else panel index
     var total: Int     // page count, for the library progress readout
     // Reading direction for THIS comic. Optional so older saved data (which lacked the field)
     // still decodes; nil means "never chosen for this comic" → fall back to the global default.
     var rtl: Bool?
+    // Saved with the resume point so offline edits can be recovered into the Jellyfin outbox.
+    // Legacy entries remain unversioned until the user actually changes progress.
+    var localRevision: UUID? = nil
+    // Server read/unread intent is independent of the current page (including the last page).
+    var completionOverride: Bool? = nil
 
     var isCompleted: Bool {
         guard total > 0 else { return false }
+        if let completionOverride { return completionOverride }
         return total == 1 ? page >= 1 : page >= total - 1
     }
 
@@ -113,13 +119,8 @@ enum ReadingProgress {
     /// Schedule an asynchronous serialized save, conflating rapid successive page turns.
     private static func scheduleSave() {
         lock.lock()
-        let currentMap = inMemoryProgress ?? [:]
         saveWorkItem?.cancel()
-        let item = DispatchWorkItem {
-            if let data = try? JSONEncoder().encode(currentMap) {
-                defaults.set(data, forKey: key)
-            }
-        }
+        let item = DispatchWorkItem { persistCurrentSnapshot() }
         saveWorkItem = item
         lock.unlock()
         ioQueue.asyncAfter(deadline: .now() + 0.08, execute: item)
@@ -130,17 +131,34 @@ enum ReadingProgress {
         lock.lock()
         saveWorkItem?.cancel()
         saveWorkItem = nil
+        lock.unlock()
+
+        // Drain prior writes without holding the lock needed by preference observers.
+        ioQueue.sync {
+            persistCurrentSnapshot()
+            defaults.synchronize()
+        }
+    }
+
+    /// Called only on ioQueue. Read the latest maps when a write executes, so an older
+    /// queued save cannot overwrite a newer flush. Defaults callbacks may read progress.
+    private static func persistCurrentSnapshot() {
+        lock.lock()
         let pMap = inMemoryProgress
         let oMap = inMemoryOpened
         lock.unlock()
-
         if let pMap, let data = try? JSONEncoder().encode(pMap) {
             defaults.set(data, forKey: key)
         }
         if let oMap, let data = try? JSONEncoder().encode(oMap) {
             defaults.set(data, forKey: openedKey)
         }
-        defaults.synchronize()
+    }
+
+    /// Read only persisted edits when materializing pending remote operations.
+    static func savedSnapshot() throws -> [String: Progress] {
+        guard let data = defaults.data(forKey: key) ?? defaults.data(forKey: legacyKey) else { return [:] }
+        return try JSONDecoder().decode([String: Progress].self, from: data)
     }
 
     static func get(_ url: URL) -> Progress? {
@@ -157,15 +175,38 @@ enum ReadingProgress {
     }
 
     /// Sets and prompts durable persistence for this comic's progress.
-    static func set(_ url: URL, page: Int, step: Int, total: Int, rtl: Bool) {
+    static func set(_ url: URL, page: Int, step: Int, total: Int, rtl: Bool, completed: Bool? = nil) {
         initializeLifecycleObservers()
         lock.lock()
         if inMemoryProgress == nil {
             _ = inMemoryProgressLocked()
         }
-        inMemoryProgress?[url.lastPathComponent] = Progress(page: page, step: step, total: total, rtl: rtl)
+        let previous = inMemoryProgress?[url.lastPathComponent]
+        var updated = Progress(page: page, step: step, total: total, rtl: rtl)
+        let samePage = previous?.page == page && previous?.total == total
+        updated.completionOverride = completed ?? (samePage ? previous?.completionOverride : nil)
+        // Direction/panel changes do not create a new remote page intent.
+        updated.localRevision = samePage && previous?.isCompleted == updated.isCompleted
+            ? previous?.localRevision : UUID()
+        inMemoryProgress?[url.lastPathComponent] = updated
         lock.unlock()
         scheduleSave()
+    }
+
+    /// Apply a fetched state only if the reader has not changed since the request began.
+    /// The supplied revision is already recorded in the sync store, so it must not be enqueued.
+    static func applyRemote(_ url: URL, expected: Progress?, position: JellyfinProgressStore.Position,
+                            revision: UUID) -> Bool {
+        lock.lock()
+        let current = inMemoryProgressLocked()[url.lastPathComponent]
+        guard current == expected else { lock.unlock(); return false }
+        var progress = Progress(page: position.pageCount == 1 && position.completed ? 1 : position.pageIndex,
+            step: -1, total: position.pageCount, rtl: current?.rtl, localRevision: revision)
+        progress.completionOverride = position.completed
+        inMemoryProgress?[url.lastPathComponent] = progress
+        lock.unlock()
+        flushSync()
+        return true
     }
 
     /// Resynchronizes total page count and clamps progress if an archive changed.
@@ -175,13 +216,21 @@ enum ReadingProgress {
         if inMemoryProgress == nil { _ = inMemoryProgressLocked() }
         let filename = url.lastPathComponent
         if var current = inMemoryProgress?[filename] {
-            if current.total != actualTotal || current.page >= actualTotal {
+            if current.total != actualTotal || current.page >= actualTotal || current.step != -1 {
+                let previous = current
                 let wasCompleted = current.isCompleted
                 current.total = actualTotal
+                current.step = -1
                 if wasCompleted {
-                    current.page = max(0, actualTotal - 1)
+                    current.page = actualTotal == 1 ? 1 : actualTotal - 1
                 } else {
                     current.page = min(max(current.page, 0), actualTotal - 1)
+                }
+                // Keep a previously edited resume point recoverable after page-count correction.
+                // Untouched legacy progress still does not imply a new remote edit.
+                if current.localRevision != nil,
+                   current.page != previous.page || current.total != previous.total {
+                    current.localRevision = UUID()
                 }
                 inMemoryProgress?[filename] = current
                 lock.unlock()
@@ -210,13 +259,8 @@ enum ReadingProgress {
         lock.lock()
         if inMemoryOpened == nil { _ = inMemoryOpenedLocked() }
         inMemoryOpened?[url.lastPathComponent] = Date().timeIntervalSince1970
-        let currentMap = inMemoryOpened ?? [:]
         lock.unlock()
-        ioQueue.async {
-            if let data = try? JSONEncoder().encode(currentMap) {
-                defaults.set(data, forKey: openedKey)
-            }
-        }
+        ioQueue.async { persistCurrentSnapshot() }
     }
 
     /// Sets explicit last-opened timestamp (e.g. when restoring from backup).
@@ -225,13 +269,8 @@ enum ReadingProgress {
         lock.lock()
         if inMemoryOpened == nil { _ = inMemoryOpenedLocked() }
         inMemoryOpened?[url.lastPathComponent] = timestamp
-        let currentMap = inMemoryOpened ?? [:]
         lock.unlock()
-        ioQueue.async {
-            if let data = try? JSONEncoder().encode(currentMap) {
-                defaults.set(data, forKey: openedKey)
-            }
-        }
+        ioQueue.async { persistCurrentSnapshot() }
     }
 
     /// Last-opened timestamp for a comic (0 if never opened) — the library sort key.

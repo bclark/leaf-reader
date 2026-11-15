@@ -128,15 +128,18 @@ struct LeafMark: View {
 struct LeafWordmark: View {
     var color: Color = Leaf.cream
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Image("LeafMark")
                 .resizable()
-                .frame(width: 32, height: 32)
+                .frame(width: 36, height: 36)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             Text("LEAF")
                 .font(.anton(28))
+                .tracking(1)
                 .foregroundColor(color)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: "Leaf"))
     }
 }
 
@@ -145,7 +148,8 @@ struct OchreBadge: View {
     let text: LocalizedStringKey
     var body: some View {
         Text(text)
-            .font(.anton(15))
+            .font(.custom("Anton-Regular", size: 15, relativeTo: .subheadline))
+            .fixedSize(horizontal: false, vertical: true)
             .tracking(0.6)
             .foregroundColor(Leaf.ink)
             .padding(.horizontal, 16)

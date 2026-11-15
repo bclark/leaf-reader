@@ -32,8 +32,8 @@ private val LeafColorScheme = darkColorScheme(
     surfaceVariant = DeepInkSurface,
     onSurfaceVariant = PaperWhiteMuted,
     outline = LeafSecondary,
-    error = ComicRose,
-    onError = PaperWhite,
+    error = ComicErrorDark,
+    onError = Color(0xFF690005),
 )
 
 /**
@@ -66,7 +66,7 @@ private val LeafLightColorScheme = lightColorScheme(
     surfaceVariant = Color(0xFFEAEDE5),
     onSurfaceVariant = Color(0xFF4A544C),
     outline = Color(0xFF718075),
-    error = Color(0xFF9E354C),
+    error = ComicErrorLight,
     onError = Color.White,
 )
 

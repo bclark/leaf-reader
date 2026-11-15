@@ -1,5 +1,7 @@
 package net.digitalbc.leafreader.data.db
 
+import androidx.room.Ignore
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -7,7 +9,7 @@ import androidx.room.PrimaryKey
  * A comic in the user's library. The archive is copied into app storage on import, so [filePath]
  * is a stable local path we fully control (the original picked file may become unreachable).
  * Reading progress is stored as [lastPage] + [lastSlot] so the reader resumes exactly where the
- * user left off, including which panel.
+ * user left off. Completion is stored separately from the page position.
  */
 @Entity(tableName = "comics")
 data class ComicEntity(
@@ -26,4 +28,11 @@ data class ComicEntity(
     val issueNumber: Float? = null,
     val dateAdded: Long,
     val lastOpened: Long,
-)
+    @ColumnInfo(defaultValue = "NULL") val completionOverride: Boolean? = null,
+) {
+    @get:Ignore
+    val isCompleted: Boolean get() = completionOverride ?: (pageCount > 0 && lastPage >= pageCount - 1)
+
+    @get:Ignore
+    val isUnread: Boolean get() = lastPage == 0 && completionOverride != true
+}

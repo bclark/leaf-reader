@@ -91,3 +91,39 @@ struct KickerText: View {
             .foregroundColor(color)
     }
 }
+
+/// Opt-in Dynamic Type for Archivo controls, preserving the variable-font weight.
+private struct LeafControlFont: ViewModifier {
+    @ScaledMetric private var size: CGFloat
+    let weight: CGFloat
+
+    init(size: CGFloat, weight: CGFloat) {
+        _size = ScaledMetric(wrappedValue: size, relativeTo: .body)
+        self.weight = weight
+    }
+
+    func body(content: Content) -> some View {
+        content.font(.archivo(size, weight: weight))
+    }
+}
+
+extension View {
+    func leafControlFont(_ size: CGFloat, weight: CGFloat = 600) -> some View {
+        modifier(LeafControlFont(size: size, weight: weight))
+    }
+}
+
+/// Stack before labels compress; menu groups can expand to fill their card.
+struct LeafAdaptiveControls<Content: View>: View {
+    var spacing: CGFloat = 8
+    var fillsWidth = false
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: spacing) { content }
+                .fixedSize(horizontal: !fillsWidth, vertical: false)
+            VStack(alignment: .leading, spacing: spacing) { content }
+        }
+    }
+}

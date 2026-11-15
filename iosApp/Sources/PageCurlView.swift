@@ -154,23 +154,30 @@ final class MetalCurlUIView: UIView {
         metalLayer.pixelFormat = .bgra8Unorm
         metalLayer.framebufferOnly = true
         metalLayer.isOpaque = true
-        metalLayer.contentsScale = UIScreen.main.scale
+        updateDrawableSize()
+        if #available(iOS 17.0, *) {
+            registerForTraitChanges([UITraitDisplayScale.self]) { (view: MetalCurlUIView, _: UITraitCollection) in
+                view.updateDrawableSize()
+                view.setNeedsLayout()
+            }
+        }
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard bounds.width > 0 && bounds.height > 0 else { return }
-        let scale = metalLayer.contentsScale
-        let expectedSize = CGSize(
-            width: max(bounds.width * scale, 1),
-            height: max(bounds.height * scale, 1)
-        )
-        if metalLayer.drawableSize != expectedSize {
-            metalLayer.drawableSize = expectedSize
-        }
+        updateDrawableSize()
         if let kind = currentKind {
             renderNow(kind: kind, progress: currentProgress, clearColor: currentClearColor)
         }
+    }
+
+    private func updateDrawableSize() {
+        // Local traits follow the window/display; layout also keeps the iOS16 path current.
+        let scale = max(traitCollection.displayScale, 1)
+        metalLayer.contentsScale = scale
+        guard bounds.width > 0 && bounds.height > 0 else { return }
+        let expectedSize = CGSize(width: max(bounds.width * scale, 1), height: max(bounds.height * scale, 1))
+        if metalLayer.drawableSize != expectedSize { metalLayer.drawableSize = expectedSize }
     }
 
     func update(kind: TurnKind?, progress: CGFloat, clearColor: MTLClearColor) {
@@ -200,14 +207,7 @@ final class MetalCurlUIView: UIView {
 
     private func renderNow(kind: TurnKind, progress: CGFloat, clearColor: MTLClearColor) {
         guard bounds.width > 0 && bounds.height > 0 else { return }
-        let scale = metalLayer.contentsScale
-        let expectedSize = CGSize(
-            width: max(bounds.width * scale, 1),
-            height: max(bounds.height * scale, 1)
-        )
-        if metalLayer.drawableSize != expectedSize {
-            metalLayer.drawableSize = expectedSize
-        }
+        updateDrawableSize()
         guard let drawable = metalLayer.nextDrawable() else { return }
         switch kind {
         case .single(let topImg, let bottomImg, let draw, let bottomDraw, let isPeelingFromRight):

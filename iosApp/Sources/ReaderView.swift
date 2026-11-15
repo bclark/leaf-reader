@@ -42,9 +42,14 @@ struct ReaderView: View {
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
+    @State private var viewportSize: CGSize = .zero
     @StateObject private var dismissal = ReaderDismissMotion()
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var settings: LeafSettings
+    @ObservedObject private var covers = CoverLoader.shared
+    @State private var hasReloaded = false
+    @State private var loadedRevision: [CoverLoader.Revision]?
     @State private var state: LoadState = .loading
     @State private var page = 0
     @State private var pageCount = 1
@@ -58,7 +63,7 @@ struct ReaderView: View {
     @StateObject private var curlAnimator = CurlAnimator()
 
     @State private var rightToLeft = false
-    @State private var showChrome = true
+    @State private var showChrome = false
     @State private var loadToken = 0
     @State private var widePages: Set<Int> = []
     @State private var sizesKnownThrough = 0
@@ -73,7 +78,7 @@ struct ReaderView: View {
     @State private var scrub: Double = 0
     @State private var scrubbing = false
 
-    private var title: String { comicURL.deletingPathExtension().lastPathComponent }
+    private var title: String { ComicMetadataStore.displayFilename(for: comicURL) }
     private var isReady: Bool { if case .ready = state { return true }; return false }
 
     private var currentLoader: PageLoader? {
@@ -121,7 +126,7 @@ struct ReaderView: View {
             settings.ground.ignoresSafeArea()
             switch state {
             case .loading:
-                if let openingCover {
+                if let openingCover, !hasReloaded {
                     GeometryReader { screen in
                         renderSinglePage(image: openingCover, panX: 0, panY: 0, zoom: 1, container: screen.size)
                     }
@@ -139,6 +144,8 @@ struct ReaderView: View {
             case .ready(let loader):
                 GeometryReader { screen in
                     readerBody(loader, size: screen.size)
+                        .onAppear { updateViewport(screen.size, loader: loader) }
+                        .onChange(of: screen.size) { updateViewport($0, loader: loader) }
                 }
                 .ignoresSafeArea()
             }
@@ -157,7 +164,7 @@ struct ReaderView: View {
         .leafAppearance(settings.theme)
         .navigationBarHidden(true)
         .statusBarHidden(!showChrome)
-        .task { load() }
+        .task(id: covers.revisions(for: [comicURL])) { load() }
         .onChange(of: scenePhase) { phase in
             if phase != .active { dismissal.reset() }
         }
@@ -170,6 +177,14 @@ struct ReaderView: View {
     }
 
     private func load() {
+        loadToken &+= 1
+        currentSpread = nil; nextSpread = nil; prevSpread = nil
+        widePages = []; sizesKnownThrough = 0
+        curlAnimator.reset()
+        resetZoom()
+        scrubbing = false
+        hasReloaded = loadedRevision != nil
+        loadedRevision = covers.revisions(for: [comicURL])
         do {
             let archive = try CbzArchive(url: comicURL)
             let loader = PageLoader(archive: archive)
@@ -197,7 +212,11 @@ struct ReaderView: View {
     }
 
     private func persist() {
-        ReadingProgress.set(comicURL, page: page, step: -1, total: pageCount, rtl: rightToLeft)
+        // A replaced archive's old reader must not overwrite reconciled progress.
+        guard isReady, loadedRevision == covers.revisions(for: [comicURL]) else { return }
+        // A single-page comic uses page 1 as its completed marker, while displaying page 0.
+        let savedPage = pageCount == 1 && ReadingProgress.isCompleted(comicURL) ? 1 : page
+        ReadingProgress.set(comicURL, page: savedPage, step: -1, total: pageCount, rtl: rightToLeft)
     }
 
     private func syncLoadSpread(loader: PageLoader, spread: ReaderSpread?) -> DisplaySpread? {
@@ -246,10 +265,25 @@ struct ReaderView: View {
         }
     }
 
+    private func updateViewport(_ size: CGSize, loader: PageLoader) {
+        guard size.width > 0, size.height > 0, size != viewportSize else { return }
+        viewportSize = size
+        // A resize cancels the old turn rather than committing its now-obsolete destination.
+        curlAnimator.reset()
+        dismissal.reset()
+        scrubbing = false
+        scrub = Double(page)
+        nextSpread = nil
+        prevSpread = nil
+        loadCurrentAndAdjacent(loader: loader, targetPage: page)
+    }
+
     private func loadCurrentAndAdjacent(loader: PageLoader, targetPage: Int) {
-        let spreadActive = isSpreadActive(for: UIScreen.main.bounds.size)
+        guard viewportSize.width > 0, viewportSize.height > 0 else { return }
+        let spreadActive = isSpreadActive(for: viewportSize)
         guard let currS = resolveSpread(for: targetPage, in: loader, spreadActive: spreadActive) else { return }
         let currFirst = Int(currS.first)
+        let currSecond = currS.second.map { Int($0.int32Value) }
 
         resetZoom()
         persist()
@@ -258,9 +292,9 @@ struct ReaderView: View {
         let token = loadToken
 
         // Reuse preloaded next or prev if matching
-        if let next = nextSpread, next.firstPage == currFirst, next.isReady {
+        if let next = nextSpread, next.firstPage == currFirst, next.secondPage == currSecond, next.isReady {
             currentSpread = next
-        } else if let prev = prevSpread, prev.firstPage == currFirst, prev.isReady {
+        } else if let prev = prevSpread, prev.firstPage == currFirst, prev.secondPage == currSecond, prev.isReady {
             currentSpread = prev
         } else {
             currentSpread = nil
@@ -459,7 +493,7 @@ struct ReaderView: View {
         .clipped()
         .overlay {
             if currentSpread == nil {
-                if let openingCover, page == 0 {
+                if let openingCover, !hasReloaded, page == 0 {
                     renderSinglePage(image: openingCover, panX: 0, panY: 0, zoom: 1, container: size)
                 } else {
                     ProgressView().tint(Leaf.ochre)
@@ -469,7 +503,6 @@ struct ReaderView: View {
         .scaleEffect(1 - CGFloat(ReaderDismissGesture.shared.progress(deltaY: Float(dismissal.offset.height), viewportHeight: Float(size.height))) * 0.08)
         .rotationEffect(.degrees(Double(min(max(dismissal.offset.width / max(size.width, 1) * 14, -10), 10))))
         .offset(dismissal.offset)
-        .onChange(of: size) { _ in dismissal.reset() }
         // Unified gesture layer: pinch-to-zoom, pan when zoomed, tap zones, and drag-to-flip
         .overlay {
             ReaderGestures(
@@ -580,7 +613,7 @@ struct ReaderView: View {
             .frame(width: size.width, height: size.height)
             .contentShape(Rectangle())
             .accessibilityIdentifier("ReaderCanvas")
-            .allowsHitTesting(currentSpread?.isReady == true)
+            .allowsHitTesting(currentSpread?.isReady == true && size == viewportSize)
         }
     }
 
@@ -599,12 +632,12 @@ struct ReaderView: View {
         } else {
             height = CGFloat(computeSinglePageDraw(for: first, in: size).scaledHeight)
         }
-        return height * zoom <= size.height + 1 / UIScreen.main.scale
+        return height * zoom <= size.height + 1 / max(displayScale, 1)
     }
 
     private var pageStatus: String {
         guard let loader = currentLoader else { return ReaderTurnLogic.formatPageStatus(page: page, pageCount: pageCount) }
-        let spreadActive = isSpreadActive(for: UIScreen.main.bounds.size)
+        let spreadActive = isSpreadActive(for: viewportSize)
         let s = resolveSpread(for: page, in: loader, spreadActive: spreadActive)
         let first = Int(s?.first ?? Int32(page))
         let second = s?.second != nil ? Int(s!.second!.int32Value) : nil
@@ -621,7 +654,7 @@ struct ReaderView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Button { dismiss() } label: {
-                    Image(systemName: "arrow.left")
+                    Image(systemName: "chevron.left")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(Leaf.cream)
                         .frame(width: 44, height: 44)
@@ -660,8 +693,8 @@ struct ReaderView: View {
 
     @ViewBuilder
     private var readerControls: some View {
-        SpreadChip(spreadEnabled: isSpreadActive(for: UIScreen.main.bounds.size)) {
-            let screen = UIScreen.main.bounds.size
+        SpreadChip(spreadEnabled: isSpreadActive(for: viewportSize)) {
+            let screen = viewportSize
             let isLandscape = screen.width > screen.height
             if isLandscape {
                 settings.landscapeSpread.toggle()
@@ -699,7 +732,7 @@ struct ReaderView: View {
             }
             ComicScrubberSlider(
                 value: $scrub,
-                range: 0...Double(max(pageCount - 1, 1)),
+                range: 0...Double(max(pageCount - 1, 0)),
                 onEditingChanged: { editing in
                     if editing {
                         scrubbing = true
@@ -900,7 +933,7 @@ struct ReaderView: View {
             curlAnimator.completeImmediately()
         }
         guard !curlAnimator.isAnimating && curlAnimator.direction == nil else { return }
-        let spreadActive = isSpreadActive(for: UIScreen.main.bounds.size)
+        let spreadActive = isSpreadActive(for: viewportSize)
         let s = resolveSpread(for: page, in: loader, spreadActive: spreadActive)
 
         let target: Int
@@ -958,17 +991,19 @@ struct ReaderView: View {
     }
 
     private func preloadAdjacent(for target: Int, targetSpreadS: ReaderSpread?, in loader: PageLoader) {
-        let spreadActive = isSpreadActive(for: UIScreen.main.bounds.size)
+        loadToken &+= 1
+        let token = loadToken
+        let spreadActive = isSpreadActive(for: viewportSize)
         let newNextTarget = Int(targetSpreadS?.after ?? Int32(target + 1))
         let newNextS = (newNextTarget < loader.pageCount) ? self.resolveSpread(for: newNextTarget, in: loader, spreadActive: spreadActive) : nil
         let newPrevTarget = target - 1
         let newPrevS = (newPrevTarget >= 0) ? self.resolveSpread(for: newPrevTarget, in: loader, spreadActive: spreadActive) : nil
 
         self.loadSpreadImages(loader: loader, spread: newNextS) { ds in
-            if self.page == target { self.nextSpread = ds }
+            if self.page == target && self.loadToken == token { self.nextSpread = ds }
         }
         self.loadSpreadImages(loader: loader, spread: newPrevS) { ds in
-            if self.page == target { self.prevSpread = ds }
+            if self.page == target && self.loadToken == token { self.prevSpread = ds }
         }
     }
 
@@ -1155,14 +1190,15 @@ struct DirectionChip: View {
                 Image(systemName: "arrow.left.arrow.right")
                     .font(.system(size: 15, weight: .semibold)).foregroundColor(Leaf.cream)
                 Text(rightToLeft ? String(localized: "RTL") : String(localized: "LTR"))
-                    .font(.archivo(11, weight: 700)).tracking(1).foregroundColor(Leaf.cream)
+                    .leafControlFont(11, weight: 700).tracking(1).foregroundColor(Leaf.cream)
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background(Leaf.cream.opacity(0.12))
             .clipShape(Capsule())
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
-        .lineLimit(1)
-        .fixedSize(horizontal: true, vertical: false)
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityLabel(rightToLeft
             ? Text("Reading direction: right to left")
             : Text("Reading direction: left to right"))
@@ -1182,14 +1218,17 @@ struct SpreadChip: View {
                 Image(systemName: "book.closed")
                     .font(.system(size: 14, weight: .semibold)).foregroundColor(Leaf.cream)
                 Text(spreadEnabled ? String(localized: "SPREAD") : String(localized: "SINGLE"))
-                    .font(.archivo(11, weight: 700)).tracking(1).foregroundColor(Leaf.cream)
+                    .leafControlFont(11, weight: 700).tracking(1).foregroundColor(Leaf.cream)
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background(Leaf.cream.opacity(0.12))
             .clipShape(Capsule())
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
-        .lineLimit(1)
-        .fixedSize(horizontal: true, vertical: false)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityLabel("Two-page spread")
+        .accessibilityValue(spreadEnabled ? Text("Two-page spread") : Text("Single page"))
         .accessibilityIdentifier("SpreadChip")
         .buttonStyle(.plain)
     }
@@ -1206,14 +1245,17 @@ struct FitModeChip: View {
                 Image(systemName: fitMode == .fitWidth ? "arrow.left.and.right" : "aspectratio")
                     .font(.system(size: 14, weight: .semibold)).foregroundColor(Leaf.cream)
                 Text(fitMode == .fitWidth ? String(localized: "WIDTH") : String(localized: "PAGE"))
-                    .font(.archivo(11, weight: 700)).tracking(1).foregroundColor(Leaf.cream)
+                    .leafControlFont(11, weight: 700).tracking(1).foregroundColor(Leaf.cream)
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background(Leaf.cream.opacity(0.12))
             .clipShape(Capsule())
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
-        .lineLimit(1)
-        .fixedSize(horizontal: true, vertical: false)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityLabel("Page Fit")
+        .accessibilityValue(fitMode == .fitWidth ? Text("FIT TO WIDTH") : Text("FIT TO PAGE"))
         .accessibilityIdentifier("FitModeChip")
         .buttonStyle(.plain)
     }
@@ -1228,8 +1270,8 @@ struct ComicScrubberSlider: View {
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width
-            let total = max(range.upperBound - range.lowerBound, 1)
-            let fraction = max(0, min(1, (value - range.lowerBound) / total))
+            let total = range.upperBound - range.lowerBound
+            let fraction = max(0, min(1, (value - range.lowerBound) / max(total, 1)))
 
             ZStack(alignment: .leading) {
                 Capsule()
@@ -1253,7 +1295,7 @@ struct ComicScrubberSlider: View {
                 DragGesture(minimumDistance: 0)
                     .onChanged { gesture in
                         onEditingChanged(true)
-                        let newFraction = max(0, min(1, gesture.location.x / w))
+                        let newFraction = max(0, min(1, gesture.location.x / max(w, 1)))
                         value = range.lowerBound + Double(newFraction) * total
                     }
                     .onEnded { _ in
@@ -1261,7 +1303,24 @@ struct ComicScrubberSlider: View {
                     }
             )
         }
-        .frame(height: 28)
+        .frame(height: 44)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("PAGE")
+        .accessibilityValue(Text("Page \(Int(value.rounded()) + 1)/\(Int(range.upperBound) + 1)"))
+        .accessibilityAdjustableAction { direction in
+            let delta: Double
+            switch direction {
+            case .increment: delta = 1
+            case .decrement: delta = -1
+            @unknown default: return
+            }
+            let next = min(range.upperBound, max(range.lowerBound, value.rounded() + delta))
+            guard next != value else { return }
+            // Commit through the same page-loading path used when a drag ends.
+            onEditingChanged(true)
+            value = next
+            onEditingChanged(false)
+        }
         .accessibilityIdentifier("ComicScrubberSlider")
     }
 }

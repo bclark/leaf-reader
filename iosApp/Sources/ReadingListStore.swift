@@ -41,8 +41,12 @@ public enum ReadingListStore {
     @discardableResult
     public static func createList(name: String, itemFilenames: [String] = []) -> ReadingListRecord {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let list = ReadingListRecord(name: trimmed.isEmpty ? String(localized: "Reading List") : trimmed, itemFilenames: itemFilenames)
         lock.lock()
+        let links = defaults.dictionary(forKey: "leaf.readingLists.remoteCopies.v1") as? [String: String] ?? [:]
+        var seen = Set<String>()
+        let members = itemFilenames.map { filename in links.first(where: { $0.value == filename })?.key ?? filename }
+            .filter { seen.insert($0).inserted }
+        let list = ReadingListRecord(name: trimmed.isEmpty ? String(localized: "Reading List") : trimmed, itemFilenames: members)
         var lists = inMemoryLists ?? loadLocked()
         lists.append(list)
         inMemoryLists = lists
@@ -78,7 +82,9 @@ public enum ReadingListStore {
         var lists = inMemoryLists ?? loadLocked()
         if let idx = lists.firstIndex(where: { $0.id == listId }) {
             var existing = lists[idx].itemFilenames
-            for f in filenames {
+            let links = defaults.dictionary(forKey: "leaf.readingLists.remoteCopies.v1") as? [String: String] ?? [:]
+            for filename in filenames {
+                let f = links.first(where: { $0.value == filename })?.key ?? filename
                 if !existing.contains(f) {
                     existing.append(f)
                 }
@@ -88,6 +94,48 @@ public enum ReadingListStore {
             saveLocked(lists)
         }
         lock.unlock()
+    }
+
+    /// Attach a downloaded copy without making a second list member or changing its position.
+    static func linkRemote(_ reference: JellyfinListReference, filename: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        var links = defaults.dictionary(forKey: "leaf.readingLists.remoteCopies.v1") as? [String: String] ?? [:]
+        if links[reference.token] != filename {
+            links[reference.token] = filename
+            defaults.set(links, forKey: "leaf.readingLists.remoteCopies.v1")
+        }
+        var lists = inMemoryLists ?? loadLocked()
+        let original = lists
+        for index in lists.indices {
+            let values = lists[index].itemFilenames.map { $0 == filename ? reference.token : $0 }
+            var seen = Set<String>()
+            lists[index].itemFilenames = values.filter { seen.insert($0).inserted }
+        }
+        if lists != original {
+            inMemoryLists = lists
+            saveLocked(lists)
+        }
+    }
+
+    /// Forget the removed copy while retaining the account-scoped list member.
+    static func unlinkLocalCopy(filename: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        let links = defaults.dictionary(forKey: "leaf.readingLists.remoteCopies.v1") as? [String: String] ?? [:]
+        defaults.set(links.filter { $0.value != filename }, forKey: "leaf.readingLists.remoteCopies.v1")
+    }
+
+    static func localFilename(for member: String) -> String? {
+        guard JellyfinListReference(token: member) != nil else { return member }
+        lock.lock()
+        defer { lock.unlock() }
+        return defaults.dictionary(forKey: "leaf.readingLists.remoteCopies.v1")?[member] as? String
+    }
+
+    /// Unknown progress remains a candidate; never skip an unavailable member in list order.
+    static func nextMember(in members: [String], completed: (String) -> Bool?) -> String? {
+        members.first { completed($0) != true } ?? members.first
     }
 
     public static func removeComic(from listId: String, filename: String) {

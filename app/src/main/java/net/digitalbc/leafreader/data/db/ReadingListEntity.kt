@@ -19,11 +19,18 @@ data class ReadingListEntity(
  */
 @Entity(
     tableName = "reading_list_items",
-    primaryKeys = ["listId", "comicId"],
+    primaryKeys = ["listId", "referenceKey"],
 )
 data class ReadingListItemEntity(
     val listId: Long,
     val comicId: Long,
     val sortOrder: Int,
     val addedAt: Long = System.currentTimeMillis(),
+    val referenceKey: String = "local:$comicId",
+    val serverId: String? = null,
+    val userId: String? = null,
+    val itemId: String? = null,
+    val libraryId: String? = null,
+    val snapshot: String? = null,
+    val title: String? = null,
 )

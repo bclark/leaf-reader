@@ -8,6 +8,11 @@ struct ReadingListDetailView: View {
     @ObservedObject var library: LibraryStore
     let onDismiss: () -> Void
     var initialShowAddComics: Bool = false
+    var jellyfin: JellyfinBrowserModel? = nil
+    var catalogue: JellyfinCatalogueModel? = nil
+    @State var downloadedOnly = false
+    @Binding var unreadOnly: Bool
+    var searchQuery = ""
 
     @Namespace private var coverTransition
     @State private var openComic: OpenComic?
@@ -27,7 +32,7 @@ struct ReadingListDetailView: View {
     private var listComics: [URL] {
         guard let list = currentList else { return [] }
         let map = Dictionary(uniqueKeysWithValues: library.comics.map { ($0.lastPathComponent, $0) })
-        return list.itemFilenames.compactMap { map[$0] }
+        return list.itemFilenames.compactMap { ReadingListStore.localFilename(for: $0).flatMap { map[$0] } }
     }
 
     private var completedCount: Int {
@@ -89,7 +94,7 @@ struct ReadingListDetailView: View {
                                 .font(.system(size: 16, weight: .bold))
                                 .foregroundColor(Leaf.ink)
                             Text("ADD COMICS")
-                                .font(.anton(15))
+                                .font(.custom("Anton-Regular", size: 15, relativeTo: .headline))
                                 .tracking(0.8)
                                 .foregroundColor(Leaf.ink)
                         }
@@ -163,23 +168,27 @@ struct ReadingListDetailView: View {
                     .frame(width: 38, height: 38)
                     .background(Leaf.cream.opacity(0.14))
                     .clipShape(Circle())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Back")
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(currentList?.name ?? String(localized: "Reading List"))
-                    .font(.anton(18))
+                    .font(.custom("Anton-Regular", size: 18, relativeTo: .headline))
                     .foregroundColor(Leaf.cream)
                     .lineLimit(1)
                 Text("CUSTOM STORYLINE / READING LIST")
-                    .font(.archivo(11, weight: 600))
+                    .leafControlFont(11, weight: 600)
                     .foregroundColor(Leaf.creamMuted)
                     .lineLimit(1)
             }
 
             Spacer()
 
-            HStack(spacing: 8) {
+            HStack(spacing: 4) {
+                UnreadFilterButton(isOn: $unreadOnly, onBrand: true)
                 Button {
                     renameInput = currentList?.name ?? ""
                     showRenameAlert = true
@@ -190,6 +199,8 @@ struct ReadingListDetailView: View {
                         .frame(width: 36, height: 36)
                         .background(Leaf.cream.opacity(0.14))
                         .clipShape(Circle())
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Rename Reading List")
@@ -203,6 +214,8 @@ struct ReadingListDetailView: View {
                         .frame(width: 36, height: 36)
                         .background(Leaf.cream.opacity(0.14))
                         .clipShape(Circle())
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Delete Reading List")
@@ -221,13 +234,25 @@ struct ReadingListDetailView: View {
 
         return ScrollView {
             VStack(spacing: 16) {
-                heroCard
+                UnreadFilterChip(isOn: $unreadOnly)
+                if currentList?.itemFilenames.contains(where: { JellyfinListReference(token: $0) != nil }) != true {
+                    heroCard
+                }
 
-                if listComics.isEmpty {
+                if let list = currentList, list.itemFilenames.contains(where: { JellyfinListReference(token: $0) != nil }) {
+                    JellyfinMixedListContent(list: list, browser: jellyfin, catalogue: catalogue,
+                        library: library, downloadedOnly: $downloadedOnly,
+                        unreadOnly: $unreadOnly, searchQuery: searchQuery,
+                        openLocal: { openComic = OpenComic(url: $0) })
+                } else if listComics.isEmpty {
                     emptyStateCard
                 } else {
                     LazyVGrid(columns: gridColumns, spacing: cols >= 4 ? 14 : 18) {
-                        ForEach(Array(listComics.enumerated()), id: \.element) { index, url in
+                        ForEach(Array(listComics.enumerated()).filter {
+                            (!unreadOnly || !ReadingProgress.isCompleted($0.element)) &&
+                            LibraryBrowseState.matches(searchQuery, values: [$0.element.lastPathComponent,
+                                library.metadata[$0.element.lastPathComponent]?.title ?? "", currentList?.name ?? ""])
+                        }, id: \.element) { index, url in
                             let isRead = ReadingProgress.isCompleted(url)
                             let lastPage = ReadingProgress.get(url)?.page ?? 0
                             ReadingListComicCard(
@@ -306,11 +331,11 @@ struct ReadingListDetailView: View {
             : String(localized: "\(completedCount) OF \(listComics.count) READ")
         let progressFraction = listComics.isEmpty ? 0.0 : Double(completedCount) / Double(listComics.count)
 
-        return HStack(spacing: 12) {
+        return LeafAdaptiveControls(spacing: 12) {
             // Left: Unified Read Badge + Slim Progress Bar
             VStack(alignment: .leading, spacing: 6) {
                 Text(statusText)
-                    .font(.anton(12))
+                    .font(.custom("Anton-Regular", size: 12, relativeTo: .headline))
                     .tracking(0.5)
                     .foregroundColor(badgeColor)
                     .lineLimit(1)
@@ -355,6 +380,8 @@ struct ReadingListDetailView: View {
                                         lineWidth: 1
                                     )
                             )
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
 
@@ -366,13 +393,14 @@ struct ReadingListDetailView: View {
                                 Image(systemName: "play.fill")
                                     .font(.system(size: 12, weight: .bold))
                                 Text(shortActionLabel)
-                                    .font(.anton(13))
+                                    .font(.custom("Anton-Regular", size: 13, relativeTo: .headline))
                                     .tracking(0.6)
-                                    .lineLimit(1)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             .foregroundColor(Leaf.ink)
                             .padding(.horizontal, 12)
-                            .frame(height: 36)
+                            .padding(.vertical, 8)
+                            .frame(minHeight: 44)
                             .background(Leaf.ochre)
                             .clipShape(RoundedCornerShape(cornerRadius: 8))
                             .overlay(
@@ -400,10 +428,10 @@ struct ReadingListDetailView: View {
     private var emptyStateCard: some View {
         VStack(spacing: 10) {
             Text("THIS LIST IS EMPTY")
-                .font(.anton(16))
+                .font(.custom("Anton-Regular", size: 16, relativeTo: .headline))
                 .foregroundColor(Leaf.text.opacity(0.75))
             Text("Tap + ADD COMICS in the bottom corner to curate your reading order.")
-                .font(.archivo(12, weight: 500))
+                .leafControlFont(12, weight: 500)
                 .foregroundColor(Leaf.secondaryText)
                 .multilineTextAlignment(.center)
         }
@@ -430,7 +458,7 @@ struct ReadingListDetailView: View {
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(addSearchQuery.isEmpty ? Leaf.secondaryText : Leaf.goldText)
                         TextField("SEARCH BY TITLE OR SERIES…", text: $addSearchQuery)
-                            .font(.archivo(13, weight: 600))
+                            .leafControlFont(13, weight: 600)
                             .foregroundColor(Leaf.text)
                             .tint(Leaf.goldText)
                             .textInputAutocapitalization(.characters)
@@ -439,6 +467,9 @@ struct ReadingListDetailView: View {
                             Button { addSearchQuery = "" } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .foregroundColor(Leaf.secondaryText)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                                    .accessibilityLabel("CLEAR SEARCH")
                             }
                             .buttonStyle(.plain)
                         }
@@ -456,7 +487,7 @@ struct ReadingListDetailView: View {
                     if availableComics.isEmpty {
                         VStack(spacing: 8) {
                             Text(q.isEmpty ? String(localized: "All library comics are already in this reading list.") : String(localized: "No comics matching “\(addSearchQuery)”"))
-                                .font(.archivo(13))
+                                .leafControlFont(13)
                                 .foregroundColor(Leaf.secondaryText)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -471,7 +502,7 @@ struct ReadingListDetailView: View {
                                     SmallCoverThumb(url: url)
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(url.deletingPathExtension().lastPathComponent)
-                                            .font(.archivo(13, weight: 700))
+                                            .leafControlFont(13, weight: 700)
                                             .foregroundColor(Leaf.text)
                                             .lineLimit(1)
                                         if let s = library.metadata[url.lastPathComponent]?.series, !s.isEmpty {
@@ -482,7 +513,7 @@ struct ReadingListDetailView: View {
                                                 return ""
                                             }()
                                             Text("\(s)\(issuePart)")
-                                                .font(.archivo(11))
+                                                .leafControlFont(11)
                                                 .foregroundColor(Leaf.secondaryText)
                                                 .lineLimit(1)
                                         }
@@ -523,6 +554,7 @@ struct ReadingListDetailView: View {
 /// Comic card inside `ReadingListDetailView` showing sequence badge (#1, #2),
 /// top-right quick-remove (x), and bottom-right Move Up / Move Down arrows.
 struct ReadingListComicCard: View {
+    @ObservedObject private var covers = CoverLoader.shared
     @EnvironmentObject private var settings: LeafSettings
     let url: URL
     let sequenceNumber: Int
@@ -557,9 +589,7 @@ struct ReadingListComicCard: View {
             ZStack(alignment: .bottom) {
                 Group {
                     if let cover {
-                        Image(uiImage: cover)
-                            .resizable()
-                            .scaledToFill()
+                        LibraryCoverArtwork(image: cover)
                     } else {
                         GeneratedCover(
                             title: url.deletingPathExtension().lastPathComponent,
@@ -594,6 +624,8 @@ struct ReadingListComicCard: View {
                                 .frame(width: 22, height: 22)
                                 .background(Leaf.deepInk.opacity(0.85))
                                 .clipShape(Circle())
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Remove from reading list")
@@ -601,39 +633,6 @@ struct ReadingListComicCard: View {
                     Spacer()
                 }
                 .padding(6)
-
-                // Quick Move Up / Move Down buttons at bottom-right above the progress bar
-                if onMoveUp != nil || onMoveDown != nil {
-                    HStack(spacing: 4) {
-                        Spacer()
-                        if let onMoveUp {
-                            Button(action: onMoveUp) {
-                                Image(systemName: "arrow.up")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(Leaf.cream)
-                                    .frame(width: 22, height: 22)
-                                    .background(Leaf.deepInk.opacity(0.85))
-                                    .clipShape(Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Move earlier in reading order")
-                        }
-                        if let onMoveDown {
-                            Button(action: onMoveDown) {
-                                Image(systemName: "arrow.down")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(Leaf.cream)
-                                    .frame(width: 22, height: 22)
-                                    .background(Leaf.deepInk.opacity(0.85))
-                                    .clipShape(Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Move later in reading order")
-                        }
-                    }
-                    .padding(.trailing, 6)
-                    .padding(.bottom, columns >= 4 ? 10 : 12)
-                }
 
                 // Bottom progress bar
                 GeometryReader { geo in
@@ -655,6 +654,41 @@ struct ReadingListComicCard: View {
                 onOpen()
             }
 
+            // Keep reorder targets separate from the cover in dense grids.
+            if onMoveUp != nil || onMoveDown != nil {
+                LeafAdaptiveControls(spacing: 4) {
+                    if let onMoveUp {
+                        Button(action: onMoveUp) {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(Leaf.cream)
+                                .frame(width: 22, height: 22)
+                                .background(Leaf.deepInk.opacity(0.85))
+                                .clipShape(Circle())
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Move earlier in reading order")
+                    }
+                    if let onMoveDown {
+                        Button(action: onMoveDown) {
+                            Image(systemName: "arrow.down")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(Leaf.cream)
+                                .frame(width: 22, height: 22)
+                                .background(Leaf.deepInk.opacity(0.85))
+                                .clipShape(Circle())
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Move later in reading order")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+
             Text(displayTitle)
                 .font(.archivo(columns >= 4 ? 10 : 12, weight: 800))
                 .foregroundColor(Leaf.text)
@@ -669,7 +703,7 @@ struct ReadingListComicCard: View {
                 .lineLimit(1)
                 .padding(.top, 2)
         }
-        .task {
+        .task(id: covers.revisions(for: [url])) {
             let loaded = await CoverLoader.load(for: url)
             cover = loaded.cover
             pages = loaded.pageCount

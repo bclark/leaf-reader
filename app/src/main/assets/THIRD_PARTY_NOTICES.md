@@ -32,7 +32,7 @@ MPL-2.0 (Leaf) is compatible with combining larger works governed by the above l
 ### Apache License 2.0
 Full text: [`THIRD_PARTY_LICENSES/Apache-2.0.txt`](https://github.com/bclark/leaf-reader/blob/main/THIRD_PARTY_LICENSES/Apache-2.0.txt)
 
-- **Kotlin Standard Library & KotlinX Coroutines** (`1.9.0` / `2.2.10`) — © JetBrains s.r.o. and Kotlin Foundation contributors.
+- **Kotlin Standard Library & KotlinX Coroutines** (`2.2.10` / `1.9.0`) — © JetBrains s.r.o. and Kotlin Foundation contributors.
 - **AndroidX & Jetpack Libraries**: `core-ktx:1.15.0`, `lifecycle-*:2.8.7`, `activity-compose:1.9.3`, `compose-bom:2024.12.01`, `navigation-compose:2.8.5`, `documentfile:1.0.1`, `room-*:2.7.0-alpha13` — © The Android Open Source Project.
 - **Apache Commons Compress** (`1.27.1`) — © The Apache Software Foundation. Used for CBZ/ZIP archive reading on Android.
 - **SMBJ** (`0.13.0`) — © Jeroen van Erp (Hierynomus). Used for SMB network drive connectivity on Android.
@@ -74,21 +74,21 @@ Upstream Source: https://github.com/omicronapps/7-Zip-JBinding-4Android (wraps 7
      - Unzip the APK archive (`unzip Leaf.apk -d /tmp/apk`).
      - Replace `lib/<abi>/lib7-Zip-JBinding.so` with a custom-compiled version of the library.
      - Re-align and re-sign the APK using `zipalign` and `apksigner`.
-- **Platform Scope:** iOS does **not** bundle 7-Zip-JBinding or any LGPL code; iOS uses `libarchive` (BSD-licensed) for RAR decompression.
+- **Platform Scope:** iOS does **not** use this Android 7-Zip-JBinding dependency; it uses `libarchive` for RAR decompression. This Android notice does not certify the full iOS dependency or license inventory.
 
 ---
 
-## Bundled Panel-Detection Model & Training Data
+## Historical Panel-Detection Model & Training Data
 
 Full text: [`THIRD_PARTY_LICENSES/AGPL-3.0.txt`](https://github.com/bclark/leaf-reader/blob/main/THIRD_PARTY_LICENSES/AGPL-3.0.txt)
 
-- **Model Asset:** `manga_panel_detector_int8.tflite` (bundled in `app/src/main/assets/` on Android and `iosApp/Sources/` on iOS).
+- **Model Asset:** `manga_panel_detector_int8.tflite` is historical repository/training material. Whole-page Android release builds exclude the model and its inference runtime; this notice does not mean they are packaged.
 - **Provenance & Model License (AGPL-3.0):**
   - Originates from [`leoxs22/manga-panel-detector-yolo26n`](https://huggingface.co/leoxs22/manga-panel-detector-yolo26n).
   - The model was trained and exported using **Ultralytics YOLO** (`yolov8n` / `yolo11n`) software and pretrained weights.
   - While originally labelled Apache-2.0 on HuggingFace, the upstream author explicitly corrected the license label to **GNU AGPL-3.0** because it derives from Ultralytics AGPL-3.0 pretrained weights.
   - Full Python training, dataset conversion, and export scripts are located in `training/` within this repository (`train.py`, `export_tflite.py`, `manga109_to_yolo.py`, `comics_to_yolo.py`).
-  - *Evaluation Note:* Retaining an AGPL-3.0 model asset in an open-source App Store or Google Play release is under review. An alternative model trained from a permissively licensed base (e.g., RT-DETR or YOLOX) on public domain datasets is recommended for future releases.
+  - *Release Scope:* The whole-page Android app does not run panel detection or distribute this model. The historical provenance and training disclosures below are retained for repository material, without adding a model or dataset to the Android package.
 
 - **Training Data Disclosures (Manga109-s & COMICS):**
   - **Manga109-s Dataset:** The model was trained in part on annotations from the **Manga109-s dataset** (developed by the University of Tokyo / Manga109 Consortium).

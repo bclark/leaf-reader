@@ -1,0 +1,6 @@
+<resources>
+    <string name="library_continue_reading">Continuar leyendo</string>
+    <string name="library_continue_accessible">Continuar leyendo, %1$s, %2$s</string>
+    <string name="library_continue_failed">No se pudo obtener este cómic. Inténtalo de nuevo cuando el servidor esté disponible.</string>
+    <string name="library_continue_unreadable">Esta copia ya no se puede leer. Añádela de nuevo para continuar.</string>
+</resources>

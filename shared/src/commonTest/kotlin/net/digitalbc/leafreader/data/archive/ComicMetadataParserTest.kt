@@ -7,6 +7,27 @@ import kotlin.test.assertNull
 class ComicMetadataParserTest {
 
     @Test
+    fun comicInfoDecodesEntitiesExactlyOnce() {
+        val meta = ComicMetadataParser.parseComicInfoXml("""
+            <ComicInfo><Series>Pepper&amp;Carrot</Series>
+            <Title>&lt;Magic&gt; &quot;Tea&quot; &apos;Party&apos; &#38; &#x1F955; &amp;amp;</Title>
+            <Number>&#49;</Number><Year>&#x32;026</Year></ComicInfo>
+        """.trimIndent())
+        assertEquals("Pepper&Carrot", meta.series)
+        assertEquals("<Magic> \"Tea\" 'Party' & 🥕 &amp;", meta.title)
+        assertEquals(1f, meta.issueNumber)
+        assertEquals(2026, meta.year)
+    }
+
+    @Test
+    fun comicInfoPreservesLiteralAndInvalidEntities() {
+        val text = "<![CDATA[Pepper&amp;Carrot]]> &amp;amp; &unknown; &#0; &#xD800; &#x110000; &#999999999999;"
+        assertEquals("Pepper&amp;Carrot &amp; &unknown; &#0; &#xD800; &#x110000; &#999999999999;",
+            ComicMetadataParser.parseComicInfoXml("<Series>$text</Series>").series)
+        assertEquals("Pepper&amp;Carrot", ComicMetadataParser.parseFilename("Pepper&amp;Carrot.cbz").series)
+    }
+
+    @Test
     fun testParseFilenameWithYearAndIssue() {
         val meta = ComicMetadataParser.parseFilename("Deadpool (2016) 001.cbz")
         assertEquals("Deadpool", meta.series)

@@ -35,6 +35,16 @@ public enum ComicMetadataStore {
     private static let lock = NSLock()
     private static var inMemoryMetadata: [String: ComicMetadataRecord]?
 
+    /// Older Jellyfin imports used UUID filenames; keep their progress keys intact.
+    static func displayFilename(for url: URL) -> String {
+        let base = url.deletingPathExtension().lastPathComponent
+        if base.hasPrefix("Jellyfin-"), UUID(uuidString: String(base.dropFirst(9))) != nil,
+           let title = get(url)?.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+            return title
+        }
+        return base
+    }
+
     public static func get(_ url: URL) -> ComicMetadataRecord? {
         let filename = url.lastPathComponent
         lock.lock()

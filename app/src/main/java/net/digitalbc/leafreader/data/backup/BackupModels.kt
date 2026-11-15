@@ -28,6 +28,7 @@ data class BackupComic(
     val lastSlot: Int = 0,
     val dateAdded: Long = 0,
     val lastOpened: Long = 0,
+    val completed: Boolean? = null,
 )
 
 data class BackupReadingListItem(
@@ -35,6 +36,11 @@ data class BackupReadingListItem(
     val series: String? = null,
     val issueNumber: Float? = null,
     val sortOrder: Int = 0,
+    val serverId: String? = null,
+    val userId: String? = null,
+    val itemId: String? = null,
+    val libraryId: String? = null,
+    val remoteSnapshot: String? = null,
 )
 
 data class BackupReadingList(
@@ -58,6 +64,7 @@ data class BackupPreview(
     val appVersion: String,
     val totalComicsInBackup: Int,
     val matchingComicsCount: Int,
+    val skippedReadingListItemsCount: Int,
     val readingListsCount: Int,
     val hasSettings: Boolean,
 )

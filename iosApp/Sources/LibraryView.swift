@@ -18,12 +18,35 @@ private struct OpenReadingList: Identifiable {
 /// and configurable grid columns.
 struct LibraryView: View {
     @EnvironmentObject private var settings: LeafSettings
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var library = LibraryStore()
+    @StateObject private var jellyfin = JellyfinBrowserModel()
+    @StateObject private var catalogue = JellyfinCatalogueModel()
+    @AppStorage("leaf.jellyfin.onboardingChosen") private var onboardingChosen = false
+    @State private var browse = LibraryBrowseState()
+    @State private var offlineComics: Set<URL> = []
+    @State private var offlineRevisions: Set<CoverLoader.Revision> = []
+    @State private var checkingOffline = false
+    private typealias ScrollTarget = (id: String, anchor: UnitPoint)
+    @State private var scrollPositions: [LibraryBrowseState.ViewMode: ScrollTarget] = [:]
+    @State private var pendingScrollTarget: ScrollTarget?
+    @State private var restoringView: LibraryBrowseState.ViewMode?
+    @AccessibilityFocusState private var unreadButtonFocused: Bool
+    @ObservedObject private var covers = CoverLoader.shared
+    private var downloadedOnly: Bool { browse.view == .offline }
+    @State private var remoteBook: JellyfinBook?
+    @State private var remoteGroup: JellyfinCatalogueModel.Group?
+    @State private var showRemoteDetail = false
 
-    @State private var selectedFilter: LibraryFilter = .all
+    private var showsRemote: Bool {
+        jellyfin.connection != nil && !downloadedOnly
+    }
+
+    private var selectedFilter: LibraryFilter { browse.view.filter }
     @State private var showPicker = false
     @State private var showImportSource = false
     @State private var showSmbBrowser = false
+    @State private var showJellyfinBrowser = false
     @State private var showMenu = false
 
     // Single comic awaiting delete confirmation
@@ -40,7 +63,9 @@ struct LibraryView: View {
     @State private var seriesInputVolume = ""
 
     // Reading lists dialogs
-    @State private var showCreateListAlert = false
+    @State private var showCreateListSheet = false
+    @State private var createListAfterAddSheet = false
+    @State private var pendingCreatedListID: String?
     @State private var newListNameInput = ""
     @State private var showAddToListSheet = false
 
@@ -52,13 +77,39 @@ struct LibraryView: View {
 
     // Search mode & query
     @State private var isSearchOpen = false
+    @Environment(\.scenePhase) private var scenePhase
     @State private var searchQuery = ""
+    @ScaledMetric(relativeTo: .subheadline) private var searchTextSize = 13.0
+    @ScaledMetric(relativeTo: .headline) private var primaryActionTextSize = 16.0
+    @FocusState private var searchFieldFocused: Bool
+    @AccessibilityFocusState private var searchButtonFocused: Bool
+    @AccessibilityFocusState private var searchFieldAccessibilityFocused: Bool
 
-    // Global default reading direction
-    @State private var defaultRTL = ReadingPrefs.defaultRightToLeft
+    private var readableOfflineComics: Set<URL> {
+        offlineRevisions == Set(covers.revisions(for: library.comics)) ? offlineComics : []
+    }
+
+    /// Most recently opened comic that is started but not finished.
+    private var continueComic: (url: URL, progress: Progress)? {
+        library.comics
+            .compactMap { url -> (url: URL, progress: Progress)? in
+                guard let progress = ReadingProgress.get(url), progress.page > 0, !progress.isCompleted,
+                      !downloadedOnly || readableOfflineComics.contains(url) else { return nil }
+                return (url, progress)
+            }
+            .max { ReadingProgress.openedAt($0.url) < ReadingProgress.openedAt($1.url) }
+    }
+
+    /// Nothing local and no server: the empty state replaces the grid, tile and onboarding card.
+    private var showsEmptyLibrary: Bool {
+        library.comics.isEmpty && jellyfin.connection == nil && searchQuery.isEmpty
+            && selectedFilter != .readingLists && !isEditMode
+    }
 
     private var currentItems: [LibraryItem] {
-        library.libraryItems(filter: selectedFilter, searchQuery: searchQuery)
+        library.libraryItems(filter: selectedFilter, searchQuery: searchQuery,
+            unreadOnly: browse.unreadOnly,
+            available: downloadedOnly ? readableOfflineComics : nil)
     }
 
     private func availableColumns(for width: CGFloat) -> [Int] {
@@ -72,6 +123,7 @@ struct LibraryView: View {
     }
 
     private func actualColumns(for width: CGFloat) -> Int {
+        if dynamicTypeSize.isAccessibilitySize { return 1 }
         let avail = availableColumns(for: width)
         return min(max(settings.libraryColumns, 2), avail.last ?? 2)
     }
@@ -91,39 +143,21 @@ struct LibraryView: View {
 
                 VStack(spacing: 0) {
                     appBar
-                    filterBar
-                    GeometryReader { geo in
-                        content(for: geo.size.width)
+                    if !isEditMode {
+                        filterBar
+                        HStack(spacing: 8) {
+                            if !showsRemote && !library.comics.isEmpty { libraryEditActions }
+                            UnreadFilterChip(isOn: $browse.unreadOnly) { unreadButtonFocused = true }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 18)
                     }
+                    GeometryReader { geo in
+                        content(for: geo.size)
+                    }
+                    libraryPrimaryAction
                 }
 
-                // Extended "+ CREATE LIST" FAB in the LISTS tab matching Android
-                if !isEditMode && selectedFilter == .readingLists {
-                    HStack {
-                        Spacer()
-                        Button {
-                            newListNameInput = ""
-                            showCreateListAlert = true
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "plus")
-                                    .font(.system(size: 13, weight: .bold))
-                                Text("CREATE LIST")
-                                    .font(.anton(13))
-                            }
-                            .foregroundColor(Leaf.ink)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                            .background(Leaf.ochre)
-                            .clipShape(Capsule())
-                            .comicShadow(offset: 3, color: .black.opacity(0.75), corner: 22)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Create Reading List")
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 20)
-                }
 
                 if isEditMode {
                     editActionBar
@@ -138,7 +172,9 @@ struct LibraryView: View {
                     seriesName: series.name,
                     volume: series.volume,
                     library: library,
-                    onDismiss: { openSeries = nil }
+                    onDismiss: { openSeries = nil },
+                    unreadOnly: $browse.unreadOnly, searchQuery: searchQuery,
+                    availableCopies: downloadedOnly ? readableOfflineComics : nil
                 )
                 .environmentObject(settings)
                 .onDisappear { library.refresh() }
@@ -148,7 +184,9 @@ struct LibraryView: View {
                     listId: listTarget.id,
                     library: library,
                     onDismiss: { openReadingList = nil },
-                    initialShowAddComics: listTarget.showAddComics
+                    initialShowAddComics: listTarget.showAddComics,
+                    jellyfin: jellyfin, catalogue: catalogue, downloadedOnly: downloadedOnly,
+                    unreadOnly: $browse.unreadOnly, searchQuery: searchQuery
                 )
                 .environmentObject(settings)
                 .onDisappear { library.refresh() }
@@ -161,6 +199,56 @@ struct LibraryView: View {
             .confirmationDialog("Add Comics", isPresented: $showImportSource, titleVisibility: .visible) {
                 Button("From Files") { showPicker = true }
                 Button("From SMB Drive") { showSmbBrowser = true }
+                Button("From Jellyfin") { showJellyfinBrowser = true }
+            }
+            .sheet(isPresented: $showJellyfinBrowser, onDismiss: {
+                Task {
+                    await catalogue.start(browser: jellyfin, force: true)
+                    await jellyfin.restoreDownloads(library: library)
+                }
+            }) {
+                JellyfinBrowserView(model: jellyfin).environmentObject(library)
+            }
+            .navigationDestination(isPresented: $showRemoteDetail) {
+                if let remoteBook {
+                    JellyfinDetailView(item: remoteBook, model: jellyfin,
+                        creatorLibraryID: catalogue.libraryID, creatorCachedBooks: catalogue.books)
+                        .environmentObject(library)
+                }
+            }
+            .sheet(item: $remoteGroup) { group in
+                NavigationStack {
+                    JellyfinGroupView(group: group, browser: jellyfin, catalogue: catalogue,
+                        downloadedOnly: downloadedOnly, unreadOnly: $browse.unreadOnly, searchQuery: searchQuery)
+                        .environmentObject(library)
+                }
+            }
+            .task {
+                await jellyfin.restoreDownloads(library: library)
+                await catalogue.start(browser: jellyfin)
+                if catalogue.unreachable { browse.handleUnreachableLaunch() }
+                browse.finishLaunchCheck()
+            }
+            .onChange(of: openComic?.url) { comic in
+                if comic != nil { searchFieldFocused = false; searchFieldAccessibilityFocused = false }
+            }
+            .onChange(of: showRemoteDetail) { presented in
+                if presented { searchFieldFocused = false; searchFieldAccessibilityFocused = false }
+            }
+            .task(id: downloadedOnly ? covers.revisions(for: library.comics) : []) {
+                guard downloadedOnly else { return }
+                checkingOffline = true
+                let revisions = Set(covers.revisions(for: library.comics))
+                do {
+                    offlineComics = try await LibraryBrowseState.readableCopies(library.comics)
+                    offlineRevisions = revisions
+                    checkingOffline = false
+                } catch { /* A superseded view/file scan must not publish partial results. */ }
+            }
+            .onChange(of: scenePhase) { phase in
+                if phase == .active {
+                    Task { await catalogue.refreshIfNeeded(browser: jellyfin) }
+                }
             }
             .sheet(isPresented: $showSmbBrowser) {
                 SmbBrowserView().environmentObject(library)
@@ -178,27 +266,21 @@ struct LibraryView: View {
             .sheet(isPresented: $showSetSeriesSheet) {
                 setSeriesSheet.leafAppearance(settings.theme)
             }
-            .sheet(isPresented: $showAddToListSheet) {
+            .sheet(isPresented: $showAddToListSheet, onDismiss: {
+                if createListAfterAddSheet {
+                    createListAfterAddSheet = false
+                    showCreateListSheet = true
+                }
+            }) {
                 addToListSheet.leafAppearance(settings.theme)
             }
-            .alert("Create Reading List", isPresented: $showCreateListAlert) {
-                TextField("e.g. Summer Crossover Event", text: $newListNameInput)
-                Button("Cancel", role: .cancel) {}
-                Button(selectedComics.isEmpty && !library.comics.isEmpty ? String(localized: "Create & Add Comics") : String(localized: "Create")) {
-                    let name = newListNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !name.isEmpty else { return }
-                    let preselected = Array(selectedComics)
-                    let created = library.createReadingList(name: name, urls: preselected)
-                    newListNameInput = ""
-                    if isEditMode {
-                        isEditMode = false
-                        selectedComics.removeAll()
-                    } else if preselected.isEmpty && !library.comics.isEmpty {
-                        openReadingList = OpenReadingList(id: created.id, showAddComics: true)
-                    }
+            .sheet(isPresented: $showCreateListSheet, onDismiss: {
+                if let id = pendingCreatedListID {
+                    pendingCreatedListID = nil
+                    openReadingList = OpenReadingList(id: id, showAddComics: true)
                 }
-            } message: {
-                Text("Group comics in any order to track a custom reading storyline.")
+            }) {
+                createListSheet.leafAppearance(settings.theme)
             }
             .alert("Import failed", isPresented: Binding(
                 get: { library.importError != nil },
@@ -214,7 +296,12 @@ struct LibraryView: View {
             )) {
                 Button("Cancel", role: .cancel) { pendingDelete = nil }
                 Button("Delete", role: .destructive) {
-                    if let url = pendingDelete { library.delete(url) }
+                    if let url = pendingDelete {
+                        Task {
+                            await library.deletePreservingJellyfinProgress([url])
+                            await jellyfin.restoreDownloads(library: library)
+                        }
+                    }
                     pendingDelete = nil
                 }
             } message: {
@@ -223,8 +310,10 @@ struct LibraryView: View {
             .alert("Delete \(selectedComics.count) comics?", isPresented: $showBatchDeleteAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Delete", role: .destructive) {
-                    withAnimation {
-                        library.deleteBatch(selectedComics)
+                    let selected = selectedComics
+                    Task {
+                        await library.deletePreservingJellyfinProgress(selected)
+                        await jellyfin.restoreDownloads(library: library)
                         selectedComics.removeAll()
                         isEditMode = false
                     }
@@ -252,21 +341,31 @@ struct LibraryView: View {
             HStack(alignment: .center) {
                 LeafWordmark()
                 Spacer()
-                HStack(spacing: 8) {
+                HStack(spacing: 4) {
+                    UnreadFilterButton(isOn: $browse.unreadOnly, onBrand: true)
+                        .accessibilityFocused($unreadButtonFocused)
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             isSearchOpen.toggle()
-                            if !isSearchOpen { searchQuery = "" }
+                            if !isSearchOpen {
+                                searchQuery = ""
+                                searchFieldFocused = false
+                                searchButtonFocused = true
+                            }
                         }
                     } label: {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: 18, weight: .bold))
                             .foregroundColor(isSearchOpen ? Leaf.ink : Leaf.paperWhite)
                             .frame(width: 36, height: 36)
                             .background(isSearchOpen ? Leaf.ochre : Leaf.paperWhite.opacity(0.14))
                             .clipShape(Circle())
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(isSearchOpen ? Text("Close") : Text("SEARCH COMICS, SERIES OR LISTS…"))
+                    .accessibilityFocused($searchButtonFocused)
 
                     Button { showMenu = true } label: {
                         Image(systemName: "line.3.horizontal")
@@ -275,6 +374,8 @@ struct LibraryView: View {
                             .frame(width: 36, height: 36)
                             .background(Leaf.paperWhite.opacity(0.14))
                             .clipShape(Circle())
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("MENU"))
@@ -287,18 +388,31 @@ struct LibraryView: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(searchQuery.isEmpty ? Leaf.secondaryText : Leaf.ochre)
                     TextField("SEARCH COMICS, SERIES OR LISTS…", text: $searchQuery)
-                        .font(.archivo(13, weight: 600))
+                        .font(.archivo(searchTextSize, weight: 600))
                         .foregroundColor(Leaf.text)
                         .tint(Leaf.ochre)
                         .textInputAutocapitalization(.characters)
                         .disableAutocorrection(true)
+                        .focused($searchFieldFocused)
+                        .accessibilityFocused($searchFieldAccessibilityFocused)
+                        .onAppear {
+                            searchFieldFocused = true
+                            searchFieldAccessibilityFocused = true
+                        }
                     if !searchQuery.isEmpty {
-                        Button { searchQuery = "" } label: {
+                        Button {
+                            searchQuery = ""
+                            searchFieldFocused = true
+                            searchFieldAccessibilityFocused = true
+                        } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 16))
                                 .foregroundColor(Leaf.text.opacity(0.6))
+                                .frame(minWidth: 44, minHeight: 44)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(Text("CLEAR SEARCH"))
                     }
                 }
                 .padding(.horizontal, 12)
@@ -320,62 +434,39 @@ struct LibraryView: View {
         .background(Leaf.leafPrimary.ignoresSafeArea(edges: .top))
     }
 
-    // Filter pill row: ALL | SERIES | LISTS | UNREAD
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(LibraryFilter.allCases) { filter in
-                    let isSelected = selectedFilter == filter
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            selectedFilter = filter
-                        }
-                    } label: {
-                        Text(filter.label)
-                            .font(.archivo(11, weight: 700))
-                            .foregroundColor(isSelected ? Leaf.ink : Leaf.text)
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 6)
-                            .background(isSelected ? Leaf.ochre : settings.groundSoft)
-                            .clipShape(Capsule())
-                            .overlay(
-                                Capsule().stroke(isSelected ? Leaf.ochre : Leaf.ink, lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
+        LibraryViewSelector(selection: Binding(get: { browse.view }, set: { view in
+            guard view != browse.view else { return }
+            pendingScrollTarget = scrollPositions[view] ?? (view.rawValue + ":top", .top)
+            restoringView = view
+            browse.select(view)
+        }))
             .padding(.horizontal, 18)
-            .padding(.vertical, 4)
-        }
+            .padding(.top, 4)
     }
 
-    // Keep display choices on their own row so the badge and editing actions
-    // cannot compress column labels. At larger text sizes the groups stack.
+    // Android leads the visual hierarchy; reflow preserves iOS accessibility.
     private func subheader(for width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    libraryStatusBadge.fixedSize(horizontal: true, vertical: false)
-                    Spacer(minLength: 0)
-                    libraryEditActions.fixedSize(horizontal: true, vertical: false)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    libraryStatusBadge
-                    libraryEditActions
-                }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                libraryStatusBadge.fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 0)
+                libraryActions(for: width)
             }
-            if !isEditMode {
-                LibraryDisplayControls(
-                    columns: availableColumns(for: width),
-                    selectedColumn: actualColumns(for: width),
-                    defaultRTL: $defaultRTL
-                )
+            VStack(alignment: .leading, spacing: 8) {
+                libraryStatusBadge
+                libraryActions(for: width)
             }
         }
         .padding(.horizontal, 18)
         .padding(.top, 10)
         .padding(.bottom, 6)
+    }
+
+    private func libraryActions(for width: CGFloat) -> some View {
+        LibraryAdaptiveControls {
+            libraryEditActions
+        }
     }
 
     @ViewBuilder
@@ -395,13 +486,13 @@ struct LibraryView: View {
     }
 
     private var libraryEditActions: some View {
-        HStack(spacing: 8) {
-            if !isEditMode && !library.comics.isEmpty {
+        LibraryAdaptiveControls {
+            if !isEditMode && !library.comics.isEmpty && !showsRemote {
                 Button {
-                    withAnimation { isEditMode = true }
+                    isEditMode = true
                 } label: {
                     Text("EDIT")
-                        .font(.anton(11))
+                        .font(.custom("Anton-Regular", size: 11, relativeTo: .caption))
                         .foregroundColor(Leaf.text)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
@@ -414,13 +505,11 @@ struct LibraryView: View {
             } else if isEditMode {
                 let allSelected = !library.comics.isEmpty && selectedComics.count == library.comics.count
                 Button {
-                    withAnimation {
-                        if allSelected { selectedComics.removeAll() }
-                        else { selectedComics = Set(library.comics) }
-                    }
+                    if allSelected { selectedComics.removeAll() }
+                    else { selectedComics = Set(library.comics) }
                 } label: {
                     Text(allSelected ? String(localized: "DESELECT ALL") : String(localized: "SELECT ALL"))
-                        .font(.anton(11))
+                        .font(.custom("Anton-Regular", size: 11, relativeTo: .caption))
                         .foregroundColor(allSelected ? Leaf.ink : Leaf.text)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
@@ -432,13 +521,11 @@ struct LibraryView: View {
                 .buttonStyle(.plain)
 
                 Button {
-                    withAnimation {
-                        isEditMode = false
-                        selectedComics.removeAll()
-                    }
+                    isEditMode = false
+                    selectedComics.removeAll()
                 } label: {
                     Text("DONE")
-                        .font(.anton(11))
+                        .font(.custom("Anton-Regular", size: 11, relativeTo: .caption))
                         .foregroundColor(Leaf.ink)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
@@ -452,188 +539,300 @@ struct LibraryView: View {
     }
 
     // Main Grid Content
-    private func content(for width: CGFloat) -> some View {
+    private func content(for size: CGSize) -> some View {
+        let width = size.width
         let cols = actualColumns(for: width)
         let spacing: CGFloat = cols >= 4 ? 12 : 16
-        let gridColumns = Array(repeating: GridItem(.flexible(), spacing: spacing), count: cols)
+        let gridColumns = Array(repeating: GridItem(.flexible(), spacing: spacing, alignment: .top), count: cols)
         let items = currentItems
 
-        return ScrollView {
-            VStack(spacing: 0) {
-                subheader(for: width)
+        return ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: 1).id(browse.view.rawValue + ":top")
+                    if isEditMode { subheader(for: width) }
+                    if downloadedOnly && checkingOffline { ProgressView("Checking local comics…").padding() }
 
-                if !searchQuery.isEmpty && items.isEmpty {
-                    VStack(spacing: 12) {
-                        Text("No items matching “\(searchQuery)”")
-                            .font(.archivo(13))
-                            .foregroundColor(Leaf.secondaryText)
-                            .padding(.top, 36)
-                        Button { searchQuery = "" } label: {
-                            Text("CLEAR SEARCH")
-                                .font(.anton(12))
-                                .foregroundColor(Leaf.ink)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 6)
-                                .background(Leaf.ochre)
-                                .clipShape(RoundedCornerShape(cornerRadius: 3))
-                        }
-                        .buttonStyle(.plain)
+                    if showsEmptyLibrary {
+                        EmptyLibraryView(importing: library.importing, add: {
+                            onboardingChosen = true
+                            showImportSource = true
+                        }, connect: {
+                            onboardingChosen = true
+                            showJellyfinBrowser = true
+                        })
+                    } else if jellyfin.connection == nil && !onboardingChosen {
+                        JellyfinOnboardingCard(connect: {
+                            onboardingChosen = true
+                            showJellyfinBrowser = true
+                        }, skip: { onboardingChosen = true })
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 20)
-                } else if items.isEmpty {
-                    Text(emptyMessage)
-                        .font(.archivo(13))
-                        .foregroundColor(Leaf.secondaryText)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let resume = continueComic, !isEditMode, searchQuery.isEmpty {
+                        ContinueReadingCard(url: resume.url, progress: resume.progress) {
+                            openComic = OpenComic(url: resume.url)
+                        }
                         .padding(.horizontal, 18)
-                        .padding(.vertical, 14)
-                }
-
-                LazyVGrid(columns: gridColumns, spacing: cols >= 4 ? 14 : 18) {
-                    ForEach(items) { item in
-                        switch item {
-                        case .singleComic(let url, let meta):
-                            Button {
-                                if isEditMode {
-                                    toggleSelect(url)
-                                } else {
-                                    openComic = OpenComic(url: url)
-                                }
-                            } label: {
-                                ComicCard(
-                                    url: url,
-                                    progress: ReadingProgress.get(url),
-                                    columns: cols,
-                                    isEditMode: isEditMode,
-                                    isSelected: selectedComics.contains(url),
-                                    coverTransition: coverTransition
-                                )
+                        .padding(.top, 12)
+                    }
+                    if jellyfin.connection != nil {
+                        JellyfinCatalogueStatus(catalogue: catalogue, browser: jellyfin,
+                            connect: { showJellyfinBrowser = true })
+                    }
+                    if showsRemote && selectedFilter != .readingLists {
+                        JellyfinMainGrid(catalogue: catalogue, browser: jellyfin, filter: selectedFilter,
+                            query: searchQuery, columns: cols, downloadedOnly: false,
+                            unreadOnly: browse.unreadOnly, scrollScope: browse.view.rawValue,
+                            select: { remoteBook = $0; showRemoteDetail = true },
+                            selectGroup: { remoteGroup = $0 })
+                            .environmentObject(library)
+                    } else {
+                    if showsRemote && selectedFilter == .readingLists {
+                        JellyfinCollectionsSection(catalogue: catalogue, browser: jellyfin,
+                            unreadOnly: $browse.unreadOnly, searchQuery: searchQuery)
+                            .environmentObject(library)
+                    }
+                    if !searchQuery.isEmpty && items.isEmpty {
+                        VStack(spacing: 12) {
+                            Text("No items matching “\(searchQuery)”")
+                                .font(.archivo(13))
+                                .foregroundColor(Leaf.secondaryText)
+                                .padding(.top, 36)
+                            Button { searchQuery = "" } label: {
+                                Text("CLEAR SEARCH")
+                                    .font(.anton(12))
+                                    .foregroundColor(Leaf.ink)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 6)
+                                    .background(Leaf.ochre)
+                                    .clipShape(RoundedCornerShape(cornerRadius: 3))
                             }
                             .buttonStyle(.plain)
-                            .simultaneousGesture(
-                                LongPressGesture().onEnded { _ in
-                                    if !isEditMode {
-                                        isEditMode = true
-                                        selectedComics.insert(url)
-                                    }
-                                }
-                            )
-                            .contextMenu {
-                                if !isEditMode {
-                                    Button {
-                                        isEditMode = true
-                                        selectedComics.insert(url)
-                                    } label: {
-                                        Label("Select", systemImage: "checkmark.circle")
-                                    }
-                                    Button {
-                                        selectedComics = [url]
-                                        seriesInputName = meta?.series ?? ""
-                                        seriesInputVolume = meta?.volume ?? ""
-                                        showSetSeriesSheet = true
-                                    } label: {
-                                        Label("Set Series Name", systemImage: "square.stack.3d.up")
-                                    }
-                                    Button {
-                                        selectedComics = [url]
-                                        showAddToListSheet = true
-                                    } label: {
-                                        Label("Add to Reading List", systemImage: "list.bullet")
-                                    }
-                                    Button(role: .destructive) { pendingDelete = url } label: {
-                                        Label("Remove", systemImage: "trash")
-                                    }
-                                }
-                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 20)
+                    } else if items.isEmpty && !checkingOffline && !showsEmptyLibrary {
+                        Text(emptyMessage)
+                            .font(.archivo(13))
+                            .foregroundColor(Leaf.secondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 14)
+                    }
 
-                        case .seriesStack(let name, let volume, let issues, let topComic, let total, let unread, let fraction):
-                            ComicStackCard(
-                                seriesName: name,
-                                volume: volume,
-                                issues: issues,
-                                topCoverComic: topComic,
-                                totalIssues: total,
-                                unreadIssues: unread,
-                                progressFraction: fraction,
-                                columns: cols,
-                                isEditMode: isEditMode,
-                                isSelected: issues.allSatisfy { selectedComics.contains($0) },
-                                onOpenSeries: {
+                    if browse.unreadOnly && items.isEmpty && !checkingOffline && (!downloadedOnly || !readableOfflineComics.isEmpty) {
+                        Button("Clear Unread only") { browse.unreadOnly = false; unreadButtonFocused = true }
+                            .frame(minHeight: 44)
+                    }
+                    // The empty state stands alone; reading lists stay reachable from the Lists view.
+                    if !showsEmptyLibrary {
+                    LazyVGrid(columns: gridColumns, spacing: cols >= 4 ? 14 : 18) {
+                        ForEach(items) { item in
+                            Group {
+                            switch item {
+                            case .singleComic(let url, let meta):
+                                Button {
                                     if isEditMode {
-                                        let allInSeriesSelected = issues.allSatisfy { selectedComics.contains($0) }
-                                        if allInSeriesSelected {
-                                            issues.forEach { selectedComics.remove($0) }
-                                        } else {
-                                            issues.forEach { selectedComics.insert($0) }
-                                        }
+                                        toggleSelect(url)
                                     } else {
-                                        openSeries = OpenSeries(name: name, volume: volume)
+                                        openComic = OpenComic(url: url)
+                                    }
+                                } label: {
+                                    ComicCard(
+                                        url: url,
+                                        progress: ReadingProgress.get(url),
+                                        columns: cols,
+                                        isEditMode: isEditMode,
+                                        isSelected: selectedComics.contains(url),
+                                        coverTransition: coverTransition
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .simultaneousGesture(
+                                    LongPressGesture().onEnded { _ in
+                                        if !isEditMode {
+                                            isEditMode = true
+                                            selectedComics.insert(url)
+                                        }
+                                    }
+                                )
+                                .contextMenu {
+                                    if !isEditMode {
+                                        Button {
+                                            isEditMode = true
+                                            selectedComics.insert(url)
+                                        } label: {
+                                            Label("Select", systemImage: "checkmark.circle")
+                                        }
+                                        Button {
+                                            selectedComics = [url]
+                                            seriesInputName = meta?.series ?? ""
+                                            seriesInputVolume = meta?.volume ?? ""
+                                            showSetSeriesSheet = true
+                                        } label: {
+                                            Label("Set Series Name", systemImage: "square.stack.3d.up")
+                                        }
+                                        Button {
+                                            selectedComics = [url]
+                                            showAddToListSheet = true
+                                        } label: {
+                                            Label("Add to Reading List", systemImage: "list.bullet")
+                                        }
+                                        Button(role: .destructive) { pendingDelete = url } label: {
+                                            Label("Remove", systemImage: "trash")
+                                        }
                                     }
                                 }
-                            )
-                            .contextMenu {
-                                Button {
-                                    openSeries = OpenSeries(name: name, volume: volume)
-                                } label: {
-                                    Label("Open Series", systemImage: "books.vertical")
+
+                            case .seriesStack(let name, let volume, let issues, let topComic, let total, let unread, let fraction):
+                                ComicStackCard(
+                                    seriesName: name,
+                                    volume: volume,
+                                    issues: issues,
+                                    topCoverComic: topComic,
+                                    totalIssues: total,
+                                    unreadIssues: unread,
+                                    progressFraction: fraction,
+                                    columns: cols,
+                                    isEditMode: isEditMode,
+                                    isSelected: issues.allSatisfy { selectedComics.contains($0) },
+                                    onOpenSeries: {
+                                        if isEditMode {
+                                            let allInSeriesSelected = issues.allSatisfy { selectedComics.contains($0) }
+                                            if allInSeriesSelected {
+                                                issues.forEach { selectedComics.remove($0) }
+                                            } else {
+                                                issues.forEach { selectedComics.insert($0) }
+                                            }
+                                        } else {
+                                            openSeries = OpenSeries(name: name, volume: volume)
+                                        }
+                                    }
+                                )
+                                .contextMenu {
+                                    Button {
+                                        openSeries = OpenSeries(name: name, volume: volume)
+                                    } label: {
+                                        Label("Open Series", systemImage: "books.vertical")
+                                    }
+                                    Button {
+                                        let allDone = unread == 0
+                                        library.markComicsRead(urls: issues, read: !allDone)
+                                    } label: {
+                                        Label(unread == 0 ? String(localized: "Mark All Unread") : String(localized: "Mark All Read"), systemImage: "checkmark.circle")
+                                    }
                                 }
-                                Button {
-                                    let allDone = unread == 0
-                                    library.markComicsRead(urls: issues, read: !allDone)
-                                } label: {
-                                    Label(unread == 0 ? String(localized: "Mark All Unread") : String(localized: "Mark All Read"), systemImage: "checkmark.circle")
+
+                            case .readingListItem(let list, let previewUrls, let count):
+                                ReadingListCard(
+                                    list: list,
+                                    previewUrls: previewUrls,
+                                    itemCount: count,
+                                    columns: cols,
+                                    onOpenList: {
+                                        openReadingList = OpenReadingList(id: list.id, showAddComics: false)
+                                    }
+                                )
+                                .contextMenu {
+                                    Button {
+                                        openReadingList = OpenReadingList(id: list.id, showAddComics: false)
+                                    } label: {
+                                        Label("Open List", systemImage: "list.bullet")
+                                    }
+                                    Button(role: .destructive) {
+                                        library.deleteReadingList(id: list.id)
+                                    } label: {
+                                        Label("Delete List", systemImage: "trash")
+                                    }
                                 }
                             }
+                            }
+                            .fixedSize(horizontal: false, vertical: true)
+                            .libraryScrollAnchor(browse.view.rawValue + ":" + item.id)
+                        }
 
-                        case .readingListItem(let list, let previewUrls, let count):
-                            ReadingListCard(
-                                list: list,
-                                previewUrls: previewUrls,
-                                itemCount: count,
-                                columns: cols,
-                                onOpenList: {
-                                    openReadingList = OpenReadingList(id: list.id, showAddComics: false)
-                                }
-                            )
-                            .contextMenu {
-                                Button {
-                                    openReadingList = OpenReadingList(id: list.id, showAddComics: false)
-                                } label: {
-                                    Label("Open List", systemImage: "list.bullet")
-                                }
-                                Button(role: .destructive) {
-                                    library.deleteReadingList(id: list.id)
-                                } label: {
-                                    Label("Delete List", systemImage: "trash")
-                                }
+                        // Comics are added from the bottom action; lists keep their in-grid tile.
+                        if !isEditMode && searchQuery.isEmpty && selectedFilter == .readingLists {
+                            AddTile(importing: false, columns: cols, title: "CREATE LIST") {
+                                newListNameInput = ""
+                                showCreateListSheet = true
                             }
                         }
                     }
-
-                    if !isEditMode && searchQuery.isEmpty {
-                        AddTile(
-                            importing: library.importing,
-                            columns: cols,
-                            title: selectedFilter == .readingLists ? "CREATE LIST" : "LOAD COMIC"
-                        ) {
-                            if selectedFilter == .readingLists {
-                                newListNameInput = ""
-                                showCreateListAlert = true
-                            } else {
-                                showImportSource = true
-                            }
-                        }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 10)
+                    .padding(.bottom, isEditMode ? 96 : 16)
+                    }
                     }
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 10)
-                .padding(.bottom, isEditMode ? 96 : (selectedFilter == .readingLists ? 84 : 48))
             }
+            .coordinateSpace(name: "library.scroll")
+            .onPreferenceChange(LibraryScrollPositions.self) { positions in
+                guard restoringView != browse.view else { return }
+                let prefix = browse.view.rawValue + ":"
+                if let first = positions.filter({ $0.key.hasPrefix(prefix) }).min(by: { abs($0.value.minY) < abs($1.value.minY) }) {
+                    // Align the same points in the item and viewport to keep its partial offset.
+                    let travel = size.height - first.value.height
+                    let anchorY = abs(travel) > 1 ? first.value.minY / travel : 0
+                    scrollPositions[browse.view] = (first.key, UnitPoint(x: 0.5, y: anchorY))
+                }
+            }
+            .onChange(of: browse.view) { view in
+                let target = pendingScrollTarget.flatMap { $0.id.hasPrefix(view.rawValue + ":") ? $0 : nil }
+                ?? scrollPositions[view] ?? (view.rawValue + ":top", .top)
+                Task { @MainActor in
+                    await Task.yield()
+                    guard browse.view == view else { return }
+                    proxy.scrollTo(target.id, anchor: target.anchor)
+                    await Task.yield()
+                    if browse.view == view { restoringView = nil }
+                }
+            }
+            .refreshable { await catalogue.refresh(browser: jellyfin) }
+        }
+    }
+
+    @ViewBuilder
+    private var libraryPrimaryAction: some View {
+        if !isEditMode && !showsEmptyLibrary {
+            HStack {
+                Spacer()
+                Button {
+                    if selectedFilter == .readingLists {
+                        newListNameInput = ""
+                        showCreateListSheet = true
+                    } else { showImportSource = true }
+                } label: {
+                    HStack(spacing: 8) {
+                        if library.importing && selectedFilter != .readingLists {
+                            ProgressView().tint(Leaf.ink)
+                        } else {
+                            Image(systemName: "plus")
+                                .font(.system(size: primaryActionTextSize, weight: .bold))
+                        }
+                        Text(selectedFilter == .readingLists ? "Create Reading List" : "Add Comics")
+                            .font(.archivo(primaryActionTextSize, weight: 700))
+                    }
+                    .foregroundColor(Leaf.ink)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                    .frame(minHeight: 44)
+                    .background(Leaf.ochre)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .comicShadow(offset: 3, color: .black.opacity(0.75), corner: 12)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(selectedFilter == .readingLists ? Text("Create Reading List") : Text("Add Comics"))
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
         }
     }
 
     private var emptyMessage: String {
+        if downloadedOnly && readableOfflineComics.isEmpty {
+            return String(localized: "No readable local copies yet. Add comics from Files or SMB, or download a Jellyfin comic.")
+        }
+        if browse.unreadOnly { return String(localized: "No unread comics match this view.") }
         switch selectedFilter {
         case .all: return String(localized: "No comics yet. Tap LOAD COMIC to add a CBZ, CBR, or PDF.")
         case .series: return String(localized: "No series stacks yet. Group comics by setting a Series Name.")
@@ -787,6 +986,49 @@ struct LibraryView: View {
         }
     }
 
+    private var createListSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("List Name", text: $newListNameInput)
+                        .accessibilityIdentifier("library.newListName")
+                } footer: {
+                    Text("Group comics in any order to track a custom reading storyline.")
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(settings.ground)
+            .tint(Leaf.goldText)
+            .navigationTitle("Create Reading List")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showCreateListSheet = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        let name = newListNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !name.isEmpty else { return }
+                        let preselected = Array(selectedComics)
+                        let created = library.createReadingList(name: name, urls: preselected)
+                        newListNameInput = ""
+                        if isEditMode {
+                            isEditMode = false
+                            selectedComics.removeAll()
+                        } else if preselected.isEmpty && !library.comics.isEmpty {
+                            pendingCreatedListID = created.id
+                        }
+                        showCreateListSheet = false
+                    } label: {
+                        Label(selectedComics.isEmpty && !library.comics.isEmpty ? String(localized: "Create & Add Comics") : String(localized: "Create"), systemImage: "checkmark")
+                            .labelStyle(.iconOnly)
+                    }
+                    .disabled(newListNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+
     private var addToListSheet: some View {
         NavigationStack {
             ZStack {
@@ -795,9 +1037,9 @@ struct LibraryView: View {
                     List {
                         Section {
                             Button {
-                                showAddToListSheet = false
+                                createListAfterAddSheet = true
                                 newListNameInput = ""
-                                showCreateListAlert = true
+                                showAddToListSheet = false
                             } label: {
                                 HStack {
                                     Image(systemName: "plus.circle.fill")
@@ -859,17 +1101,25 @@ struct LibraryView: View {
 /// Interactive neat stack card matching Android's ComicStackCard.
 /// Supports 3-layer paper card styling with bottom-left issue badge and vertical downward cover peel!
 struct ComicStackCard: View {
+    @ObservedObject private var covers = CoverLoader.shared
     @EnvironmentObject private var settings: LeafSettings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let seriesName: String
     let volume: String?
     let issues: [URL]
-    let topCoverComic: URL
+    var topCoverComic: URL? = nil
     let totalIssues: Int
     let unreadIssues: Int
     let progressFraction: Double
+    var showsProgress = true
     var columns: Int = 2
     var isEditMode: Bool = false
     var isSelected: Bool = false
+    var remoteBooks: [JellyfinBook] = []
+    var remoteClient: JellyfinClient? = nil
+    var remoteProfileID = ""
+    var remoteCopies: [String: URL] = [:]
     let onOpenSeries: () -> Void
 
     @State private var topIndex: Int = 0
@@ -881,9 +1131,9 @@ struct ComicStackCard: View {
     @State private var layer2CoverImage: UIImage?
     @State private var layer3CoverImage: UIImage?
 
-    private var count: Int { max(issues.count, 1) }
+    private var count: Int { max(remoteBooks.isEmpty ? issues.count : remoteBooks.count, 1) }
 
-    private var currentTopComic: URL {
+    private var currentTopComic: URL? {
         guard !issues.isEmpty else { return topCoverComic }
         let idx = (topIndex % count + count) % count
         return issues[idx]
@@ -902,12 +1152,12 @@ struct ComicStackCard: View {
     }
 
     private var currentIssueNum: Int {
-        guard !issues.isEmpty else { return 1 }
+        guard !issues.isEmpty || !remoteBooks.isEmpty else { return 1 }
         return (topIndex % count + count) % count + 1
     }
 
     private var layer2IssueNum: Int {
-        guard !issues.isEmpty else { return 2 }
+        guard !issues.isEmpty || !remoteBooks.isEmpty else { return 2 }
         return ((topIndex + 1) % count + count) % count + 1
     }
 
@@ -928,9 +1178,7 @@ struct ComicStackCard: View {
                     ZStack {
                         Leaf.inkSoft
                         if let layer3CoverImage {
-                            Image(uiImage: layer3CoverImage)
-                                .resizable()
-                                .scaledToFill()
+                            LibraryCoverArtwork(image: layer3CoverImage)
                                 .overlay(Color.black.opacity(peelProgress >= 0.35 ? 0 : 0.28)
                                     .animation(.easeInOut(duration: 0.18), value: peelProgress >= 0.35))
                         }
@@ -948,9 +1196,7 @@ struct ComicStackCard: View {
                     ZStack(alignment: .bottom) {
                         Group {
                             if let layer2CoverImage {
-                                Image(uiImage: layer2CoverImage)
-                                    .resizable()
-                                    .scaledToFill()
+                                LibraryCoverArtwork(image: layer2CoverImage)
                             } else {
                                 GeneratedCover(title: seriesName, columns: columns)
                             }
@@ -977,7 +1223,7 @@ struct ComicStackCard: View {
                 ZStack(alignment: .bottom) {
                     Group {
                         if let topCoverImage {
-                            Image(uiImage: topCoverImage).resizable().scaledToFill()
+                            LibraryCoverArtwork(image: topCoverImage)
                         } else {
                             GeneratedCover(title: seriesName, columns: columns)
                         }
@@ -1013,13 +1259,9 @@ struct ComicStackCard: View {
             .aspectRatio(0.7, contentMode: .fit)
             .padding(.top, totalIssues >= 3 ? 10 : (totalIssues >= 2 ? 5 : 0))
             .contentShape(Rectangle())
-            .onTapGesture {
-                onOpenSeries()
-            }
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 12)
-                    .onChanged { value in
-                        guard totalIssues > 1 else { return }
+            .overlay(
+                CoverPeelGesture(onChanged: { value in
+                        guard totalIssues > 1, !reduceMotion else { return }
                         let dy = value.translation.height
                         let dx = value.translation.width
                         // Only peel on downward vertical drags so horizontal/upward scrolls pass through
@@ -1028,8 +1270,11 @@ struct ComicStackCard: View {
                         } else if peelOffsetY > 0 {
                             peelOffsetY = max(0, min(dy, cardHeight * 1.15))
                         }
-                    }
-                    .onEnded { value in
+                    }, onEnded: { value in
+                        if reduceMotion, value.translation.height > 50 {
+                            topIndex = (topIndex + 1) % count
+                            return
+                        }
                         guard totalIssues > 1, peelOffsetY > 0 else { return }
                         let dy = value.translation.height
                         let predictedDy = value.predictedEndTranslation.height
@@ -1039,7 +1284,7 @@ struct ComicStackCard: View {
                                 peelOffsetY = cardHeight * 1.15
                             }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-                                topIndex = (topIndex + 1) % max(issues.count, 1)
+                                topIndex = (topIndex + 1) % max(remoteBooks.isEmpty ? issues.count : remoteBooks.count, 1)
                                 peelOffsetY = 0
                             }
                         } else {
@@ -1047,51 +1292,71 @@ struct ComicStackCard: View {
                                 peelOffsetY = 0
                             }
                         }
-                    }
+                    })
             )
+            .onTapGesture { onOpenSeries() }
 
             // Series Name in Archivo ExtraBold
             Text(seriesName)
-                .font(.archivo(columns >= 4 ? 10.5 : 12, weight: 800))
+                .leafControlFont(columns >= 4 ? 10.5 : 12, weight: 800)
                 .foregroundColor(Leaf.text)
-                .lineLimit(2)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 .padding(.top, columns >= 4 ? 6 : 9)
 
             // Subtitle: X issues · Y unread
-            Text("\(totalIssues) issues · \(unreadIssues) unread")
-                .font(.archivo(columns >= 4 ? 8.5 : 9.5, weight: 600))
+            Text(remoteBooks.isEmpty ? String(localized: "\(totalIssues) issues · \(unreadIssues) unread") : String(localized: "\(totalIssues) loaded comics"))
+                .leafControlFont(columns >= 4 ? 8.5 : 9.5, weight: 600)
                 .foregroundColor(unreadIssues > 0 ? Leaf.goldText : Leaf.secondaryText)
-                .lineLimit(1)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                 .padding(.top, 2)
         }
         .onAppear {
             if !didInitTopIndex {
                 didInitTopIndex = true
-                if let idx = issues.firstIndex(of: topCoverComic) {
+                if let topCoverComic, let idx = issues.firstIndex(of: topCoverComic) {
                     topIndex = idx
                 }
             }
         }
         .onChange(of: topCoverComic) { newTop in
-            if let idx = issues.firstIndex(of: newTop) {
+            if let newTop, let idx = issues.firstIndex(of: newTop) {
                 topIndex = idx
             }
         }
-        .task(id: currentTopComic) {
-            topCoverImage = await CoverLoader.load(for: currentTopComic).cover
-            if let l2 = layer2Comic {
-                layer2CoverImage = await CoverLoader.load(for: l2).cover
-            }
-            if let l3 = layer3Comic {
-                layer3CoverImage = await CoverLoader.load(for: l3).cover
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(seriesName)
+        .accessibilityValue(Text("\(currentIssueNum) / \(count)"))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { onOpenSeries() }
+        .accessibilityAction(named: Text("Next cover")) { topIndex = (topIndex + 1) % count }
+        .task(id: remoteProfileID + String(topIndex) + covers.revisions(for: issues).description) {
+            if !remoteBooks.isEmpty {
+                topCoverImage = await remoteCover(at: topIndex)
+                layer2CoverImage = remoteBooks.count > 1 ? await remoteCover(at: topIndex + 1) : nil
+                layer3CoverImage = remoteBooks.count > 2 ? await remoteCover(at: topIndex + 2) : nil
+            } else {
+                if let currentTopComic { topCoverImage = await CoverLoader.load(for: currentTopComic).cover }
+                if let l2 = layer2Comic { layer2CoverImage = await CoverLoader.load(for: l2).cover }
+                if let l3 = layer3Comic { layer3CoverImage = await CoverLoader.load(for: l3).cover }
             }
         }
+    }
+
+    private func remoteCover(at index: Int) async -> UIImage? {
+        guard !remoteBooks.isEmpty else { return nil }
+        if let url = remoteCopies[remoteBooks[index % remoteBooks.count].id] {
+            return await CoverLoader.load(for: url).cover
+        }
+        guard let remoteClient, !remoteBooks.isEmpty,
+              let data = try? await remoteClient.cover(remoteBooks[index % remoteBooks.count]) else { return nil }
+        let image = await Task.detached(priority: .utility) { JellyfinBookRow.thumbnail(data) }.value
+        return Task.isCancelled ? nil : image
     }
 
     @ViewBuilder
     private func stackBadge(issueNumber: Int) -> some View {
         HStack {
-            Text(totalIssues > 1 ? String(localized: "ISSUE #\(issueNumber) OF \(totalIssues)") : (volume ?? String(localized: "1 ISSUE")))
+            Text(!remoteBooks.isEmpty ? String(localized: "COVER \(issueNumber) OF \(totalIssues)") : totalIssues > 1 ? String(localized: "ISSUE #\(issueNumber) OF \(totalIssues)") : (volume ?? String(localized: "1 ISSUE")))
                 .font(.anton(columns >= 4 ? 7.5 : 8.5))
                 .foregroundColor(Leaf.cream)
                 .padding(.horizontal, columns >= 4 ? 4 : 5)
@@ -1108,7 +1373,9 @@ struct ComicStackCard: View {
         .padding(.bottom, columns >= 4 ? 9 : 13)
     }
 
+    @ViewBuilder
     private var progressBarView: some View {
+        if showsProgress {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Leaf.ink
@@ -1116,12 +1383,14 @@ struct ComicStackCard: View {
             }
         }
         .frame(height: columns >= 4 ? 5 : 7)
+        }
     }
 }
 
 /// Reading List Card displayed in the library grid — "Messy Stack" visual with rotated layers
 /// and downward cover peel matching Android's `ReadingListCard`.
 struct ReadingListCard: View {
+    @ObservedObject private var covers = CoverLoader.shared
     @EnvironmentObject private var settings: LeafSettings
     let list: ReadingListRecord
     let previewUrls: [URL]
@@ -1184,9 +1453,7 @@ struct ReadingListCard: View {
                     ZStack {
                         Leaf.inkSoft
                         if let layer3CoverImage {
-                            Image(uiImage: layer3CoverImage)
-                                .resizable()
-                                .scaledToFill()
+                            LibraryCoverArtwork(image: layer3CoverImage)
                                 .overlay(Color.black.opacity(peelProgress >= 0.35 ? 0 : 0.28)
                                     .animation(.easeInOut(duration: 0.18), value: peelProgress >= 0.35))
                         }
@@ -1207,9 +1474,7 @@ struct ReadingListCard: View {
                     ZStack(alignment: .bottomLeading) {
                         Group {
                             if let layer2CoverImage {
-                                Image(uiImage: layer2CoverImage)
-                                    .resizable()
-                                    .scaledToFill()
+                                LibraryCoverArtwork(image: layer2CoverImage)
                             } else {
                                 GeneratedCover(title: list.name, columns: columns)
                             }
@@ -1248,7 +1513,7 @@ struct ReadingListCard: View {
                 ZStack(alignment: .bottomLeading) {
                     Group {
                         if let topCoverImage {
-                            Image(uiImage: topCoverImage).resizable().scaledToFill()
+                            LibraryCoverArtwork(image: topCoverImage)
                         } else {
                             GeneratedCover(title: list.name, columns: columns)
                         }
@@ -1293,10 +1558,8 @@ struct ReadingListCard: View {
             .aspectRatio(0.7, contentMode: .fit)
             .padding(itemCount >= 2 ? 6 : 0)
             .contentShape(Rectangle())
-            .onTapGesture { onOpenList() }
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 12)
-                    .onChanged { value in
+            .overlay(
+                CoverPeelGesture(onChanged: { value in
                         guard itemCount > 1 else { return }
                         let dy = value.translation.height
                         let dx = value.translation.width
@@ -1305,8 +1568,7 @@ struct ReadingListCard: View {
                         } else if peelOffsetY > 0 {
                             peelOffsetY = max(0, min(dy, cardHeight * 1.15))
                         }
-                    }
-                    .onEnded { value in
+                    }, onEnded: { value in
                         guard itemCount > 1, peelOffsetY > 0 else { return }
                         let dy = value.translation.height
                         let predictedDy = value.predictedEndTranslation.height
@@ -1324,8 +1586,9 @@ struct ReadingListCard: View {
                                 peelOffsetY = 0
                             }
                         }
-                    }
+                    })
             )
+            .onTapGesture { onOpenList() }
 
             Text(list.name)
                 .font(.archivo(columns >= 4 ? 10.5 : 12, weight: 800))
@@ -1339,7 +1602,13 @@ struct ReadingListCard: View {
                 .lineLimit(1)
                 .padding(.top, 2)
         }
-        .task(id: currentTopComic) {
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(list.name)
+        .accessibilityValue(Text("\(currentItemNum) / \(count)"))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { onOpenList() }
+        .accessibilityAction(named: Text("Next cover")) { topIndex = (topIndex + 1) % count }
+        .task(id: covers.revisions(for: previewUrls) + covers.revisions(for: [currentTopComic].compactMap { $0 })) {
             if let top = currentTopComic {
                 topCoverImage = await CoverLoader.load(for: top).cover
             } else {
@@ -1361,6 +1630,7 @@ struct ReadingListCard: View {
 
 /// A single comic in the grid
 struct ComicCard: View {
+    @ObservedObject private var covers = CoverLoader.shared
     @EnvironmentObject private var settings: LeafSettings
     let url: URL
     let progress: Progress?
@@ -1371,7 +1641,7 @@ struct ComicCard: View {
     @State private var cover: UIImage?
     @State private var pages = 0
 
-    private var title: String { url.deletingPathExtension().lastPathComponent }
+    private var title: String { ComicMetadataStore.displayFilename(for: url) }
     private var lastPage: Int { progress?.page ?? 0 }
     private var pageCount: Int { progress?.total ?? pages }
     private var started: Bool { lastPage > 0 }
@@ -1382,7 +1652,7 @@ struct ComicCard: View {
             ZStack(alignment: .bottom) {
                 Group {
                     if let cover {
-                        Image(uiImage: cover).resizable().scaledToFill()
+                        LibraryCoverArtwork(image: cover)
                     } else {
                         GeneratedCover(title: title, columns: columns)
                     }
@@ -1415,7 +1685,6 @@ struct ComicCard: View {
                 .frame(height: columns >= 4 ? 5 : 7)
             }
             .aspectRatio(0.7, contentMode: .fit)
-            .frame(maxHeight: 430)
             .background(settings.groundSoft)
             .clipShape(RoundedCornerShape(cornerRadius: 4))
             .comicCoverSource(url: url, namespace: coverTransition)
@@ -1437,11 +1706,27 @@ struct ComicCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 2)
         }
-        .task {
+        .task(id: covers.revisions(for: [url])) {
             let loaded = await CoverLoader.load(for: url)
             cover = loaded.cover
             pages = loaded.pageCount
         }
+    }
+}
+
+/// The card proposes the artwork bounds; a wide image must not enlarge its layout or hit region.
+struct LibraryCoverArtwork: View {
+    let image: UIImage
+
+    var body: some View {
+        Color.clear
+            .overlay {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            }
+            .clipped()
+            .contentShape(Rectangle())
     }
 }
 
@@ -1493,13 +1778,13 @@ struct AddTile: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .aspectRatio(0.7, contentMode: .fit)
-            .frame(maxHeight: 430)
             .halftone(color: Leaf.ochre, alpha: 0.10)
             .overlay(
                 RoundedCornerShape(cornerRadius: 4)
                     .stroke(Leaf.secondaryText, style: StrokeStyle(lineWidth: strokeWidth, dash: [14, 10]))
             )
             .clipShape(RoundedCornerShape(cornerRadius: 4))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -1512,83 +1797,16 @@ struct RoundedCornerShape: Shape {
     }
 }
 
-/// Display choices keep their full touch targets and reflow with available space.
-private struct LibraryDisplayControls: View {
-    let columns: [Int]
-    let selectedColumn: Int
-    @Binding var defaultRTL: Bool
-    @EnvironmentObject private var settings: LeafSettings
-    @ScaledMetric(relativeTo: .body) private var choiceSize = 15.0
-    @ScaledMetric(relativeTo: .caption) private var labelSize = 12.0
+/// Keep controls at their natural width when space permits, otherwise wrap text in a vertical stack.
+private struct LibraryAdaptiveControls<Content: View>: View {
+    @ViewBuilder let content: Content
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .bottom, spacing: 16) {
-                columnChoices.fixedSize(horizontal: true, vertical: false)
-                Spacer(minLength: 0)
-                directionChoice.fixedSize(horizontal: true, vertical: false)
-            }
-            VStack(alignment: .leading, spacing: 12) {
-                columnChoices
-                directionChoice
-            }
-        }
-    }
-
-    private var columnChoices: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("COLUMNS")
-                .font(.archivo(labelSize, weight: 600))
-                .foregroundColor(Leaf.secondaryText)
-            HStack(spacing: 1) {
-                ForEach(columns, id: \.self) { count in
-                    let isSelected = selectedColumn == count
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            settings.libraryColumns = count
-                        }
-                    } label: {
-                        Text("\(count)")
-                            .font(.archivo(choiceSize, weight: 700))
-                            .foregroundColor(isSelected ? Leaf.ink : Leaf.secondaryText)
-                            .padding(.horizontal, 8)
-                            .frame(minWidth: 44, minHeight: 44)
-                            .background(isSelected ? Leaf.ochre : Color.clear)
-                            .clipShape(RoundedCornerShape(cornerRadius: 3))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text("COLUMNS"))
-                    .accessibilityValue(Text("\(count)"))
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
-                }
-            }
-            .padding(1)
-            .background(settings.groundSoft)
-            .clipShape(RoundedCornerShape(cornerRadius: 3))
-            .overlay(RoundedCornerShape(cornerRadius: 3).stroke(Leaf.secondaryText, lineWidth: 1))
-        }
-    }
-
-    private var directionChoice: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("NEW COMICS")
-                .font(.archivo(labelSize, weight: 600))
-                .foregroundColor(Leaf.secondaryText)
-            Button {
-                defaultRTL.toggle()
-                ReadingPrefs.defaultRightToLeft = defaultRTL
-            } label: {
-                Text(defaultRTL ? String(localized: "RTL") : String(localized: "LTR"))
-                    .font(.archivo(choiceSize, weight: 700))
-                    .foregroundColor(Leaf.ink)
-                    .padding(.horizontal, 12)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .background(Leaf.ochre)
-                    .clipShape(RoundedCornerShape(cornerRadius: 3))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("NEW COMICS"))
-            .accessibilityValue(Text(defaultRTL ? String(localized: "RTL") : String(localized: "LTR")))
+            HStack(spacing: 8) { content }
+                .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 8) { content }
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

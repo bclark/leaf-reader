@@ -75,6 +75,7 @@ final class LibraryStore: ObservableObject {
     func importComicAwaitingCompletion(
         from url: URL, originalName: String? = nil, expectedBytes: Int64? = nil,
         collision: ComicImportCollision = .keepBoth,
+        beforePublish: @escaping @Sendable (URL) throws -> Void = { _ in },
         phase: @escaping @Sendable (ComicImportPhase) -> Void = { _ in }
     ) async throws -> URL {
         pendingImports += 1
@@ -85,18 +86,43 @@ final class LibraryStore: ObservableObject {
         }
         let result = try await importPipeline.importFile(from: url,
             originalName: originalName ?? url.lastPathComponent, expectedBytes: expectedBytes,
-            collision: collision, phase: phase)
+            collision: collision, beforePublish: beforePublish, phase: phase)
         // Do not check cancellation after publication: finish this transaction consistently.
         ReadingProgress.markOpened(result.url)
-        if ComicMetadataStore.get(result.url) == nil {
+        if ComicMetadataStore.get(result.url)?.userModified != true {
             ComicMetadataStore.set(result.url, metadata: result.metadata)
         }
+        ReadingProgress.resyncTotalIfNeeded(result.url, actualTotal: result.pageCount)
+        ReadingProgress.flushSync()
+        CoverLoader.invalidate(result.url)
         refresh(backfill: false)
         return result.url
     }
 
+    /// Save unsent remote intent before removing local resume storage or archive bytes.
+    func deletePreservingJellyfinProgress(_ urls: Set<URL>, imports: JellyfinImports = .shared,
+                                        progressStore: JellyfinProgressStore = .shared) async {
+        do {
+            let versions = try Dictionary(uniqueKeysWithValues: urls.map { ($0, try JellyfinLocalVersion($0)) })
+            let records = try await imports.reconcile(localFiles: comics)
+            ReadingProgress.flushSync()
+            let snapshot = try ReadingProgress.savedSnapshot()
+            try await progressStore.recoverLocalEdits(imports: records, snapshot: { snapshot })
+            // An open reader or replacement during either suspension must not lose its newer edit.
+            guard urls.allSatisfy({ ReadingProgress.get($0) == snapshot[$0.lastPathComponent] &&
+                (try? JellyfinLocalVersion($0)) == versions[$0] }) else {
+                throw JellyfinProgressStore.StoreError.changedDuringSync
+            }
+            deleteBatch(urls)
+        } catch {
+            importError = String(localized: "Could not prepare Jellyfin progress. Your local comics are still available. Try opening Jellyfin again.")
+        }
+    }
+
     func delete(_ url: URL) {
-        try? FileManager.default.removeItem(at: url)
+        do { try FileManager.default.removeItem(at: url) }
+        catch { return }
+        ReadingListStore.unlinkLocalCopy(filename: url.lastPathComponent)
         ReadingProgress.clear(url)
         ComicMetadataStore.clear(url)
         for list in readingLists {
@@ -107,7 +133,9 @@ final class LibraryStore: ObservableObject {
 
     func deleteBatch(_ urls: Set<URL>) {
         for url in urls {
-            try? FileManager.default.removeItem(at: url)
+            do { try FileManager.default.removeItem(at: url) }
+            catch { continue }
+            ReadingListStore.unlinkLocalCopy(filename: url.lastPathComponent)
             ReadingProgress.clear(url)
             ComicMetadataStore.clear(url)
             for list in readingLists {
@@ -136,7 +164,7 @@ final class LibraryStore: ObservableObject {
             }()
             let dir = ReadingProgress.readingDirection(url)
             let targetPage = read ? max(1, resolvedTotal - 1) : 0
-            ReadingProgress.set(url, page: targetPage, step: -1, total: resolvedTotal, rtl: dir)
+            ReadingProgress.set(url, page: targetPage, step: -1, total: resolvedTotal, rtl: dir, completed: read)
         }
         ReadingProgress.flushSync()
         refresh()
@@ -197,19 +225,24 @@ final class LibraryStore: ObservableObject {
     func markReadingListRead(listId: String, read: Bool) {
         guard let list = readingLists.first(where: { $0.id == listId }) else { return }
         let comicMap = Dictionary(uniqueKeysWithValues: comics.map { ($0.lastPathComponent, $0) })
-        let listUrls = list.itemFilenames.compactMap { comicMap[$0] }
+        let listUrls = list.itemFilenames.compactMap { ReadingListStore.localFilename(for: $0).flatMap { comicMap[$0] } }
         markComicsRead(urls: listUrls, read: read)
     }
 
     // MARK: - Item Resolution for Library UI
 
-    func libraryItems(filter: LibraryFilter, searchQuery: String) -> [LibraryItem] {
+    func libraryItems(filter: LibraryFilter, searchQuery: String, excluding: Set<URL> = [],
+                      unreadOnly: Bool = false, available: Set<URL>? = nil) -> [LibraryItem] {
         let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let comicMap = Dictionary(uniqueKeysWithValues: comics.map { ($0.lastPathComponent, $0) })
 
         let filteredComics: [URL] = {
-            if q.isEmpty { return comics }
-            return comics.filter { url in
+            let candidates = comics.filter {
+                !excluding.contains($0) && (available?.contains($0) ?? true) &&
+                (!unreadOnly || !ReadingProgress.isCompleted($0))
+            }
+            if q.isEmpty { return candidates }
+            return candidates.filter { url in
                 let filename = url.lastPathComponent.lowercased()
                 let title = url.deletingPathExtension().lastPathComponent.lowercased()
                 let series = metadata[url.lastPathComponent]?.series?.lowercased() ?? ""
@@ -220,8 +253,9 @@ final class LibraryStore: ObservableObject {
         let listItems: [LibraryItem] = {
             let filteredLists = q.isEmpty ? readingLists : readingLists.filter { $0.name.lowercased().contains(q) }
             return filteredLists.map { list in
-                let previewUrls = list.itemFilenames.compactMap { comicMap[$0] }
-                return LibraryItem.readingListItem(list: list, previewUrls: previewUrls, itemCount: previewUrls.count)
+                let previewUrls = list.itemFilenames.compactMap { ReadingListStore.localFilename(for: $0).flatMap { comicMap[$0] } }
+                    .filter { !unreadOnly || !ReadingProgress.isCompleted($0) }
+                return LibraryItem.readingListItem(list: list, previewUrls: previewUrls, itemCount: list.itemFilenames.count)
             }
         }()
 
@@ -268,7 +302,7 @@ final class LibraryStore: ObservableObject {
                 items.append(.singleComic(url: url, metadata: metadata[url.lastPathComponent]))
                 handled.insert(url)
             }
-            return items + listItems
+            return items + (available == nil ? listItems : [])
 
         case .series:
             var seriesGroups: [String: [URL]] = [:]

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application android:label="Leaf Recovery QA" android:allowBackup="false"
+        tools:replace="android:label,android:allowBackup">
+        <profileable android:shell="true" />
+        <activity android:name="net.digitalbc.leafreader.qa.HalftoneQaActivity" android:exported="true" />
+        <activity android:name="net.digitalbc.leafreader.qa.RecoveryQaActivity"
+            android:exported="true" />
+        <activity android:name="net.digitalbc.leafreader.qa.LibraryQaActivity" android:exported="true" />
+        <activity android:name="net.digitalbc.leafreader.qa.LibraryPhoneQaActivity" android:exported="true" />
+        <activity android:name="net.digitalbc.leafreader.qa.LibraryLargeQaActivity" android:exported="true" />
+        <activity android:name="net.digitalbc.leafreader.qa.LibraryMediumQaActivity" android:exported="true" />
+        <activity android:name="net.digitalbc.leafreader.qa.LibraryWideQaActivity" android:exported="true" />
+        <activity-alias android:name="${applicationId}.LightLauncher"
+            android:enabled="true" android:exported="false"
+            android:targetActivity="net.digitalbc.leafreader.MainActivity" />
+        <activity-alias android:name="${applicationId}.DarkLauncher"
+            android:enabled="false" android:exported="false"
+            android:targetActivity="net.digitalbc.leafreader.MainActivity" />
+    </application>
+</manifest>

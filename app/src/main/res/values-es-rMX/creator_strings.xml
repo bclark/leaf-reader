@@ -1,0 +1,19 @@
+<resources>
+    <string name="creator_find_accessibility">Buscar cómics de %1$s, %2$s</string>
+    <string name="creator_comics_by">Cómics de %1$s</string>
+    <string name="creator_role_writer">Guion</string>
+    <string name="creator_role_artist">Dibujo</string>
+    <string name="creator_role_colorist">Color</string>
+    <string name="creator_role_inker">Entintado</string>
+    <string name="creator_role_letterer">Rotulación</string>
+    <string name="creator_role_editor">Edición</string>
+    <string name="creator_role_creator">Autoría</string>
+    <string name="creator_saved_scope">Solo créditos guardados. Los resultados pueden estar incompletos o desactualizados.</string>
+    <string name="creator_library_scope">Jellyfin · %1$s · créditos de autoría</string>
+    <string name="creator_name_scope">Nombre exacto en los créditos; el servidor no proporcionó un identificador de persona.</string>
+    <string name="creator_no_matches">No hay cómics coincidentes en los metadatos disponibles.</string>
+    <string name="creator_downloaded">Descargados</string>
+    <string name="creator_no_library">Conéctate a una biblioteca de cómics para buscar a esta persona.</string>
+    <string name="creator_account_changed">La cuenta conectada cambió. Vuelve a tu biblioteca y selecciona de nuevo a una persona.</string>
+    <string name="jellyfin_retained_read_explanation">Se descarga el cómic completo antes de abrirlo. La copia permanece en este dispositivo hasta que la elimines.</string>
+</resources>

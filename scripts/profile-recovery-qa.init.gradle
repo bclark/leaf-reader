@@ -1,0 +1,11 @@
+allprojects { project ->
+    project.plugins.withId('com.android.application') {
+        project.androidComponents.finalizeDsl { android ->
+            def qa = android.buildTypes.getByName('recoveryQa')
+            qa.debuggable = false
+            qa.minifyEnabled = true
+            qa.shrinkResources = true
+            qa.proguardFiles(android.getDefaultProguardFile('proguard-android-optimize.txt'), project.file('proguard-rules.pro'))
+        }
+    }
+}

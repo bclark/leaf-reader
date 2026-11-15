@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="library_view_all">Todos</string>
+    <string name="library_view_series">Series</string>
+    <string name="library_view_lists">Listas</string>
+    <string name="library_view_offline">Sin conexión</string>
+    <string name="library_unread_only">Solo sin leer</string>
+    <string name="library_clear_unread">Quitar filtro sin leer</string>
+    <string name="library_no_unread">No hay cómics sin leer en esta vista.</string>
+    <string name="library_offline_empty">Aún no hay copias disponibles. Importa un cómic de Archivos o SMB, o descarga uno de Jellyfin.</string>
+    <string name="library_default_rtl">Lectura de derecha a izquierda por defecto</string>
+    <string name="library_select_all">Seleccionar todo</string>
+    <string name="library_deselect_all">Deseleccionar todo</string>
+    <string name="library_done">Listo</string>
+    <plurals name="library_series_completed">
+        <item quantity="one">%1$d número · leído</item>
+        <item quantity="many">%1$d números · leídos</item>
+        <item quantity="other">%1$d números · leídos</item>
+    </plurals>
+    <plurals name="library_series_unread">
+        <item quantity="one">%1$d número · %2$d sin leer</item>
+        <item quantity="many">%1$d números · %2$d sin leer</item>
+        <item quantity="other">%1$d números · %2$d sin leer</item>
+    </plurals>
+</resources>

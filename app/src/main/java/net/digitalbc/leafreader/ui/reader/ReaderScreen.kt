@@ -86,11 +86,13 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.ui.draw.clip
@@ -509,6 +511,9 @@ private fun PageScrubber(
             }
             PageCoin(pageLabel = shownPageLabel, total = pageCount)
         }
+        val isRtlLayout = LocalLayoutDirection.current == LayoutDirection.Rtl
+        val invertNav = if (isRtlLayout) !rightToLeft else rightToLeft
+
         Spacer(Modifier.size(4.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -518,10 +523,10 @@ private fun PageScrubber(
             IconButton(
                 onClick = onPrevPage,
                 enabled = canGoPrev,
-                modifier = Modifier.size(44.dp),
+                modifier = Modifier.size(48.dp),
             ) {
                 Icon(
-                    imageVector = if (rightToLeft) Icons.AutoMirrored.Filled.NavigateNext else Icons.AutoMirrored.Filled.NavigateBefore,
+                    imageVector = if (invertNav) Icons.AutoMirrored.Filled.NavigateNext else Icons.AutoMirrored.Filled.NavigateBefore,
                     contentDescription = if (isSpread) "Previous pages" else "Previous page",
                     tint = if (canGoPrev) Cream else CreamMuted.copy(alpha = 0.35f),
                 )
@@ -544,10 +549,10 @@ private fun PageScrubber(
             IconButton(
                 onClick = onNextPage,
                 enabled = canGoNext,
-                modifier = Modifier.size(44.dp),
+                modifier = Modifier.size(48.dp),
             ) {
                 Icon(
-                    imageVector = if (rightToLeft) Icons.AutoMirrored.Filled.NavigateBefore else Icons.AutoMirrored.Filled.NavigateNext,
+                    imageVector = if (invertNav) Icons.AutoMirrored.Filled.NavigateBefore else Icons.AutoMirrored.Filled.NavigateNext,
                     contentDescription = if (isSpread) "Next pages" else "Next page",
                     tint = if (canGoNext) Cream else CreamMuted.copy(alpha = 0.35f),
                 )

@@ -52,7 +52,7 @@ struct ReaderGestures: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UIView, context: Context) {
-        context.coordinator.parent = self
+        context.coordinator.update(self, in: uiView)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -61,7 +61,22 @@ struct ReaderGestures: UIViewRepresentable {
         var parent: ReaderGestures
         weak var doubleTapRecognizer: UITapGestureRecognizer?
         private var maxTouches = 1
+        private var resettingForResize = false
         init(_ parent: ReaderGestures) { self.parent = parent }
+
+        func update(_ parent: ReaderGestures, in view: UIView) {
+            if self.parent.size != parent.size {
+                // Cancel old-coordinate gestures without publishing state during a SwiftUI update.
+                resettingForResize = true
+                for recognizer in view.gestureRecognizers ?? [] where recognizer.isEnabled {
+                    recognizer.isEnabled = false
+                    recognizer.isEnabled = true
+                }
+                maxTouches = 1
+                resettingForResize = false
+            }
+            self.parent = parent
+        }
 
         // Only require double-tap failure when zoomed in (where double-tap resets zoom to 1x).
         // When at 1x zoom, double-tap fails immediately so single-tap page turns have 0ms delay
@@ -85,6 +100,7 @@ struct ReaderGestures: UIViewRepresentable {
         }
 
         @objc func handlePinch(_ g: UIPinchGestureRecognizer) {
+            guard !resettingForResize else { return }
             switch g.state {
             case .began: parent.onMultipleTouches()
             case .changed: parent.onPinchChanged(g.scale)
@@ -94,6 +110,7 @@ struct ReaderGestures: UIViewRepresentable {
         }
 
         @objc func handlePan(_ g: UIPanGestureRecognizer) {
+            guard !resettingForResize else { return }
             guard let view = g.view else { return }
             let t = g.translation(in: view)
             switch g.state {
@@ -117,13 +134,17 @@ struct ReaderGestures: UIViewRepresentable {
         }
 
         @objc func handleTap(_ g: UITapGestureRecognizer) {
+            guard !resettingForResize else { return }
             guard let view = g.view else { return }
             let loc = g.location(in: view)
             let viewSize = (view.bounds.width > 0 && view.bounds.height > 0) ? view.bounds.size : parent.size
             parent.onTap(loc, viewSize)
         }
 
-        @objc func handleDouble(_ g: UITapGestureRecognizer) { parent.onDoubleTap() }
+        @objc func handleDouble(_ g: UITapGestureRecognizer) {
+            guard !resettingForResize else { return }
+            parent.onDoubleTap()
+        }
 
         func simulateTap(at location: CGPoint, in viewSize: CGSize) {
             parent.onTap(location, viewSize)

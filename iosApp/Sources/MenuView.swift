@@ -8,6 +8,7 @@ struct MenuView: View {
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
 
+    @State private var defaultRTL = ReadingPrefs.defaultRightToLeft
     @State private var showingSmbSettings = false
     @State private var showingExporter = false
     @State private var exportDocument = BackupJSONDocument()
@@ -56,7 +57,11 @@ struct MenuView: View {
                                 .frame(width: 38, height: 38)
                                 .background(Leaf.cream.opacity(0.14))
                                 .clipShape(Circle())
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Back")
                         OchreBadge(text: "MENU")
                         Spacer()
                     }
@@ -99,23 +104,26 @@ struct MenuView: View {
                             // Page Fit
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Page Fit")
-                                    .font(.archivo(14, weight: 700))
+                                    .leafControlFont(14, weight: 700)
                                     .foregroundColor(Leaf.text)
                                 Text(settings.pageFitMode == .fitWidth
                                      ? String(localized: "Fit page to screen width for easier reading of small text and speech bubbles.")
                                      : String(localized: "Fit the entire page on screen."))
-                                    .font(.archivo(12, weight: 400))
+                                    .leafControlFont(12, weight: 400)
                                     .foregroundColor(Leaf.secondaryText)
 
-                                HStack(spacing: 2) {
+                                LeafAdaptiveControls(spacing: 2, fillsWidth: true) {
                                     Button {
                                         settings.pageFitMode = .fitPage
                                     } label: {
                                         Text("FIT TO PAGE")
-                                            .font(.archivo(12, weight: 700))
+                                            .leafControlFont(12, weight: 700)
                                             .foregroundColor(settings.pageFitMode == .fitPage ? Leaf.ink : Leaf.secondaryText)
                                             .frame(maxWidth: .infinity)
+                                            .padding(.horizontal, 12)
                                             .padding(.vertical, 8)
+                                            .frame(minWidth: 44, minHeight: 44)
+                                            .contentShape(Rectangle())
                                             .background(settings.pageFitMode == .fitPage ? Leaf.ochre : Color.clear)
                                             .clipShape(RoundedCornerShape(cornerRadius: 3))
                                     }
@@ -125,10 +133,13 @@ struct MenuView: View {
                                         settings.pageFitMode = .fitWidth
                                     } label: {
                                         Text("FIT TO WIDTH")
-                                            .font(.archivo(12, weight: 700))
+                                            .leafControlFont(12, weight: 700)
                                             .foregroundColor(settings.pageFitMode == .fitWidth ? Leaf.ink : Leaf.secondaryText)
                                             .frame(maxWidth: .infinity)
+                                            .padding(.horizontal, 12)
                                             .padding(.vertical, 8)
+                                            .frame(minWidth: 44, minHeight: 44)
+                                            .contentShape(Rectangle())
                                             .background(settings.pageFitMode == .fitWidth ? Leaf.ochre : Color.clear)
                                             .clipShape(RoundedCornerShape(cornerRadius: 3))
                                     }
@@ -147,7 +158,7 @@ struct MenuView: View {
                             LayoutChoiceView(title: "Landscape layout", isSpread: $settings.landscapeSpread)
 
                             Text("The cover and wide pages stay single in either layout.")
-                                .font(.archivo(11, weight: 400))
+                                .leafControlFont(11, weight: 400)
                                 .foregroundColor(Leaf.secondaryText)
                         }
                         .padding(16)
@@ -157,32 +168,44 @@ struct MenuView: View {
                         Spacer().frame(height: 32)
 
                         // ---- Library -----------------------------------------------------
-                        Button("SMB Drive Settings") { showingSmbSettings = true }
-                            .font(.archivo(14, weight: 700))
-                            .foregroundColor(Leaf.goldText)
-                            .padding(.bottom, 24)
+                        Button { showingSmbSettings = true } label: {
+                            Text("SMB Drive Settings")
+                                .leafControlFont(14, weight: 700)
+                                .frame(minWidth: 44, minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .foregroundColor(Leaf.goldText)
+                        .padding(.bottom, 24)
 
                         SectionLabel("LIBRARY")
                         Spacer().frame(height: 10)
+                        Toggle("Default right-to-left reading", isOn: $defaultRTL)
+                            .leafControlFont(14, weight: 700)
+                            .frame(minHeight: 44)
+                            .onChange(of: defaultRTL) { ReadingPrefs.defaultRightToLeft = $0 }
+                            .padding(.bottom, 12)
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Grid Columns")
-                                .font(.archivo(14, weight: 700))
+                                .leafControlFont(14, weight: 700)
                                 .foregroundColor(Leaf.text)
                             Text("Choose how many comic covers appear per row on the library screen.")
-                                .font(.archivo(12, weight: 400))
+                                .leafControlFont(12, weight: 400)
                                 .foregroundColor(Leaf.secondaryText)
 
-                            HStack(spacing: 2) {
+                            LeafAdaptiveControls(spacing: 2, fillsWidth: true) {
                                 ForEach([2, 3, 4, 6], id: \.self) { count in
                                     let isSelected = settings.libraryColumns == count
                                     Button {
                                         settings.libraryColumns = count
                                     } label: {
                                         Text("\(count) COL")
-                                            .font(.archivo(12, weight: 700))
+                                            .leafControlFont(12, weight: 700)
                                             .foregroundColor(isSelected ? Leaf.ink : Leaf.secondaryText)
                                             .frame(maxWidth: .infinity)
+                                            .padding(.horizontal, 12)
                                             .padding(.vertical, 8)
+                                            .frame(minWidth: 44, minHeight: 44)
+                                            .contentShape(Rectangle())
                                             .background(isSelected ? Leaf.ochre : Color.clear)
                                             .clipShape(RoundedCornerShape(cornerRadius: 3))
                                     }
@@ -205,14 +228,14 @@ struct MenuView: View {
                         Spacer().frame(height: 10)
                         VStack(alignment: .leading, spacing: 14) {
                             Text("Cross-Platform Backup")
-                                .font(.archivo(14, weight: 700))
+                                .leafControlFont(14, weight: 700)
                                 .foregroundColor(Leaf.text)
                             Text("Export or restore your reading progress, metadata, custom reading lists, and app preferences. Backups are cross-platform compatible between iOS and Android.")
-                                .font(.archivo(12, weight: 400))
+                                .leafControlFont(12, weight: 400)
                                 .lineSpacing(3)
                                 .foregroundColor(Leaf.secondaryText)
 
-                            HStack(spacing: 12) {
+                            LeafAdaptiveControls(spacing: 12, fillsWidth: true) {
                                 Button {
                                     startExport()
                                 } label: {
@@ -220,11 +243,14 @@ struct MenuView: View {
                                         Image(systemName: "square.and.arrow.up")
                                             .font(.system(size: 13, weight: .bold))
                                         Text("EXPORT BACKUP")
-                                            .font(.archivo(12, weight: 700))
+                                            .leafControlFont(12, weight: 700)
                                     }
                                     .foregroundColor(Leaf.ink)
                                     .frame(maxWidth: .infinity)
+                                    .padding(.horizontal, 16)
                                     .padding(.vertical, 10)
+                                    .frame(minWidth: 44, minHeight: 44)
+                                    .contentShape(Rectangle())
                                     .background(Leaf.ochre)
                                     .clipShape(RoundedCornerShape(cornerRadius: 4))
                                     .comicShadow(offset: 2, color: .black.opacity(0.5), corner: 4)
@@ -238,11 +264,14 @@ struct MenuView: View {
                                         Image(systemName: "square.and.arrow.down")
                                             .font(.system(size: 13, weight: .bold))
                                         Text("RESTORE BACKUP")
-                                            .font(.archivo(12, weight: 700))
+                                            .leafControlFont(12, weight: 700)
                                     }
                                     .foregroundColor(Leaf.text)
                                     .frame(maxWidth: .infinity)
+                                    .padding(.horizontal, 16)
                                     .padding(.vertical, 10)
+                                    .frame(minWidth: 44, minHeight: 44)
+                                    .contentShape(Rectangle())
                                     .background(settings.ground)
                                     .clipShape(RoundedCornerShape(cornerRadius: 4))
                                     .comicShadow(offset: 2, color: .black.opacity(0.5), corner: 4)
@@ -265,31 +294,54 @@ struct MenuView: View {
                         OchreBadge(text: "VERSION \(version)")
                         Spacer().frame(height: 14)
                         Text("A comic reader for iOS")
-                            .font(.archivo(14, weight: 600)).foregroundColor(Leaf.text)
+                            .leafControlFont(14, weight: 600).foregroundColor(Leaf.text)
                         Spacer().frame(height: 14)
                         Text("Leaf is an offline comic reader with interactive page turns, reading lists, and support for CBZ, CBR, and PDF files.")
-                            .font(.archivo(13)).lineSpacing(4).foregroundColor(Leaf.text)
+                            .leafControlFont(13).lineSpacing(4).foregroundColor(Leaf.text)
                         Spacer().frame(height: 14)
                         Link(destination: Self.repoURL) {
                             Text("Source and support (English): github.com/bclark/leaf-reader")
-                                .font(.archivo(11, weight: 600)).foregroundColor(Leaf.goldText)
+                                .leafControlFont(11, weight: 600).foregroundColor(Leaf.goldText)
                                 .padding(.top, 2)
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
                         }
                         Spacer().frame(height: 10)
                         Text("Forked with appreciation from Chika by Chakra.")
-                            .font(.archivo(12)).foregroundColor(Leaf.secondaryText)
+                            .leafControlFont(12).foregroundColor(Leaf.secondaryText)
                         Spacer().frame(height: 6)
                         Link(destination: Self.upstreamURL) {
                             Text("Upstream: github.com/batunii/chika")
-                                .font(.archivo(11, weight: 600)).foregroundColor(Leaf.secondaryText)
+                                .leafControlFont(11, weight: 600).foregroundColor(Leaf.secondaryText)
                                 .padding(.top, 2)
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+
+                        Spacer().frame(height: 14)
+                        Text("Screenshot comics: Pepper&Carrot by David Revoy, licensed under CC BY 4.0. Comics are not included with Leaf.")
+                            .leafControlFont(12).foregroundColor(Leaf.secondaryText)
+                        Link(destination: URL(string: "https://www.peppercarrot.com/")!) {
+                            Text("Read Pepper&Carrot")
+                                .leafControlFont(12, weight: 600).foregroundColor(Leaf.goldText)
+                                .frame(minHeight: 44).contentShape(Rectangle())
+                        }
+                        Link(destination: URL(string: "https://www.davidrevoy.com/")!) {
+                            Text("David Revoy’s website")
+                                .leafControlFont(12, weight: 600).foregroundColor(Leaf.goldText)
+                                .frame(minHeight: 44).contentShape(Rectangle())
+                        }
+                        Link(destination: URL(string: "https://creativecommons.org/licenses/by/4.0/")!) {
+                            Text("CC BY 4.0 license")
+                                .leafControlFont(12, weight: 600).foregroundColor(Leaf.goldText)
+                                .frame(minHeight: 44).contentShape(Rectangle())
                         }
 
                         Spacer().frame(height: 18)
                         Link(destination: Self.privacyURL) {
                             HStack {
                                 Text("Privacy policy (English) — Leaf collects no data.")
-                                    .font(.archivo(12)).foregroundColor(Leaf.text)
+                                    .leafControlFont(12).foregroundColor(Leaf.text)
                                 Spacer()
                                 Image(systemName: "arrow.up.right")
                                     .font(.system(size: 11, weight: .bold)).foregroundColor(Leaf.secondaryText)
@@ -302,7 +354,7 @@ struct MenuView: View {
                         Link(destination: Self.licensesURL) {
                             HStack {
                                 Text("Open-source licenses & notices (English).")
-                                    .font(.archivo(12)).foregroundColor(Leaf.text)
+                                    .leafControlFont(12).foregroundColor(Leaf.text)
                                 Spacer()
                                 Image(systemName: "arrow.up.right")
                                     .font(.system(size: 11, weight: .bold)).foregroundColor(Leaf.secondaryText)
@@ -318,7 +370,7 @@ struct MenuView: View {
                         SectionLabel("SUPPORT LEAF")
                         Spacer().frame(height: 10)
                         Text("Enjoying Leaf? You can leave an optional tip to support development. All features remain free.")
-                            .font(.archivo(12, weight: 500))
+                            .leafControlFont(12, weight: 500)
                             .lineSpacing(4)
                             .foregroundColor(Leaf.text)
                         Spacer().frame(height: 12)
@@ -330,7 +382,7 @@ struct MenuView: View {
                                     .font(.system(size: 16))
                                     .foregroundColor(Leaf.cream)
                                 Text("LEAVE A TIP")
-                                    .font(.anton(15))
+                                    .font(.custom("Anton-Regular", size: 15, relativeTo: .headline))
                                     .tracking(0.5)
                                     .foregroundColor(Leaf.cream)
                             }
@@ -348,7 +400,7 @@ struct MenuView: View {
 
                         // ---- Support Upstream --------------------------------------------
                         Text("Support the upstream creator of Chika:")
-                            .font(.archivo(12, weight: 500))
+                            .leafControlFont(12, weight: 500)
                             .lineSpacing(3)
                             .foregroundColor(Leaf.secondaryText)
                         Spacer().frame(height: 12)
@@ -358,7 +410,7 @@ struct MenuView: View {
                                     .font(.system(size: 16))
                                     .foregroundColor(Leaf.goldText)
                                 Text("SUPPORT ORIGINAL PROJECT")
-                                    .font(.anton(15))
+                                    .font(.custom("Anton-Regular", size: 15, relativeTo: .headline))
                                     .tracking(0.5)
                                     .foregroundColor(Leaf.text)
                             }
@@ -375,7 +427,7 @@ struct MenuView: View {
                         Spacer().frame(height: 6)
                         Link(destination: Self.upstreamURL) {
                             Text("github.com/batunii/chika")
-                                .font(.archivo(11, weight: 600))
+                                .leafControlFont(11, weight: 600)
                                 .foregroundColor(Leaf.goldText)
                         }
                     }
@@ -391,7 +443,7 @@ struct MenuView: View {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(Leaf.goldText)
                         Text(toast)
-                            .font(.archivo(13, weight: 600))
+                            .leafControlFont(13, weight: 600)
                             .foregroundColor(Leaf.text)
                     }
                     .padding(.horizontal, 16)
@@ -575,8 +627,11 @@ private struct RestorePreviewSheet: View {
                             .frame(width: 32, height: 32)
                             .background(Leaf.text.opacity(0.12))
                             .clipShape(Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Close")
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
@@ -590,11 +645,11 @@ private struct RestorePreviewSheet: View {
                                 .font(.system(size: 12))
                                 .foregroundColor(Leaf.goldText)
                             Text("Exported \(formattedExportDate)")
-                                .font(.archivo(12, weight: 600))
+                                .leafControlFont(12, weight: 600)
                                 .foregroundColor(Leaf.text)
                             Spacer()
                             Text("v\(preview.appVersion)")
-                                .font(.archivo(11, weight: 600))
+                                .leafControlFont(11, weight: 600)
                                 .foregroundColor(Leaf.secondaryText)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
@@ -608,7 +663,7 @@ private struct RestorePreviewSheet: View {
                         // Backup Contents Summary
                         VStack(alignment: .leading, spacing: 10) {
                             Text("BACKUP CONTENTS")
-                                .font(.anton(13))
+                                .font(.custom("Anton-Regular", size: 13, relativeTo: .headline))
                                 .tracking(0.5)
                                 .foregroundColor(Leaf.goldText)
 
@@ -619,11 +674,11 @@ private struct RestorePreviewSheet: View {
                                         .foregroundColor(Leaf.secondaryText)
                                         .frame(width: 20)
                                     Text("\(preview.totalComicsInBackup) comics in backup")
-                                        .font(.archivo(13, weight: 600))
+                                        .leafControlFont(13, weight: 600)
                                         .foregroundColor(Leaf.text)
                                     if preview.matchingComicsCount > 0 {
                                         Text("(\(preview.matchingComicsCount) match library)")
-                                            .font(.archivo(12, weight: 400))
+                                            .leafControlFont(12, weight: 400)
                                             .foregroundColor(Leaf.goldText)
                                     }
                                 }
@@ -634,7 +689,7 @@ private struct RestorePreviewSheet: View {
                                         .foregroundColor(Leaf.secondaryText)
                                         .frame(width: 20)
                                     Text("\(preview.readingListsCount) reading lists")
-                                        .font(.archivo(13, weight: 600))
+                                        .leafControlFont(13, weight: 600)
                                         .foregroundColor(Leaf.text)
                                 }
 
@@ -644,7 +699,7 @@ private struct RestorePreviewSheet: View {
                                         .foregroundColor(Leaf.secondaryText)
                                         .frame(width: 20)
                                     Text(preview.hasSettings ? String(localized: "Includes app preferences") : String(localized: "No preferences included"))
-                                        .font(.archivo(13, weight: 600))
+                                        .leafControlFont(13, weight: 600)
                                         .foregroundColor(Leaf.text)
                                 }
                             }
@@ -656,7 +711,7 @@ private struct RestorePreviewSheet: View {
                         // Strategy Selector
                         VStack(alignment: .leading, spacing: 10) {
                             Text("CONFLICT RESOLUTION")
-                                .font(.anton(13))
+                                .font(.custom("Anton-Regular", size: 13, relativeTo: .headline))
                                 .tracking(0.5)
                                 .foregroundColor(Leaf.goldText)
 
@@ -672,10 +727,10 @@ private struct RestorePreviewSheet: View {
                                                 .padding(.top, 2)
                                             VStack(alignment: .leading, spacing: 3) {
                                                 Text(strategy.title)
-                                                    .font(.archivo(13, weight: 700))
+                                                    .leafControlFont(13, weight: 700)
                                                     .foregroundColor(Leaf.text)
                                                 Text(strategy.subtitle)
-                                                    .font(.archivo(11, weight: 400))
+                                                    .leafControlFont(11, weight: 400)
                                                     .foregroundColor(Leaf.secondaryText)
                                             }
                                             Spacer()
@@ -699,7 +754,7 @@ private struct RestorePreviewSheet: View {
                                 onApply()
                             } label: {
                                 Text("APPLY RESTORE")
-                                    .font(.anton(15))
+                                    .font(.custom("Anton-Regular", size: 15, relativeTo: .headline))
                                     .tracking(0.5)
                                     .foregroundColor(Leaf.ink)
                                     .frame(maxWidth: .infinity)
@@ -714,10 +769,12 @@ private struct RestorePreviewSheet: View {
                                 onCancel()
                             } label: {
                                 Text("CANCEL")
-                                    .font(.archivo(13, weight: 700))
+                                    .leafControlFont(13, weight: 700)
                                     .foregroundColor(Leaf.secondaryText)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 10)
+                                    .frame(minWidth: 44, minHeight: 44)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }
@@ -736,7 +793,7 @@ private struct SectionLabel: View {
     init(_ text: LocalizedStringKey) { self.text = text }
     var body: some View {
         Text(text)
-            .font(.archivo(9, weight: 800)).tracking(2.5).foregroundColor(Leaf.goldText)
+            .leafControlFont(9, weight: 800).tracking(2.5).foregroundColor(Leaf.goldText)
     }
 }
 
@@ -751,9 +808,9 @@ private struct ToggleRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.archivo(14, weight: 700)).foregroundColor(Leaf.text)
+                Text(title).leafControlFont(14, weight: 700).foregroundColor(Leaf.text)
                 Text(subtitle)
-                    .font(.archivo(10.5, weight: 500)).lineSpacing(3).foregroundColor(Leaf.secondaryText)
+                    .leafControlFont(10.5, weight: 500).lineSpacing(3).foregroundColor(Leaf.secondaryText)
             }
             Spacer(minLength: 0)
             LeafSwitch(isOn: $isOn)
@@ -798,17 +855,20 @@ private struct LayoutChoiceView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.archivo(14, weight: 700))
+                .leafControlFont(14, weight: 700)
                 .foregroundColor(Leaf.text)
-            HStack(spacing: 2) {
+            LeafAdaptiveControls(spacing: 2, fillsWidth: true) {
                 Button {
                     isSpread = false
                 } label: {
                     Text("Single page")
-                        .font(.archivo(12, weight: 700))
+                        .leafControlFont(12, weight: 700)
                         .foregroundColor(!isSpread ? Leaf.ink : Leaf.secondaryText)
                         .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 12)
                         .padding(.vertical, 8)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                         .background(!isSpread ? Leaf.ochre : Color.clear)
                         .clipShape(RoundedCornerShape(cornerRadius: 3))
                 }
@@ -818,10 +878,13 @@ private struct LayoutChoiceView: View {
                     isSpread = true
                 } label: {
                     Text("Two-page spread")
-                        .font(.archivo(12, weight: 700))
+                        .leafControlFont(12, weight: 700)
                         .foregroundColor(isSpread ? Leaf.ink : Leaf.secondaryText)
                         .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 12)
                         .padding(.vertical, 8)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                         .background(isSpread ? Leaf.ochre : Color.clear)
                         .clipShape(RoundedCornerShape(cornerRadius: 3))
                 }

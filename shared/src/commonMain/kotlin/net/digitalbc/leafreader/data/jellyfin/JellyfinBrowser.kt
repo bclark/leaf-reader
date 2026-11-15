@@ -35,6 +35,15 @@ data class JellyfinBrowserState(
     }
 }
 
+/** Only a single Books library is safe to enter automatically; names are not identifiers. */
+object JellyfinLibraryEntry {
+    fun comicLibraries(views: List<JellyfinView>): List<JellyfinView> =
+        views.filter { it.collectionType.equals("books", ignoreCase = true) }
+
+    fun automaticLibrary(views: List<JellyfinView>): JellyfinView? =
+        comicLibraries(views).singleOrNull()
+}
+
 object JellyfinBrowserLogic {
     fun begin(state: JellyfinBrowserState): JellyfinBrowserState =
         state.copy(
