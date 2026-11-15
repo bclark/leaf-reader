@@ -173,6 +173,31 @@ class LibraryViewModelTest {
     }
 
     @Test
+    fun seriesSelectionFromSavedLibraryDoesNotCancelServerDiscovery() = runBlocking {
+        configureJellyfin()
+        val discovered = CompletableDeferred<Unit>()
+        val books = JellyfinView("books", "Comics", "books")
+        val entry = net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueEntry(
+            JellyfinItem("one", "A book", false, container = "cbz"), "Book", false)
+        val vm = JellyfinCatalogueViewModel(repository, settings,
+            defaultDispatcher = testDispatcher, ioDispatcher = testDispatcher,
+            restore = { net.digitalbc.leafreader.data.jellyfin.JellyfinSavedCatalogue(listOf(books), books, null) },
+            readIndex = { null }, saveIndex = { _, _, _ -> },
+            views = { discovered.await(); Result.success(listOf(books)) },
+            fetch = { Result.success(net.digitalbc.leafreader.data.jellyfin.JellyfinCataloguePage(
+                listOf(entry), 1, 1, false)) })
+        stores += ViewModelStore().apply { put("saved-library-series", vm) }
+        vm.ensure()
+        assertEquals(books, vm.state.value.library)
+        vm.browse(net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.SERIES, "", false)
+        discovered.complete(Unit)
+        withTimeout(3000) { vm.state.first { it.indexComplete } }
+        assertEquals(listOf("one"), vm.state.value.entries.map { it.item.id })
+        assertFalse(vm.state.value.offline)
+        assertFalse(vm.state.value.loading)
+    }
+
+    @Test
     fun seriesSelectionDuringColdCacheReadStillStartsCatalogueIndex() = runBlocking {
         configureJellyfin()
         val cacheRead = CompletableDeferred<Unit>()

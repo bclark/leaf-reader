@@ -75,6 +75,8 @@ class JellyfinCatalogueViewModel(
         .mapLatest { (raw, ids) -> withContext(defaultDispatcher) { projector.prepare(raw, ids) } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, CatalogueState(creator = creator))
     private var scope: List<String>? = null
+    private var launchJob: Job? = null
+    private var launchGeneration = 0L
     private var job: Job? = null
     private var indexJob: Job? = null
     private var generation = 0L
@@ -142,18 +144,19 @@ class JellyfinCatalogueViewModel(
         if (!force && scope == currentScope() &&
             (_state.value.loaded || _state.value.loading || _state.value.launchFailure != null)) return
         val sameScope = scope == currentScope()
-        job?.cancel(); indexJob?.cancel(); ++indexGeneration
+        launchJob?.cancel(); job?.cancel(); indexJob?.cancel(); ++indexGeneration
         if (!sameScope) { index = null; pages.clear() }
         scope = currentScope()
         val captured = scope!!
-        val request = ++generation
+        ++generation
+        val request = ++launchGeneration
         lastCheck = elapsedNanos()
         val before = if (sameScope) _state.value else CatalogueState(accountScope = positionScope, creator = creator)
         _state.value = before.copy(loading = true, indexing = false, accountScope = positionScope)
-        job = viewModelScope.launch {
+        launchJob = viewModelScope.launch {
             if (index == null) {
                 val saved = restore()
-                if (!valid(request, captured)) return@launch
+                if (!validLaunch(request, captured)) return@launch
                 if (saved != null) {
                     index = saved.index
                     val books = JellyfinLibraryEntry.comicLibraries(saved.libraries).ifEmpty { saved.libraries }
@@ -162,7 +165,7 @@ class JellyfinCatalogueViewModel(
                 }
             }
             val result = launchRequest(views)
-            if (!valid(request, captured)) return@launch
+            if (!validLaunch(request, captured)) return@launch
             result.onSuccess { libraries ->
                 val books = JellyfinLibraryEntry.comicLibraries(libraries).ifEmpty { libraries }
                 val selected = books.firstOrNull { it.id == _state.value.library?.id }
@@ -171,7 +174,7 @@ class JellyfinCatalogueViewModel(
                 // Applying its default Series query cancels the current query job.
                 if (selected != null && index == null) {
                     val saved = readIndex(selected.id)
-                    if (!valid(request, captured)) return@launch
+                    if (!validLaunch(request, captured)) return@launch
                     index = saved
                 }
                 _state.value = project(_state.value.copy(libraries = books, library = selected,
@@ -183,6 +186,9 @@ class JellyfinCatalogueViewModel(
             }.onFailure { error -> connectionFailed(error, startup = true) }
         }
     }
+
+    private fun validLaunch(request: Long, captured: List<String>) =
+        request == launchGeneration && captured == currentScope()
 
     private fun valid(request: Long, captured: List<String>) =
         request == generation && captured == currentScope()
@@ -200,14 +206,14 @@ class JellyfinCatalogueViewModel(
     }
 
     fun chooseLibrary(library: JellyfinView) {
-        job?.cancel(); indexJob?.cancel(); ++generation; ++indexGeneration; pages.clear(); index = null
+        launchJob?.cancel(); job?.cancel(); indexJob?.cancel(); ++generation; ++launchGeneration; ++indexGeneration; pages.clear(); index = null
         val captured = currentScope()
-        val request = generation
+        val request = launchGeneration
         _state.value = CatalogueState(libraries = _state.value.libraries, library = library,
             accountScope = positionScope, loading = true, creator = creator)
-        job = viewModelScope.launch {
+        launchJob = viewModelScope.launch {
             index = readIndex(library.id)
-            if (!valid(request, captured)) return@launch
+            if (!validLaunch(request, captured)) return@launch
             _state.value = project(_state.value.copy(loading = false))
             startIndex(startup = true)
             if (!_state.value.usesIndex && _state.value.view != JellyfinCatalogueView.DOWNLOADED) load()
