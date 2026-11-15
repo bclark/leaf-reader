@@ -120,6 +120,38 @@ struct JellyfinSyncTests {
         #expect(try await context.store.pending(for: context.connection).isEmpty)
     }
 
+    @Test func cancellationAfterServerCommitRetainsPendingAndRetriesWithoutAnotherWrite() async throws {
+        let context = try Context()
+        defer { context.clean() }
+        let initial = try await seed(context, pending: true)
+        let native = ReadingProgress.get(context.url)
+        let transport = SyncTransport(remote: baseline)
+        // Cancel the sync task after the transport commits, before its successful response
+        // is acknowledged. The parent test task must remain usable for the retry.
+        transport.onUpdate = { withUnsafeCurrentTask { $0?.cancel() } }
+        let upload = Task { try await sync(context, transport) }
+        switch await upload.result {
+        case .failure(let error): #expect(error is CancellationError)
+        case .success: Issue.record("A canceled sync must not acknowledge the pending edit")
+        }
+        #expect(!Task.isCancelled)
+        #expect(transport.writes == 1)
+        #expect(transport.remote == .init(positionTicks: 20_000, played: false))
+        #expect(ReadingProgress.get(context.url) == native)
+        let reopened = JellyfinProgressStore(file: context.root.appendingPathComponent("progress.json"))
+        let pending = try #require(try await reopened.record(for: identity))
+        #expect(pending.pendingRevision == initial.pendingRevision)
+        #expect(pending.sourceRevision == initial.sourceRevision)
+        #expect(pending.baseline == baseline)
+        transport.onUpdate = nil
+        #expect(isSynced(try await JellyfinSync.synchronize(connection: context.connection,
+            itemID: "book", url: context.url, pageCount: 10, store: reopened,
+            transport: transport, validateSession: {})))
+        #expect(transport.writes == 1)
+        #expect(try await reopened.pending(for: context.connection).isEmpty)
+        #expect(ReadingProgress.get(context.url) == native)
+    }
+
     @Test func missingAndOutOfRangeRemoteStateNeverResetsLocalProgress() async throws {
         let context = try Context()
         defer { context.clean() }
