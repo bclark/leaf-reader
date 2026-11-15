@@ -678,7 +678,13 @@ final class ReaderTurnTests: XCTestCase {
 
             let readerView = ReaderView(comicURL: cbzURL).environmentObject(settings)
             let hosting = UIHostingController(rootView: readerView)
-            let window = UIWindow(frame: CGRect(origin: .zero, size: viewport))
+            guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else {
+                XCTFail("Expected app UIWindowScene for hosted ReaderView")
+                exp.fulfill()
+                return
+            }
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(origin: .zero, size: viewport)
             window.rootViewController = hosting
             window.makeKeyAndVisible()
             hosting.view.layoutIfNeeded()
@@ -789,7 +795,13 @@ final class ReaderTurnTests: XCTestCase {
 
             let readerView = ReaderView(comicURL: cbzURL).environmentObject(settings)
             let hosting = UIHostingController(rootView: readerView)
-            let window = UIWindow(frame: CGRect(origin: .zero, size: viewport))
+            guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else {
+                XCTFail("Expected app UIWindowScene for hosted ReaderView")
+                exp.fulfill()
+                return
+            }
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(origin: .zero, size: viewport)
             window.rootViewController = hosting
             window.makeKeyAndVisible()
             hosting.view.layoutIfNeeded()
