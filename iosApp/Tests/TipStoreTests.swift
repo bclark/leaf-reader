@@ -101,6 +101,47 @@ struct TipStoreTests {
         await store.stopForTesting()
     }
 
+    @Test func directPurchaseStaysBusyUntilObserverFinishesTheSameTransaction() async throws {
+        let client = FakeTipClient()
+        var releasePurchase: CheckedContinuation<Void, Never>?
+        var releaseFinish: CheckedContinuation<Void, Never>?
+        defer { releasePurchase?.resume(); releaseFinish?.resume() }
+        client.purchaseHook = { await withCheckedContinuation { releasePurchase = $0 } }
+        var finishCalls = 0
+        var finished = false
+        let transaction = VerifiedTip(id: 902, productID: TipCatalog.productIDs[0],
+            isConsumable: true, isRevoked: false, finish: {
+                finishCalls += 1
+                await withCheckedContinuation { releaseFinish = $0 }
+                finished = true
+            })
+        client.result = .success(.verified(transaction))
+        let store = TipStore(client: client, defaults: defaults())
+        store.start()
+        await store.loadProducts()
+        store.purchase(store.products[0])
+        try await settle { releasePurchase != nil }
+        client.continuation?.yield(.verified(transaction))
+        try await settle { releaseFinish != nil }
+
+        client.purchaseHook = nil
+        releasePurchase?.resume(); releasePurchase = nil
+        try await Task.sleep(nanoseconds: 30_000_000)
+        #expect(!finished)
+        #expect(store.purchasingID == client.catalog[0].id,
+            "The direct purchase must await the observer's in-flight finish")
+        store.purchase(store.products[1])
+        try await Task.sleep(nanoseconds: 20_000_000)
+        #expect(client.purchaseCalls == 1, "Another charge must stay blocked until finish completes")
+
+        releaseFinish?.resume(); releaseFinish = nil
+        try await settle { store.purchasingID == nil }
+        #expect(finished)
+        #expect(finishCalls == 1)
+        #expect(store.notice == .thankYou)
+        await store.stopForTesting()
+    }
+
     @Test func cancellationWhileWaitingForRecoveryNeverStartsACharge() async throws {
         let client = FakeTipClient()
         var release: CheckedContinuation<Void, Never>?
