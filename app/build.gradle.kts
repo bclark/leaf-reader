@@ -165,6 +165,6 @@ baselineProfile {
     saveInSrc = true
     mergeIntoMain = true
     variants {
-        create("profileQa") { from(project(":macrobenchmark")) }
+        create("fullProfileQa") { from(project(":macrobenchmark")) }
     }
 }
