@@ -1,6 +1,25 @@
 import SwiftUI
 import LeafShared
 
+/// Translate known credit labels for display without changing server metadata or custom roles.
+private func localizedJellyfinCreditRole(_ role: String) -> String {
+    let value = role.trimmingCharacters(in: .whitespacesAndNewlines)
+    switch value.lowercased() {
+    case "writer": return String(localized: "Writer")
+    case "author": return String(localized: "Author")
+    case "artist": return String(localized: "Artist")
+    case "penciler", "penciller": return String(localized: "Penciller")
+    case "colorist": return String(localized: "Colorist")
+    case "inker": return String(localized: "Inker")
+    case "letterer": return String(localized: "Letterer")
+    case "editor": return String(localized: "Editor")
+    case "coverartist", "cover artist": return String(localized: "Cover artist")
+    case "translator": return String(localized: "Translator")
+    case "creator": return String(localized: "Creator")
+    default: return role
+    }
+}
+
 struct JellyfinDetailView: View {
     let item: JellyfinBook
     @ObservedObject var model: JellyfinBrowserModel
@@ -133,6 +152,7 @@ struct JellyfinDetailView: View {
                 ForEach(Array(details.people.enumerated()), id: \.offset) { _, person in
                     let role = [person.type, person.role].compactMap { $0 }
                         .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                        .map(localizedJellyfinCreditRole)
                         .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
                         .joined(separator: " · ")
                     NavigationLink {

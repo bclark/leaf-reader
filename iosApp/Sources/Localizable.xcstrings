@@ -5577,6 +5577,116 @@
           }
         }
       }
+    },
+    "Artist" : {
+      "comment" : "Structured comic credit role. Preserve names and custom server wording. Spanish requires fluent review.",
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Artista"
+          }
+        }
+      }
+    },
+    "Author" : {
+      "comment" : "Structured comic credit role. Preserve names and custom server wording. Spanish requires fluent review.",
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Autor"
+          }
+        }
+      }
+    },
+    "Colorist" : {
+      "comment" : "Structured comic credit role. Preserve names and custom server wording. Spanish requires fluent review.",
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Colorista"
+          }
+        }
+      }
+    },
+    "Cover artist" : {
+      "comment" : "Structured comic credit role. Preserve names and custom server wording. Spanish requires fluent review.",
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Portadista"
+          }
+        }
+      }
+    },
+    "Editor" : {
+      "comment" : "Structured comic credit role. Preserve names and custom server wording. Spanish requires fluent review.",
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Editor"
+          }
+        }
+      }
+    },
+    "Inker" : {
+      "comment" : "Structured comic credit role. Preserve names and custom server wording. Spanish requires fluent review.",
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Entintador"
+          }
+        }
+      }
+    },
+    "Letterer" : {
+      "comment" : "Structured comic credit role. Preserve names and custom server wording. Spanish requires fluent review.",
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rotulista"
+          }
+        }
+      }
+    },
+    "Penciller" : {
+      "comment" : "Structured comic credit role. Preserve names and custom server wording. Spanish requires fluent review.",
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dibujante a lápiz"
+          }
+        }
+      }
+    },
+    "Translator" : {
+      "comment" : "Structured comic credit role. Preserve names and custom server wording. Spanish requires fluent review.",
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Traductor"
+          }
+        }
+      }
+    },
+    "Writer" : {
+      "comment" : "Structured comic credit role. Preserve names and custom server wording. Spanish requires fluent review.",
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Guionista"
+          }
+        }
+      }
     }
   },
   "version" : "1.3"
