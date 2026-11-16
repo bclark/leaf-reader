@@ -50,3 +50,6 @@ The preserved library-only control contains zero Leaf app entries and uses shipp
 
 
 Packaged-profile regression at `cc35b7c` plus those exact generated files passes: shared144, each flavor268pass/1expected live-SMB skip, both lints0errors/87existing warnings, both Release/Performance APKs, Full AAB and minified benchmark/runner builds. Shipping compiler remains R89.2.14. Profile candidate Full unsigned APK8,592,849bytes versus optimizer-only8,477,519; Fdroid4,567,599 versus4,453,101. The extra startup-layout/profile cost is real; keep this draft under review until the physical comparison supports it. No startup improvement is inferred from successful compilation. CI source also compiles each profile harness but runs no emulator timing; workflows remain disabled until separately authorized.
+
+
+S25's first required-profile attempt exposed transitive ProfileInstaller1.3.1 rejecting SDK37 before any timings. Explicit1.4.1 is required; it supports the forward-compatible API31+ profile format and fixes method-flag transcoding. See [official release notes](https://developer.android.com/jetpack/androidx/releases/profileinstaller). Rebuild both control and treatment with1.4.1 before comparison; never compare across installer versions or suppress the unsupported-SDK error. Older3910e6d artifact sizes/results above are historical evidence, not final1.4.1 validation.
