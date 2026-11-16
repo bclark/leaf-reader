@@ -34,7 +34,7 @@ class BaselineProfileGenerator {
     @Test fun localReaderAndLibrary() = profile.collect(TARGET_PACKAGE, includeInStartupProfile = false) {
         startActivityAndWait()
         LeafJourneys(device).apply {
-            prepareFixtures()
+            populatedLibraryReady()
             openFixture()
             turnPageAndReturn()
             continueFixture()

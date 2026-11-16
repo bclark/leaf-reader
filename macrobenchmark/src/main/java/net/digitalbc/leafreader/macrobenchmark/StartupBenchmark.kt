@@ -52,7 +52,7 @@ class StartupBenchmark {
         iterations = 5,
         setupBlock = {
             startActivityAndWait()
-            LeafJourneys(device).prepareFixtures()
+            LeafJourneys(device).populatedLibraryReady()
         },
     ) {
         LeafJourneys(device).apply {

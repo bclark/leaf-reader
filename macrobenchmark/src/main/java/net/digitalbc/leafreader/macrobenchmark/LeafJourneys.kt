@@ -29,7 +29,10 @@ internal class LeafJourneys(private val device: UiDevice) {
         libraryReady()
         // All is a user-visible filter; no production-only automation hooks are introduced.
         device.findObject(By.text(Pattern.compile("ALL", Pattern.CASE_INSENSITIVE)))?.click()
-        if (device.hasObject(fixture)) return
+        if (device.hasObject(fixture)) {
+            verifyFixtureCount()
+            return
+        }
         check(device.hasObject(By.text("YOUR COMICS, YOUR WAY"))) {
             "Refusing fixture setup in a nonempty library. Use the separate empty benchmark app."
         }
@@ -48,6 +51,16 @@ internal class LeafJourneys(private val device: UiDevice) {
         assertTrue("Fixture import is still running", device.wait(Until.gone(By.desc("Cancel import")), 90_000))
         device.wait(Until.findObject(By.text(Pattern.compile("ALL", Pattern.CASE_INSENSITIVE))), 5_000)?.click()
         device.waitForIdle()
+        verifyFixtureCount()
+    }
+
+    private fun verifyFixtureCount() {
+        requireNotNull(device.findObject(By.desc("Menu"))).click()
+        requireNotNull(device.wait(Until.findObject(By.text("Select comics")), 5_000)).click()
+        requireNotNull(device.wait(Until.findObject(By.text(Pattern.compile("SELECT ALL", Pattern.CASE_INSENSITIVE))), 5_000)).click()
+        assertTrue("Expected exactly 24 synthetic comics", device.wait(Until.hasObject(By.text("24 COMICS SELECTED")), 5_000))
+        requireNotNull(device.findObject(By.text(Pattern.compile("DONE", Pattern.CASE_INSENSITIVE)))).click()
+        libraryReady()
     }
 
     fun continueFixture() {

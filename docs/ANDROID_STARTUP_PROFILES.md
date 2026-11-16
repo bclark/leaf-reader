@@ -12,11 +12,11 @@ Use a coordinated native/device window. Select one dedicated emulator or the sep
 python3 scripts/create-r8-fixtures.py /tmp/LeafR8Fixtures
 # Explicitly select the QA device. These files contain synthetic artwork only.
 adb -s "$R8_TEST_SERIAL" push /tmp/LeafR8Fixtures /sdcard/Download/
-./gradlew :app:generateFullProfileQaBaselineProfile \
+./gradlew :app:generateBaselineProfile \
   -Pandroid.testInstrumentationRunnerArguments.leaf.qaFixtures=true
 ```
 
-Restrict connected-device selection when other devices are attached; do not run an unqualified aggregate generation task. The test refuses to seed a nonempty library that lacks its synthetic fixtures. It imports the folder through Android's real SAF picker, using English test selectors, then exercises All, local Reader, a page turn, Continue and Library scrolling. No production automation hook, external server, authentication or private comic is involved. Setup happens outside measured blocks.
+Restrict connected-device selection when other devices are attached. With mergeIntoMain enabled, generation is aggregated, but the verified task graph contains only the two isolated profileQa flavor producers; no production app producer is configured. The test refuses to seed a nonempty library that lacks its synthetic fixtures. It imports the folder through Android's real SAF picker, using English test selectors, then exercises All, local Reader, a page turn, Continue and Library scrolling. No production automation hook, external server, authentication or private comic is involved. Setup happens outside measured blocks.
 
 `startup` alone sets `includeInStartupProfile=true`. Reader/Continue/scroll collection is Baseline-only, preventing unrelated reading code from bloating startup DEX layout. Preserve the generated text, exact APK/maps/input identity and collection result. Confirm generated rules contain Leaf classes before committing them.
 
