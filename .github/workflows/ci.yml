@@ -14,6 +14,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  android-r8:
+    name: Android minified runtime gate
+    uses: ./.github/workflows/android-r8-smoke.yml
+
   build:
     name: Build debug APK
     runs-on: ubuntu-latest
