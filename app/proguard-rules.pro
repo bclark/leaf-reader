@@ -30,3 +30,9 @@
     public static int d(...);
     public static int i(...);
 }
+
+# SMBJ discovers these callbacks through runtime annotations, not direct calls.
+# MBassador invokes Method objects, so names may still be obfuscated.
+-keepclassmembers,allowobfuscation,includedescriptorclasses class com.hierynomus.smbj.** {
+    @net.engio.mbassy.listener.Handler <methods>;
+}
