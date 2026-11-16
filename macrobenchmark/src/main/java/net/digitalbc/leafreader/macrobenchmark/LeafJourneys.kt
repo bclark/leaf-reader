@@ -64,8 +64,12 @@ internal class LeafJourneys(private val device: UiDevice) {
     }
 
     fun continueFixture() {
+        device.waitForIdle()
         val card = requireNotNull(device.wait(Until.findObject(By.descStartsWith("Continue reading, Leaf R8 Fixture")), 10_000))
-        card.click()
+        val action = if (card.isClickable) card else requireNotNull(card.parent)
+        check(action.isClickable) { "Continue semantics have no clickable card parent" }
+        System.err.println("LEAF_CONTINUE_TARGET " + action.visibleBounds)
+        action.click()
         assertTrue("Continue did not open Reader", device.wait(Until.gone(By.desc("Menu")), 10_000))
         readerControls()
         returnToLibrary()
