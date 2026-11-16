@@ -85,6 +85,8 @@ internal class LeafJourneys(private val device: UiDevice) {
         action.click()
         expect("Continue did not open Reader", device.wait(Until.gone(By.desc("Menu")), 10_000))
         readerControls()
+        expect("Continue did not resume fixture page 2",
+            device.wait(Until.hasObject(By.text("Page 2/8")), 5_000))
         returnToLibrary()
     }
 
