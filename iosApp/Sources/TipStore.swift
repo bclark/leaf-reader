@@ -137,7 +137,7 @@ final class TipStore: ObservableObject {
     private var listener: Task<Void, Never>?
     private var recovery: Task<Void, Never>?
     private var purchaseTask: Task<Void, Never>?
-    private var handlingIDs: Set<UInt64> = []
+    private var finishingTasks: [UInt64: Task<Void, Never>] = [:]
     private var completedActivePurchase = false
     private var handledIDs: Set<UInt64> = []
     private var acknowledgedIDs: Set<UInt64> = []
@@ -280,12 +280,20 @@ final class TipStore: ObservableObject {
             // Still acknowledge that direct user action once, without replaying recovery UI.
             notice = .thankYou
         }
-        guard handlingIDs.insert(transaction.id).inserted else { return }
-        defer { handlingIDs.remove(transaction.id) }
-        await transaction.finish()
-        if !transaction.isRevoked, let purchaseDate = transaction.purchaseDate {
-            promptPolicy.recordVerifiedTip(purchaseDate: purchaseDate)
+        if let finishing = finishingTasks[transaction.id] {
+            // A direct result must not make the purchase idle while its observer is still finishing.
+            if directPurchase { await finishing.value }
+            return
         }
+        let finishing = Task {
+            await transaction.finish()
+            if !transaction.isRevoked, let purchaseDate = transaction.purchaseDate {
+                promptPolicy.recordVerifiedTip(purchaseDate: purchaseDate)
+            }
+        }
+        finishingTasks[transaction.id] = finishing
+        defer { finishingTasks.removeValue(forKey: transaction.id) }
+        await finishing.value
     }
 
     private func clearPending() {
