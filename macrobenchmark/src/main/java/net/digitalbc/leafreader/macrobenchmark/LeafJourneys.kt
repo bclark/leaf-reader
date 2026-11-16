@@ -4,6 +4,8 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import androidx.test.uiautomator.waitForStable
+import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertTrue
 import java.util.regex.Pattern
 
@@ -12,13 +14,22 @@ private val fixture = By.text(Pattern.compile("LEAF R8 FIXTURE [0-9]{2}", Patter
 
 /** Real UI/SAF journeys on the separate benchmark install; never seed/reset an owner's library. */
 internal class LeafJourneys(private val device: UiDevice) {
+    private fun expect(message: String, condition: Boolean) {
+        if (!condition) {
+            val hierarchy = ByteArrayOutputStream()
+            device.dumpWindowHierarchy(hierarchy)
+            System.err.println("LEAF_JOURNEY_FAILURE " + message + " " + hierarchy.toString("UTF-8"))
+        }
+        assertTrue(message, condition)
+    }
+
     fun libraryReady() {
-        assertTrue("Library toolbar did not appear", device.wait(Until.hasObject(By.desc("Menu")), 15_000))
+        expect("Library toolbar did not appear", device.wait(Until.hasObject(By.desc("Menu")), 15_000))
     }
 
     fun populatedLibraryReady() {
         libraryReady()
-        assertTrue("Synthetic populated library is missing", device.wait(Until.hasObject(fixture), 10_000)
+        expect("Synthetic populated library is missing", device.wait(Until.hasObject(fixture), 10_000)
             || device.hasObject(By.descStartsWith("Continue reading, Leaf R8 Fixture")))
     }
 
@@ -46,9 +57,9 @@ internal class LeafJourneys(private val device: UiDevice) {
         requireNotNull(device.wait(Until.findObject(By.text("LeafR8Fixtures")), 5_000)).click()
         requireNotNull(device.wait(Until.findObject(By.text("USE THIS FOLDER")), 5_000)).click()
         device.wait(Until.findObject(By.text("ALLOW")), 5_000)?.click()
-        assertTrue("Fixture import did not finish; push the generated folder into Downloads first",
+        expect("Fixture import did not finish; push the generated folder into Downloads first",
             device.wait(Until.hasObject(fixture), 90_000))
-        assertTrue("Fixture import is still running", device.wait(Until.gone(By.desc("Cancel import")), 90_000))
+        expect("Fixture import is still running", device.wait(Until.gone(By.desc("Cancel import")), 90_000))
         device.wait(Until.findObject(By.text(Pattern.compile("ALL", Pattern.CASE_INSENSITIVE))), 5_000)?.click()
         device.waitForIdle()
         verifyFixtureCount()
@@ -58,19 +69,21 @@ internal class LeafJourneys(private val device: UiDevice) {
         requireNotNull(device.findObject(By.desc("Menu"))).click()
         requireNotNull(device.wait(Until.findObject(By.text("Select comics")), 5_000)).click()
         requireNotNull(device.wait(Until.findObject(By.text(Pattern.compile("SELECT ALL", Pattern.CASE_INSENSITIVE))), 5_000)).click()
-        assertTrue("Expected exactly 24 synthetic comics", device.wait(Until.hasObject(By.text("24 SELECTED")), 5_000))
+        expect("Expected exactly 24 synthetic comics", device.wait(Until.hasObject(By.text("24 SELECTED")), 5_000))
         requireNotNull(device.findObject(By.text(Pattern.compile("DONE", Pattern.CASE_INSENSITIVE)))).click()
         libraryReady()
     }
 
     fun continueFixture() {
-        device.waitForIdle()
+        expect("Expected saved page 2 before Continue", device.wait(Until.hasObject(
+            By.desc(Pattern.compile("Continue reading, Leaf R8 Fixture [0-9]{2}, Page 2 of 8"))), 5_000))
         val card = requireNotNull(device.wait(Until.findObject(By.descStartsWith("Continue reading, Leaf R8 Fixture")), 10_000))
         val action = if (card.isClickable) card else requireNotNull(card.parent)
         check(action.isClickable) { "Continue semantics have no clickable card parent" }
+        expect("Continue card did not settle", !action.waitForStable().isTimeout)
         System.err.println("LEAF_CONTINUE_TARGET " + action.visibleBounds)
         action.click()
-        assertTrue("Continue did not open Reader", device.wait(Until.gone(By.desc("Menu")), 10_000))
+        expect("Continue did not open Reader", device.wait(Until.gone(By.desc("Menu")), 10_000))
         readerControls()
         returnToLibrary()
     }
@@ -81,7 +94,7 @@ internal class LeafJourneys(private val device: UiDevice) {
         requireNotNull(device.findObject(By.text(Pattern.compile("ALL", Pattern.CASE_INSENSITIVE)))).click()
         requireNotNull(device.wait(Until.findObject(fixture), 10_000)).click()
         device.waitForIdle()
-        assertTrue("Reader did not replace Library", device.wait(Until.gone(By.desc("Menu")), 10_000))
+        expect("Reader did not replace Library", device.wait(Until.gone(By.desc("Menu")), 10_000))
     }
 
     // Handle only Android's first-run immersive hint, outside collection/measurement.
@@ -94,18 +107,25 @@ internal class LeafJourneys(private val device: UiDevice) {
         if (!device.hasObject(By.desc("Next page"))) {
             device.click(device.displayWidth / 2, device.displayHeight / 2)
         }
-        assertTrue("Expected the eight-page fixture Reader, not Series detail",
+        expect("Expected the eight-page fixture Reader, not Series detail",
             device.wait(Until.hasObject(By.desc("Next page")), 5_000))
+    }
+
+    private fun clickControl(description: String) {
+        var action = requireNotNull(device.wait(Until.findObject(By.desc(description)), 5_000))
+        while (!action.isClickable) action = requireNotNull(action.parent)
+        check(action.isEnabled) { "$description action disabled" }
+        action.click()
     }
 
     fun turnPageAndReturn() {
         readerControls()
-        device.findObject(By.desc("Previous page"))?.takeIf { it.isEnabled }?.click()
-        device.waitForIdle()
-        val next = requireNotNull(device.findObject(By.desc("Next page")))
-        check(next.isEnabled) { "Fixture unexpectedly reached its final page" }
-        next.click()
-        device.waitForIdle()
+        if (device.hasObject(By.text("Page 2/8"))) {
+            clickControl("Previous page")
+        }
+        expect("Expected fixture page 1", device.wait(Until.hasObject(By.text("Page 1/8")), 5_000))
+        clickControl("Next page")
+        expect("Next did not reach fixture page 2", device.wait(Until.hasObject(By.text("Page 2/8")), 5_000))
         returnToLibrary()
     }
 
@@ -116,8 +136,11 @@ internal class LeafJourneys(private val device: UiDevice) {
         }
         requireNotNull(device.wait(Until.findObject(By.desc("Back")), 5_000)) {
             "Reader Back action unavailable"
-        }.click()
+        }
+        clickControl("Back")
         libraryReady()
+        val root = requireNotNull(device.findObject(By.pkg(TARGET_PACKAGE)))
+        expect("Library did not settle after Reader", !root.waitForStable().isTimeout)
     }
 
     fun scrollLibrary() {

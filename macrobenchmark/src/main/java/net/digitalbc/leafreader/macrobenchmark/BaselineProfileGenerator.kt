@@ -37,11 +37,19 @@ class BaselineProfileGenerator {
     }
 
     @Test fun fixtureJourney() {
-        LeafJourneys(UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())).apply {
-            openFixture()
-            turnPageAndReturn()
-            continueFixture()
-            scrollLibrary()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val device = UiDevice.getInstance(instrumentation)
+        repeat(3) {
+            device.executeShellCommand("am force-stop $TARGET_PACKAGE")
+            val intent = requireNotNull(instrumentation.context.packageManager.getLaunchIntentForPackage(TARGET_PACKAGE))
+            instrumentation.context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+            LeafJourneys(device).apply {
+                populatedLibraryReady()
+                openFixture()
+                turnPageAndReturn()
+                continueFixture()
+                scrollLibrary()
+            }
         }
     }
 
