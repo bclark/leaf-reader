@@ -5418,6 +5418,46 @@
         }
       }
     },
+    "Add comics" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Agregar cómics"
+          }
+        }
+      }
+    },
+    "Select comics" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Seleccionar cómics"
+          }
+        }
+      }
+    },
+    "Settings and more" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ajustes y más"
+          }
+        }
+      }
+    },
+    "Page %lld" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Página %lld"
+          }
+        }
+      }
+    },
     "Open your first comic" : {
       "localizations" : {
         "es-MX" : {
@@ -5494,6 +5534,46 @@
           "stringUnit" : {
             "state" : "machine_translated",
             "value" : "Importando…"
+          }
+        }
+      }
+    },
+    "Enjoying Leaf?" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "¿Disfrutas Leaf?"
+          }
+        }
+      }
+    },
+    "Tip" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dejar propina"
+          }
+        }
+      }
+    },
+    "Not now" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ahora no"
+          }
+        }
+      }
+    },
+    "Don't ask again" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No volver a preguntar"
           }
         }
       }

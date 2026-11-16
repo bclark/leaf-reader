@@ -26,6 +26,7 @@ struct LeafApp: App {
             LibraryView()
                 .environmentObject(settings)
                 .environmentObject(tips)
+                .environment(\.tipPromptPolicy, tips.promptPolicy)
                 .task {
                     // Tests own isolated clients; never let the host finish their transactions.
                     if observesPurchases { tips.start() }

@@ -100,6 +100,7 @@ struct JellyfinBook: Codable, Identifiable, Sendable {
         let Played: Bool?
         let PlaybackPositionTicks: Int64?
         let PlayedPercentage: Double?
+        var LastPlayedDate: String? = nil
     }
 
     var withoutServerPath: JellyfinBook {
