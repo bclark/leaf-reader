@@ -67,8 +67,7 @@ internal class LeafJourneys(private val device: UiDevice) {
         val card = requireNotNull(device.wait(Until.findObject(By.descStartsWith("Continue reading, Leaf R8 Fixture")), 10_000))
         card.click()
         assertTrue("Continue did not open Reader", device.wait(Until.gone(By.desc("Menu")), 10_000))
-        device.pressBack()
-        libraryReady()
+        returnToLibrary()
     }
 
     fun openFixture() {
@@ -89,7 +88,17 @@ internal class LeafJourneys(private val device: UiDevice) {
         device.waitForIdle()
         device.click(device.displayWidth * 9 / 10, device.displayHeight / 2)
         device.waitForIdle()
-        device.pressBack()
+        returnToLibrary()
+    }
+
+    private fun returnToLibrary() {
+        // Exercise Leaf's explicit Reader Back action; platform Back is separate acceptance.
+        if (!device.hasObject(By.desc("Back"))) {
+            device.click(device.displayWidth / 2, device.displayHeight / 2)
+        }
+        requireNotNull(device.wait(Until.findObject(By.desc("Back")), 5_000)) {
+            "Reader Back action unavailable"
+        }.click()
         libraryReady()
     }
 
