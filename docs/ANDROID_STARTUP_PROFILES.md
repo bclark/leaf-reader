@@ -53,3 +53,10 @@ Packaged-profile regression at `cc35b7c` plus those exact generated files passes
 
 
 S25's first required-profile attempt exposed transitive ProfileInstaller1.3.1 rejecting SDK37 before any timings. Explicit1.4.1 is required; it supports the forward-compatible API31+ profile format and fixes method-flag transcoding. See [official release notes](https://developer.android.com/jetpack/androidx/releases/profileinstaller). Rebuild both control and treatment with1.4.1 before comparison; never compare across installer versions or suppress the unsupported-SDK error. Older3910e6d artifact sizes/results above are historical evidence, not final1.4.1 validation.
+
+
+## Corrected isolated collection —16November2026
+
+Supersedes the earlier exclusivity claim: collection source7a66856582cf2a89c0fe9671b09714960687d7e6 with explicit ProfileInstaller1.4.1, holding shared native AND both platform functional/S25 leases for the whole run. All3tests pass, zero failures/skips;24synthetic fixtures verified, all immutable source inputs unchanged (only the two declared generated outputs may change). Earlier separately leased iOS overlap is preserved as historical coverage, not isolation evidence. No physical timings accepted yet.
+
+Baseline21,968rules/2,008 Leaf app rules, SHA256eb669a0065a0b4f823f9d2665a185dffa73efaad923c9e484dcdf17161512fc5. Startup18,726rules/1,376 Leaf rules, SHA2564bfb4de91c2718580524379244b1d2dc3ff8741515c2608c4b283f0559fee3a5; still zero ReaderScreen method entries in Startup. New1.4.1 library-only control4efdf44 contains zero Leaf rules and APK SHA2567969ef1937f75c7ce19edb99c92ce2bd0f23962a72f72621d346419c8dfe3764. Both sides must use that installer version. Final packaging, smoke and physical size/latency acceptance remain pending.

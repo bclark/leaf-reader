@@ -2081,6 +2081,8 @@ SPLandroidx/compose/foundation/layout/Arrangement$Vertical;->getSpacing-D9Ej5fM(
 Landroidx/compose/foundation/layout/Arrangement$spacedBy$1;
 SPLandroidx/compose/foundation/layout/Arrangement$spacedBy$1;-><clinit>()V
 SPLandroidx/compose/foundation/layout/Arrangement$spacedBy$1;-><init>()V
+SPLandroidx/compose/foundation/layout/Arrangement$spacedBy$1;->invoke(ILandroidx/compose/ui/unit/LayoutDirection;)Ljava/lang/Integer;
+SPLandroidx/compose/foundation/layout/Arrangement$spacedBy$1;->invoke(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
 Landroidx/compose/foundation/layout/AspectRatioElement;
 SPLandroidx/compose/foundation/layout/AspectRatioElement;-><init>(FZLkotlin/jvm/functions/Function1;)V
 SPLandroidx/compose/foundation/layout/AspectRatioElement;->create()Landroidx/compose/foundation/layout/AspectRatioNode;
@@ -4944,6 +4946,7 @@ SPLandroidx/compose/runtime/Pending$keyMap$2;->invoke()Ljava/lang/Object;
 SPLandroidx/compose/runtime/Pending$keyMap$2;->invoke-SAeQiB4()Landroidx/collection/MutableScatterMap;
 Landroidx/compose/runtime/PersistentCompositionLocalMap;
 Landroidx/compose/runtime/PersistentCompositionLocalMap$Builder;
+Landroidx/compose/runtime/PreconditionsKt;
 Landroidx/compose/runtime/PrimitiveSnapshotStateKt;
 SPLandroidx/compose/runtime/PrimitiveSnapshotStateKt;->mutableFloatStateOf(F)Landroidx/compose/runtime/MutableFloatState;
 Landroidx/compose/runtime/PrimitiveSnapshotStateKt__SnapshotFloatStateKt;
@@ -5187,6 +5190,7 @@ SPLandroidx/compose/runtime/SlotReader;->getHasObjectKey()Z
 SPLandroidx/compose/runtime/SlotReader;->getInEmpty()Z
 SPLandroidx/compose/runtime/SlotReader;->getParent()I
 SPLandroidx/compose/runtime/SlotReader;->getParentNodes()I
+SPLandroidx/compose/runtime/SlotReader;->getRemainingSlots()I
 SPLandroidx/compose/runtime/SlotReader;->getSize()I
 SPLandroidx/compose/runtime/SlotReader;->getTable$runtime_release()Landroidx/compose/runtime/SlotTable;
 SPLandroidx/compose/runtime/SlotReader;->groupAux(I)Ljava/lang/Object;
@@ -5486,6 +5490,7 @@ SPLandroidx/compose/runtime/SnapshotStateKt__ProduceStateKt$produceState$5$1;-><
 SPLandroidx/compose/runtime/SnapshotStateKt__ProduceStateKt$produceState$5$1;->create(Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Lkotlin/coroutines/Continuation;
 SPLandroidx/compose/runtime/SnapshotStateKt__ProduceStateKt$produceState$5$1;->invokeSuspend(Ljava/lang/Object;)Ljava/lang/Object;
 Landroidx/compose/runtime/SnapshotStateKt__SnapshotFlowKt;
+SPLandroidx/compose/runtime/SnapshotStateKt__SnapshotFlowKt;->access$intersects(Landroidx/collection/MutableScatterSet;Ljava/util/Set;)Z
 SPLandroidx/compose/runtime/SnapshotStateKt__SnapshotFlowKt;->collectAsState(Lkotlinx/coroutines/flow/Flow;Ljava/lang/Object;Lkotlin/coroutines/CoroutineContext;Landroidx/compose/runtime/Composer;II)Landroidx/compose/runtime/State;
 SPLandroidx/compose/runtime/SnapshotStateKt__SnapshotFlowKt;->collectAsState(Lkotlinx/coroutines/flow/StateFlow;Lkotlin/coroutines/CoroutineContext;Landroidx/compose/runtime/Composer;II)Landroidx/compose/runtime/State;
 SPLandroidx/compose/runtime/SnapshotStateKt__SnapshotFlowKt;->intersects$SnapshotStateKt__SnapshotFlowKt(Landroidx/collection/MutableScatterSet;Ljava/util/Set;)Z
@@ -5631,7 +5636,7 @@ SPLandroidx/compose/runtime/changelist/ComposerChangeListWriter$Companion;-><ini
 Landroidx/compose/runtime/changelist/FixupList;
 SPLandroidx/compose/runtime/changelist/FixupList;-><clinit>()V
 SPLandroidx/compose/runtime/changelist/FixupList;-><init>()V
-SPLandroidx/compose/runtime/changelist/FixupList;->createAndInsertNode(Lkotlin/jvm/functions/Function0;ILandroidx/compose/runtime/Anchor;)V
+HSPLandroidx/compose/runtime/changelist/FixupList;->createAndInsertNode(Lkotlin/jvm/functions/Function0;ILandroidx/compose/runtime/Anchor;)V
 SPLandroidx/compose/runtime/changelist/FixupList;->endNodeInsert()V
 SPLandroidx/compose/runtime/changelist/FixupList;->executeAndFlushAllPendingFixups(Landroidx/compose/runtime/Applier;Landroidx/compose/runtime/SlotWriter;Landroidx/compose/runtime/RememberManager;)V
 SPLandroidx/compose/runtime/changelist/FixupList;->isEmpty()Z
@@ -6322,6 +6327,7 @@ SPLandroidx/compose/runtime/snapshots/SnapshotIdSet$Companion;-><init>()V
 SPLandroidx/compose/runtime/snapshots/SnapshotIdSet$Companion;-><init>(Lkotlin/jvm/internal/DefaultConstructorMarker;)V
 SPLandroidx/compose/runtime/snapshots/SnapshotIdSet$Companion;->getEMPTY()Landroidx/compose/runtime/snapshots/SnapshotIdSet;
 Landroidx/compose/runtime/snapshots/SnapshotIdSetKt;
+SPLandroidx/compose/runtime/snapshots/SnapshotIdSetKt;->binarySearch([II)I
 Landroidx/compose/runtime/snapshots/SnapshotKt;
 SPLandroidx/compose/runtime/snapshots/SnapshotKt;-><clinit>()V
 SPLandroidx/compose/runtime/snapshots/SnapshotKt;->access$advanceGlobalSnapshot()V
@@ -13801,6 +13807,7 @@ SPLandroidx/navigation/compose/NavHostKt$NavHost$visibleEntries$2$1;->invoke()Lj
 SPLandroidx/navigation/compose/NavHostKt$NavHost$visibleEntries$2$1;->invoke()Ljava/util/List;
 PLandroidx/profileinstaller/ProfileInstallReceiver;-><init>()V
 PLandroidx/profileinstaller/ProfileInstallReceiver;->onReceive(Landroid/content/Context;Landroid/content/Intent;)V
+PLandroidx/profileinstaller/ProfileInstallReceiver;->saveProfile(ILandroidx/profileinstaller/ProfileInstaller$DiagnosticsCallback;)V
 PLandroidx/profileinstaller/ProfileInstallReceiver;->saveProfile(Landroidx/profileinstaller/ProfileInstaller$DiagnosticsCallback;)V
 PLandroidx/profileinstaller/ProfileInstallReceiver$$ExternalSyntheticLambda0;-><init>()V
 PLandroidx/profileinstaller/ProfileInstallReceiver$ResultDiagnostics;-><init>(Landroidx/profileinstaller/ProfileInstallReceiver;)V
@@ -13821,16 +13828,20 @@ SPLandroidx/profileinstaller/ProfileInstallerInitializer;->create(Landroid/conte
 SPLandroidx/profileinstaller/ProfileInstallerInitializer;->delayAfterFirstFrame(Landroid/content/Context;)V
 SPLandroidx/profileinstaller/ProfileInstallerInitializer;->dependencies()Ljava/util/List;
 SPLandroidx/profileinstaller/ProfileInstallerInitializer;->installAfterDelay(Landroid/content/Context;)V
+SPLandroidx/profileinstaller/ProfileInstallerInitializer;->lambda$create$0$androidx-profileinstaller-ProfileInstallerInitializer(Landroid/content/Context;J)V
 SPLandroidx/profileinstaller/ProfileInstallerInitializer;->lambda$delayAfterFirstFrame$0$androidx-profileinstaller-ProfileInstallerInitializer(Landroid/content/Context;)V
 PLandroidx/profileinstaller/ProfileInstallerInitializer;->lambda$installAfterDelay$1(Landroid/content/Context;)V
 PLandroidx/profileinstaller/ProfileInstallerInitializer;->lambda$writeInBackground$2(Landroid/content/Context;)V
 PLandroidx/profileinstaller/ProfileInstallerInitializer;->writeInBackground(Landroid/content/Context;)V
 Landroidx/profileinstaller/ProfileInstallerInitializer$$ExternalSyntheticLambda0;
 SPLandroidx/profileinstaller/ProfileInstallerInitializer$$ExternalSyntheticLambda0;-><init>(Landroid/content/Context;)V
+SPLandroidx/profileinstaller/ProfileInstallerInitializer$$ExternalSyntheticLambda0;-><init>(Landroidx/profileinstaller/ProfileInstallerInitializer;Landroid/content/Context;)V
+SPLandroidx/profileinstaller/ProfileInstallerInitializer$$ExternalSyntheticLambda0;->doFrame(J)V
 PLandroidx/profileinstaller/ProfileInstallerInitializer$$ExternalSyntheticLambda0;->run()V
 Landroidx/profileinstaller/ProfileInstallerInitializer$$ExternalSyntheticLambda1;
+SPLandroidx/profileinstaller/ProfileInstallerInitializer$$ExternalSyntheticLambda1;-><init>(Landroid/content/Context;)V
 SPLandroidx/profileinstaller/ProfileInstallerInitializer$$ExternalSyntheticLambda1;-><init>(Landroidx/profileinstaller/ProfileInstallerInitializer;Landroid/content/Context;)V
-SPLandroidx/profileinstaller/ProfileInstallerInitializer$$ExternalSyntheticLambda1;->run()V
+PLandroidx/profileinstaller/ProfileInstallerInitializer$$ExternalSyntheticLambda1;->run()V
 PLandroidx/profileinstaller/ProfileInstallerInitializer$$ExternalSyntheticLambda2;-><init>(Landroid/content/Context;)V
 PLandroidx/profileinstaller/ProfileInstallerInitializer$$ExternalSyntheticLambda2;->run()V
 Landroidx/profileinstaller/ProfileInstallerInitializer$Choreographer16Impl;
@@ -13846,6 +13857,7 @@ SPLandroidx/profileinstaller/ProfileInstallerInitializer$Result;-><init>()V
 PLandroidx/profileinstaller/ProfileVerifier;-><clinit>()V
 PLandroidx/profileinstaller/ProfileVerifier;->getPackageLastUpdateTime(Landroid/content/Context;)J
 PLandroidx/profileinstaller/ProfileVerifier;->setCompilationStatus(IZZ)Landroidx/profileinstaller/ProfileVerifier$CompilationStatus;
+PLandroidx/profileinstaller/ProfileVerifier;->setCompilationStatus(IZZZ)Landroidx/profileinstaller/ProfileVerifier$CompilationStatus;
 PLandroidx/profileinstaller/ProfileVerifier;->writeProfileVerification(Landroid/content/Context;Z)Landroidx/profileinstaller/ProfileVerifier$CompilationStatus;
 PLandroidx/profileinstaller/ProfileVerifier$Api33Impl;->getPackageInfo(Landroid/content/pm/PackageManager;Landroid/content/Context;)Landroid/content/pm/PackageInfo;
 PLandroidx/profileinstaller/ProfileVerifier$Cache;-><init>(IIJJ)V
@@ -13853,6 +13865,7 @@ PLandroidx/profileinstaller/ProfileVerifier$Cache;->equals(Ljava/lang/Object;)Z
 PLandroidx/profileinstaller/ProfileVerifier$Cache;->readFromFile(Ljava/io/File;)Landroidx/profileinstaller/ProfileVerifier$Cache;
 PLandroidx/profileinstaller/ProfileVerifier$Cache;->writeOnFile(Ljava/io/File;)V
 PLandroidx/profileinstaller/ProfileVerifier$CompilationStatus;-><init>(IZZ)V
+PLandroidx/profileinstaller/ProfileVerifier$CompilationStatus;-><init>(IZZZ)V
 Landroidx/room/BaseRoomConnectionManager;
 SPLandroidx/room/BaseRoomConnectionManager;-><clinit>()V
 SPLandroidx/room/BaseRoomConnectionManager;-><init>()V
@@ -17099,6 +17112,7 @@ SPLnet/digitalbc/leafreader/ui/brand/LeafBrandKt;-><clinit>()V
 SPLnet/digitalbc/leafreader/ui/brand/LeafBrandKt;->LeafWordmark(Landroidx/compose/ui/Modifier;Landroidx/compose/runtime/Composer;II)V
 SPLnet/digitalbc/leafreader/ui/brand/LeafBrandKt;->halftone-POIbLQ4$default(Landroidx/compose/ui/Modifier;JFFFILjava/lang/Object;)Landroidx/compose/ui/Modifier;
 SPLnet/digitalbc/leafreader/ui/brand/LeafBrandKt;->halftone-POIbLQ4(Landroidx/compose/ui/Modifier;JFFF)Landroidx/compose/ui/Modifier;
+SPLnet/digitalbc/leafreader/ui/brand/LeafBrandKt;->halftone_POIbLQ4$lambda$0(FFJFLandroidx/compose/ui/graphics/drawscope/DrawScope;)Lkotlin/Unit;
 Lnet/digitalbc/leafreader/ui/brand/LeafBrandKt$$ExternalSyntheticLambda10;
 SPLnet/digitalbc/leafreader/ui/brand/LeafBrandKt$$ExternalSyntheticLambda10;-><init>()V
 Lnet/digitalbc/leafreader/ui/brand/LeafBrandKt$$ExternalSyntheticLambda5;
@@ -18546,6 +18560,7 @@ SPLorg/apache/commons/compress/archivers/zip/ZipFile;->builder()Lorg/apache/comm
 SPLorg/apache/commons/compress/archivers/zip/ZipFile;->close()V
 SPLorg/apache/commons/compress/archivers/zip/ZipFile;->createBoundedInputStream(JJ)Lorg/apache/commons/compress/utils/BoundedArchiveInputStream;
 SPLorg/apache/commons/compress/archivers/zip/ZipFile;->fillNameMap()V
+PLorg/apache/commons/compress/archivers/zip/ZipFile;->finalize()V
 SPLorg/apache/commons/compress/archivers/zip/ZipFile;->getDataOffset(Lorg/apache/commons/compress/archivers/zip/ZipArchiveEntry;)J
 SPLorg/apache/commons/compress/archivers/zip/ZipFile;->getEntries()Ljava/util/Enumeration;
 SPLorg/apache/commons/compress/archivers/zip/ZipFile;->getInputStream(Lorg/apache/commons/compress/archivers/zip/ZipArchiveEntry;)Ljava/io/InputStream;
