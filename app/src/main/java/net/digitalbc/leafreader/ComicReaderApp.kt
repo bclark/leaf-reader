@@ -22,6 +22,9 @@ class ComicReaderApp : Application() {
 
     val database: AppDatabase by lazy { AppDatabase.get(this) }
     val settings: AppSettings by lazy { AppSettings(this) }
+    val firstLaunchState by lazy {
+        net.digitalbc.leafreader.data.settings.FirstLaunchStateStore(this)
+    }
     val libraryRepository: LibraryRepository by lazy {
         LibraryRepository(this, database.comicDao(), settings, database.readingListDao(), database)
     }
