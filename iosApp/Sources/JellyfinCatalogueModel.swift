@@ -38,6 +38,12 @@ final class JellyfinCatalogueModel: ObservableObject {
     private var lastRefresh: Date?
     private var generation = UUID()
     private var scope: JellyfinConnection?
+    /// A visible Continue item must belong to the same authenticated session as its client.
+    func isCurrent(for connection: JellyfinConnection?) -> Bool {
+        guard let connection else { return false }
+        return scope == connection
+    }
+
     private var offset = 0
     private let defaults: UserDefaults
 

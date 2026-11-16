@@ -70,7 +70,8 @@ final class JellyfinBrowserModel: ObservableObject {
         }
     }
 
-    func signIn(url: String, username: String, password: String, allowHTTP: Bool) {
+    func signIn(url: String, username: String, password: String, allowHTTP: Bool,
+                onSuccess: (@MainActor () -> Void)? = nil) {
         run {
             self.activity = String(localized: "Signing in…")
             let base = try JellyfinConnection.baseURL(url, allowHTTP: allowHTTP)
@@ -89,6 +90,8 @@ final class JellyfinBrowserModel: ObservableObject {
             self.client = JellyfinClient(baseURL: base, token: result.AccessToken, deviceID: self.deviceID)
             self.needsSignIn = false
             self.items = []; self.folders = []; self.downloaded = [:]
+            // The authenticated connection is committed; finish its UI outcome before starting cancellable browsing.
+            onSuccess?()
             try await self.load(reset: true)
         }
     }

@@ -5417,6 +5417,166 @@
           }
         }
       }
+    },
+    "Add comics" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Agregar cómics"
+          }
+        }
+      }
+    },
+    "Select comics" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Seleccionar cómics"
+          }
+        }
+      }
+    },
+    "Settings and more" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ajustes y más"
+          }
+        }
+      }
+    },
+    "Page %lld" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Página %lld"
+          }
+        }
+      }
+    },
+    "Open your first comic" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "machine_translated",
+            "value" : "Abre tu primer cómic"
+          }
+        }
+      }
+    },
+    "Choose a CBZ, CBR, or PDF from your device. Once imported, it’s ready to read offline." : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "machine_translated",
+            "value" : "Elige un archivo CBZ, CBR o PDF de tu dispositivo. Después de importarlo, podrás leerlo sin conexión."
+          }
+        }
+      }
+    },
+    "Choose a file" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "machine_translated",
+            "value" : "Elegir un archivo"
+          }
+        }
+      }
+    },
+    "I use Jellyfin" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "machine_translated",
+            "value" : "Uso Jellyfin"
+          }
+        }
+      }
+    },
+    "Maybe later" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "machine_translated",
+            "value" : "Quizá más tarde"
+          }
+        }
+      }
+    },
+    "Bring your Jellyfin library" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "machine_translated",
+            "value" : "Conecta tu biblioteca de Jellyfin"
+          }
+        }
+      }
+    },
+    "Connect your server to browse your collection in Leaf. Download comics to read them offline." : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "machine_translated",
+            "value" : "Conecta tu servidor para explorar tu colección en Leaf. Descarga cómics para leerlos sin conexión."
+          }
+        }
+      }
+    },
+    "Importing…" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "machine_translated",
+            "value" : "Importando…"
+          }
+        }
+      }
+    },
+    "Enjoying Leaf?" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "¿Disfrutas Leaf?"
+          }
+        }
+      }
+    },
+    "Tip" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dejar propina"
+          }
+        }
+      }
+    },
+    "Not now" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ahora no"
+          }
+        }
+      }
+    },
+    "Don't ask again" : {
+      "localizations" : {
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No volver a preguntar"
+          }
+        }
+      }
     }
   },
   "version" : "1.3"
