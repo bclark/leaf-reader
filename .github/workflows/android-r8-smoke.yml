@@ -34,7 +34,8 @@ jobs:
             ":app:test${VARIANT}DebugUnitTest" \
             ":app:assemble${VARIANT}Release" \
             ":app:assemble${VARIANT}Performance" \
-            ":r8smoke:assemble${VARIANT}Performance" --stacktrace
+            ":r8smoke:assemble${VARIANT}Performance" \
+            ":macrobenchmark:compile${VARIANT}BenchmarkProfileQaKotlin" --stacktrace
           python3 scripts/r8-smoke-probes.py "app/build/outputs/mapping/${FLAVOR}Release/mapping.txt"
       - name: Minified emulator smoke
         uses: reactivecircus/android-emulator-runner@v2

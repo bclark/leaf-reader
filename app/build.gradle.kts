@@ -1,4 +1,5 @@
 plugins {
+    alias(libs.plugins.baselineprofile)
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
@@ -79,6 +80,12 @@ android {
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
         }
+        // An isolated sandbox for synthetic profile/benchmark journeys; never replaces Leaf.
+        create("profileQa") {
+            initWith(getByName("performance"))
+            applicationIdSuffix = ".benchmark"
+            versionNameSuffix = "-benchmark"
+        }
     }
 
     compileOptions {
@@ -119,6 +126,8 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.17")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 
+    // Transitive1.3.1 rejects SDK37;1.4.1 supports the forward-compatible ART format.
+    implementation(libs.androidx.profileinstaller)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
@@ -148,4 +157,16 @@ dependencies {
     implementation(libs.smbj)
     implementation(libs.okhttp)
     testImplementation(libs.okhttp.mockwebserver)
+}
+
+// Generate explicitly on a dedicated QA device; normal assemblies never start device tests.
+// Only isolated Full QA generates/consumes the experimental app profiles.
+// Release/Performance retain dependency profiles until app-owned gains are demonstrated.
+baselineProfile {
+    automaticGenerationDuringBuild = false
+    saveInSrc = true
+    mergeIntoMain = false
+    variants {
+        create("fullProfileQa") { from(project(":macrobenchmark")) }
+    }
 }

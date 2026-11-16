@@ -27,3 +27,4 @@ rootProject.name = "Leaf"
 include(":app")
 include(":shared")
 include(":r8smoke")
+include(":macrobenchmark")
