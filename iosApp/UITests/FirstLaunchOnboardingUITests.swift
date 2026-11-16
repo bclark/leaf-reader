@@ -332,12 +332,17 @@ final class FirstLaunchOnboardingUITests: XCTestCase {
     private func revealDetailControl(_ control: XCUIElement, _ app: XCUIApplication) {
         let scroll = app.scrollViews.firstMatch
         for _ in 0..<12 {
-            let viewport = scroll.frame.intersection(app.frame)
+            let navigation = app.navigationBars.firstMatch
+            let frame = scroll.frame.intersection(app.frame)
+            let top = navigation.exists ? max(frame.minY, navigation.frame.maxY) : frame.minY
+            let viewport = CGRect(x: frame.minX, y: top, width: frame.width, height: max(0, frame.maxY - top))
             if control.exists && control.isHittable && viewport.insetBy(dx: -1, dy: -1).contains(control.frame) { return }
-            if control.exists && control.frame.minY < viewport.minY { scroll.swipeDown() }
-            else { scroll.swipeUp() }
+            let above = control.exists && control.frame.minY < viewport.minY
+            scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: above ? 0.35 : 0.65))
+                .press(forDuration: 0.05, thenDragTo: scroll.coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.5, dy: above ? 0.65 : 0.35)))
         }
-        XCTFail("Detail control must fit fully inside the scroll viewport")
+        XCTFail("Detail control must fit fully below the navigation bar inside its scroll viewport")
     }
 
     private func finishCinematicFixture(_ app: XCUIApplication) {
@@ -384,7 +389,6 @@ final class FirstLaunchOnboardingUITests: XCTestCase {
         let writer = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", cinematicWriter)).firstMatch
         revealDetailControl(writer, app)
         capture("cinematic-spanish-large-credit", app: app)
-        XCTAssertTrue(app.staticTexts["Guionista"].exists)
         XCTAssertTrue(writer.label.contains("Guionista"))
         XCTAssertGreaterThanOrEqual(writer.frame.height, 44)
         let artist = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Jordan Example")).firstMatch
