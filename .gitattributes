@@ -1,2 +1,2 @@
 
-app/src/main/generated/baselineProfiles/*.txt linguist-generated=true
+app/src/*/generated/baselineProfiles/*.txt linguist-generated=true

@@ -160,12 +160,12 @@ dependencies {
 }
 
 // Generate explicitly on a dedicated QA device; normal assemblies never start device tests.
-// Only the isolated benchmark app has a producer dependency. Committed main profiles also
-// feed Release/Performance because code namespaces are identical across application IDs.
+// Only isolated Full QA generates/consumes the experimental app profiles.
+// Release/Performance retain dependency profiles until app-owned gains are demonstrated.
 baselineProfile {
     automaticGenerationDuringBuild = false
     saveInSrc = true
-    mergeIntoMain = true
+    mergeIntoMain = false
     variants {
         create("fullProfileQa") { from(project(":macrobenchmark")) }
     }

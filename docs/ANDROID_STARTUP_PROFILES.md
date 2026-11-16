@@ -1,62 +1,45 @@
-# Leaf Android startup profiles and benchmarks
+# Leaf Android profile experiments
 
-The `profileQa` build type inherits the release-like Performance optimizations and existing development signing. Its separate `net.digitalbc.leafreader.benchmark` application ID and "Leaf Benchmark" label protect the normal Leaf install. It is nondebuggable/profileable. The Baseline Profile plugin creates an unminified producer variant for collection and a minified benchmark variant for measurement.
+The separate `net.digitalbc.leafreader.benchmark` install (Leaf Benchmark) is nondebuggable/profileable and development-signed. `profileQa` inherits Release optimizations; the plugin creates unminified collection and minified measurement variants. It never replaces normal Leaf.
 
-Generation is explicit, never part of ordinary assembly. Only Full profileQa has a producer dependency; committing generated profiles into `app/src/main/generated/baselineProfiles` also lets Release/Performance consume them. Code namespaces are identical across application IDs. Never hand-author profile entries or treat generated rules as measured speedups.
+## Current decision
 
-## Fixtures and collection
+App-owned Baseline/Startup profiles are **QA-only**. `mergeIntoMain=false` stores the collected files in `app/src/fullProfileQa/generated/baselineProfiles`; Release, Performance and Fdroid do not consume them. Ordinary assembly never starts collection. Dependency profiles remain enabled, with explicit ProfileInstaller1.4.1 to support SDK37; transitive1.3.1 rejected the real required-profile test before any timings. See [official installer notes](https://developer.android.com/jetpack/androidx/releases/profileinstaller) and [variant scoping](https://developer.android.com/topic/performance/baselineprofiles/configure-baselineprofiles).
 
-Use a coordinated native/device window. Select one dedicated emulator or the separate benchmark app sandbox on an available QA phone. Never clear or reinstall the normal Leaf package. Device/account/auth/security/radio settings stay unchanged.
+Matched-installer S25 A/B/A/B:10cold iterations per batch,20per condition, required-profile compilation,24synthetic comics. Library-only median112.426ms; app-profile median113.603ms. Batch medians: A1=113.878, B1=113.603, A2=111.941, B2=113.787ms. Descriptive bootstrap median-difference95% interval(control−candidate)−8.03..4.26ms includes zero, treats iterations independent, and is not broad causal evidence. The QA APK grew8,486,651→8,600,133bytes(+113,482). No demonstrated startup gain on this device justifies enabling these files in production.
+
+All six physical cases pass: four matched A/B batches, candidate None10cold iterations and five candidate frame journeys. None median114.784ms is also inconclusive; do not attribute existing library-profile benefit to these Leaf files. Frames are observations without a matched frame control, not a smoothness improvement claim. Raw JSON/Perfetto, exact APK/maps/conditions and before/after normal-package identity are retained locally. Normal Leaf0.3.8 identity remained unchanged; no account/radio/security/normal-app data action. TTID only; no app-owned fully-drawn signal.
+
+## Collection and smoke
+
+Use an isolated worktree and a coordinated native/device window. Hold the shared native, Android functional, iOS functional QA and selected device leases; no competing Xcode. The separate iOS functional slot must also be excluded for collection/timing. Never clear/reinstall normal Leaf or change device settings to make a test pass.
 
 ```sh
 : "${R8_TEST_SERIAL:?Set the dedicated QA serial first}"
 python3 scripts/create-r8-fixtures.py /tmp/LeafR8Fixtures
-# Explicitly select the QA device. These files contain synthetic artwork only.
 adb -s "$R8_TEST_SERIAL" push /tmp/LeafR8Fixtures /sdcard/Download/
-ANDROID_SERIAL="$R8_TEST_SERIAL" ./gradlew --no-parallel --max-workers=1 :app:generateBaselineProfile \
+ANDROID_SERIAL="$R8_TEST_SERIAL" ./gradlew --no-parallel --max-workers=1 \
+  :app:generateFullProfileQaBaselineProfile \
   -Pandroid.testInstrumentationRunnerArguments.leaf.qaFixtures=true \
   -Pandroid.testInstrumentationRunnerArguments.class=net.digitalbc.leafreader.macrobenchmark.BaselineProfileGenerator
 ```
 
-Set `ANDROID_SERIAL="$R8_TEST_SERIAL"` for Gradle when other devices are attached. Verify fixture byte hashes after staging; on scoped-storage devices use MediaStore or the system Files UI rather than changing storage permissions. With mergeIntoMain enabled, generation is aggregated, but the verified task graph contains only the isolated Full profileQa producer; no production app producer is configured. The synthetic CBZ/Library/Reader workload uses shared code, so its main profile feeds both flavors. Fdroid has separate compile/minified smoke coverage; this collector does not cover flavor-specific RAR paths. The test refuses to seed a nonempty library that lacks its synthetic fixtures. It imports the folder through Android's real SAF picker, using English test selectors, then exercises All, local Reader, a page turn, Continue and Library scrolling. No production automation hook, external server, authentication or private comic is involved. Fixture import/count checks and first-run Android immersive-hint dismissal happen outside measured blocks. After each process restart, Reader entry explicitly selects All, since Library initially shows Series; matching Series titles are not accepted as Reader. Page controls must visibly move page1 to page2, saved Continue metadata must show page2, and the actionable card must settle before a single tap. These are bounded observable preconditions, not blind retries. The measurement harness checks hierarchy stability without screenshot readbacks, avoiding GPU capture work inside frame measurement. The separate fixtureJourney smoke repeats three cold restarts. In-app Back is exercised; platform Back remains separate acceptance.
+Verify fixture bytes. Where scoped storage denies direct writes, use normal MediaStore pending publication or the Files UI; do not alter storage permissions. The harness refuses unknown nonempty libraries, imports through real SAF and asserts24selected comics. Setup/import/count and the one-time system immersive hint happen outside collection/measurement.
 
-`startup` alone sets `includeInStartupProfile=true`. Reader/Continue/scroll collection is Baseline-only, preventing unrelated reading code from bloating startup DEX layout. Preserve the generated text, exact APK/maps/input identity and collection result. Confirm generated rules contain Leaf classes before committing them.
+Library resets to Series after process death, so Reader entry explicitly selects All and requires actual Reader page controls. Page1→2 and saved Continue page2 must be visible; a single tap targets the actionable card after bounded hierarchy stability, without screenshot readbacks inside frame measurement. Three-cold-restart fixture smoke exercises these destinations. In-app Back is covered; platform Back remains separate acceptance. Earlier ambiguous failures are retained, not promoted to product regressions or silently retried.
+
+Only `startup` includes Startup Profile rules; Reader/Continue/scroll are Baseline-only. Accepted collection source7a66856582cf2a89c0fe9671b09714960687d7e6, all four leases, task-owned API37/16KB emulator,3/3tests,24verified fixtures, immutable input hashes unchanged. Both workloads stabilized at iteration7. Baseline21,968rules/2,008Leaf namespace rules, SHA256eb669a0065a0b4f823f9d2665a185dffa73efaad923c9e484dcdf17161512fc5; Startup18,726/1,376, SHA2564bfb4de91c2718580524379244b1d2dc3ff8741515c2608c4b283f0559fee3a5. Startup has zero ReaderScreen method entries. Earlier bdb1369 collection had separate iOS overlap; its exclusivity claim is superseded. No emulator latency claim.
 
 ## Measurement
 
-Rebuild the minified benchmark APK with the generated profile, then run `StartupBenchmark` on a physical device in a serial native window. Compare ten cold-start iterations without compilation and with the Baseline Profile required; missing profiles must fail, not silently fall back. Five separate frame iterations cover Reader/Continue/Library.
-
 ```sh
-./gradlew :app:assembleFullBenchmarkProfileQa
-ANDROID_SERIAL="$R8_TEST_SERIAL" ./gradlew --no-parallel --max-workers=1 :macrobenchmark:connectedFullBenchmarkProfileQaAndroidTest \
+./gradlew :app:assembleFullBenchmarkProfileQa :macrobenchmark:assembleFullBenchmarkProfileQa
+ANDROID_SERIAL="$R8_TEST_SERIAL" ./gradlew --no-parallel --max-workers=1 \
+  :macrobenchmark:connectedFullBenchmarkProfileQaAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=net.digitalbc.leafreader.macrobenchmark.StartupBenchmark \
   -Pandroid.testInstrumentationRunnerArguments.leaf.qaFixtures=true
 ```
 
-For the incremental Leaf-owned benefit, preserve a library-profile-only control APK before generation, then compare control and treatment with the same required-profile mode on the same populated QA install, preferably alternating A/B/A/B. None versus Require on the treatment alone includes existing dependency profiles and cannot isolate Leaf-owned gains. Preserve exact APK hashes, mappings, compilation configuration and iteration distributions; report inconclusive results honestly.
+Preserve a zero-Leaf-profile control with the **same** installer, compiler, signing/packaging and app inputs. Alternate A/B/A/B with required-profile compilation; None versus Require alone conflates dependency profiles. Retain per-iteration JSON/traces and thermal/battery/OS/fixture conditions. Do not suppress unsupported-SDK, debuggable, missing-profile or benchmark errors. Trial expansion or promotion into Release requires new evidence and exact artifact review.
 
-Task names must be checked against the configured plugin variants with `:macrobenchmark:tasks --all`. Use only the isolated benchmark application ID. Retain Macrobenchmark JSON and Perfetto traces with device/OS, compilation mode, thermal/network/battery and fixture state. An emulator run validates the harness/profile generation; it does not establish physical startup performance. StartupTimingMetric reports initial display here; no app-owned fully-drawn signal is added.
-
-The synthetic workload is repeatable and offline but not representative of every reader library, remote cover workload or Series peel interaction. Minimum OS, broader physical devices, real SMB/Jellyfin, upgrades, accessibility and release gates remain separate. Do not disable benchmark errors or alter device settings to make a measurement pass.
-
-
-## Collection evidence — 16 November 2026
-
-Full QA collection source `bdb1369df379c8905824688fa494c126c75acf1b`, task-owned API37/16KB emulator, all three tests pass with zero failures/skips. Startup stabilized at iteration6; Reader/Continue/Library at iteration12. The independent smoke test also exercises three cold restarts. No physical timing result follows from collection.
-
-Generated Baseline:21,953 rules,2,007 owned by the `net.digitalbc.leafreader` app namespace; SHA256 `1718742b88d4d2ac36a7040e63394ff13dc94354471b2263c1f797f9e024cfde`. Startup:18,711 rules,1,375 app rules; SHA256 `763ec6215255d7e618b27749941440738e5d41057b540370a054749b78165adc`. Startup has no `ReaderScreen` method entries; Baseline has31. Startup's Reader-package enum/settings references are legitimate cold Library configuration, not a Reader journey.
-
-The preserved library-only control contains zero Leaf app entries and uses shipping R89.2.14. A fresh build at the exact producer configuration is byte-for-byte identical to the earlier control: APK SHA256 `89d0a4b4412a6de0442d87c5a543c73057d74e5139a1d3fcd35157978b94b589`. Test-only hierarchy-stability changes after collection do not change application code; physical measurements must use the current runner and record exact APK identities. Keep raw failed experiments separate from the accepted collection receipt. Package validation and physical comparison remain required.
-
-
-Packaged-profile regression at `cc35b7c` plus those exact generated files passes: shared144, each flavor268pass/1expected live-SMB skip, both lints0errors/87existing warnings, both Release/Performance APKs, Full AAB and minified benchmark/runner builds. Shipping compiler remains R89.2.14. Profile candidate Full unsigned APK8,592,849bytes versus optimizer-only8,477,519; Fdroid4,567,599 versus4,453,101. The extra startup-layout/profile cost is real; keep this draft under review until the physical comparison supports it. No startup improvement is inferred from successful compilation. CI source also compiles each profile harness but runs no emulator timing; workflows remain disabled until separately authorized.
-
-
-S25's first required-profile attempt exposed transitive ProfileInstaller1.3.1 rejecting SDK37 before any timings. Explicit1.4.1 is required; it supports the forward-compatible API31+ profile format and fixes method-flag transcoding. See [official release notes](https://developer.android.com/jetpack/androidx/releases/profileinstaller). Rebuild both control and treatment with1.4.1 before comparison; never compare across installer versions or suppress the unsupported-SDK error. Older3910e6d artifact sizes/results above are historical evidence, not final1.4.1 validation.
-
-
-## Corrected isolated collection —16November2026
-
-Supersedes the earlier exclusivity claim: collection source7a66856582cf2a89c0fe9671b09714960687d7e6 with explicit ProfileInstaller1.4.1, holding shared native AND both platform functional/S25 leases for the whole run. All3tests pass, zero failures/skips;24synthetic fixtures verified, all immutable source inputs unchanged (only the two declared generated outputs may change). Earlier separately leased iOS overlap is preserved as historical coverage, not isolation evidence. No physical timings accepted yet.
-
-Baseline21,968rules/2,008 Leaf app rules, SHA256eb669a0065a0b4f823f9d2665a185dffa73efaad923c9e484dcdf17161512fc5. Startup18,726rules/1,376 Leaf rules, SHA2564bfb4de91c2718580524379244b1d2dc3ff8741515c2608c4b283f0559fee3a5; still zero ReaderScreen method entries in Startup. New1.4.1 library-only control4efdf44 contains zero Leaf rules and APK SHA2567969ef1937f75c7ce19edb99c92ce2bd0f23962a72f72621d346419c8dfe3764. Both sides must use that installer version. Final packaging, smoke and physical size/latency acceptance remain pending.
+Synthetic CBZs are not representative of large/publisher artwork, remote covers, Series peel, every device or minimum OS. Real SMB/Jellyfin, upgrades, accessibility, licensing/privacy and release checklist gates remain separate. CI source compiles both harnesses and runs minified correctness smoke; workflows remain disabled and no CI timing claim is made.
