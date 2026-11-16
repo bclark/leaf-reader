@@ -42,7 +42,7 @@ internal class LeafJourneys(private val device: UiDevice) {
         requireNotNull(device.wait(Until.findObject(By.text("FROM DEVICE (FOLDER)")), 5_000)).click()
         device.waitForIdle()
         device.findObject(By.desc("Show roots"))?.click()
-        requireNotNull(device.wait(Until.findObject(By.text("Downloads")), 5_000)).click()
+        requireNotNull(device.wait(Until.findObject(By.text(Pattern.compile("Downloads?"))), 5_000)).click()
         requireNotNull(device.wait(Until.findObject(By.text("LeafR8Fixtures")), 5_000)).click()
         requireNotNull(device.wait(Until.findObject(By.text("USE THIS FOLDER")), 5_000)).click()
         device.wait(Until.findObject(By.text("ALLOW")), 5_000)?.click()
