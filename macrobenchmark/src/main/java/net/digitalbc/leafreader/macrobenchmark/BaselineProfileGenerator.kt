@@ -28,7 +28,7 @@ class BaselineProfileGenerator {
     @Test fun startup() = profile.collect(TARGET_PACKAGE, includeInStartupProfile = true) {
         pressHome()
         startActivityAndWait()
-        LeafJourneys(device).libraryReady()
+        LeafJourneys(device).populatedLibraryReady()
     }
 
     @Test fun localReaderAndLibrary() = profile.collect(TARGET_PACKAGE, includeInStartupProfile = false) {

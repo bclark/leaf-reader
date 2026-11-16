@@ -42,7 +42,7 @@ class StartupBenchmark {
         setupBlock = { pressHome() },
     ) {
         startActivityAndWait()
-        LeafJourneys(device).libraryReady()
+        LeafJourneys(device).populatedLibraryReady()
     }
 
     @Test fun localReaderAndLibraryFrames() = benchmark.measureRepeated(

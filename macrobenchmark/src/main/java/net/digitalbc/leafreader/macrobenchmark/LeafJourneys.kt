@@ -16,6 +16,12 @@ internal class LeafJourneys(private val device: UiDevice) {
         assertTrue("Library toolbar did not appear", device.wait(Until.hasObject(By.desc("Menu")), 15_000))
     }
 
+    fun populatedLibraryReady() {
+        libraryReady()
+        assertTrue("Synthetic populated library is missing", device.wait(Until.hasObject(fixture), 10_000)
+            || device.hasObject(By.descStartsWith("Continue reading, Leaf R8 Fixture")))
+    }
+
     fun prepareFixtures() {
         check(InstrumentationRegistry.getArguments().getString("leaf.qaFixtures") == "true") {
             "Use the documented isolated benchmark install and pass leaf.qaFixtures=true."
