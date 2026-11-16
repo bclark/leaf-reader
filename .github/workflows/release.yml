@@ -11,8 +11,15 @@ permissions:
   contents: write
 
 jobs:
+  android-r8:
+    name: Android minified runtime gate
+    permissions:
+      contents: read
+    uses: ./.github/workflows/android-r8-smoke.yml
+
   release:
     name: Build & publish Android release
+    needs: android-r8
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

@@ -26,6 +26,7 @@ android {
     productFlavors {
         create("full") {
             dimension = "distribution"
+            proguardFiles("src/full/proguard-rules.pro")
         }
         create("fdroid") {
             dimension = "distribution"
@@ -148,7 +149,9 @@ dependencies {
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.commons.compress)
-    "fullImplementation"(libs.sevenzip)
+    "fullImplementation"(libs.sevenzip) {
+        exclude(group = "androidx.appcompat", module = "appcompat")
+    }
     implementation(libs.smbj)
     implementation(libs.okhttp)
     testImplementation(libs.okhttp.mockwebserver)
