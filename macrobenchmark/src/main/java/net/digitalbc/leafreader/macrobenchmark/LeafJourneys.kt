@@ -37,7 +37,7 @@ internal class LeafJourneys(private val device: UiDevice) {
             "Refusing fixture setup in a nonempty library. Use the separate empty benchmark app."
         }
         val load = device.findObject(By.desc("Load comic"))
-            ?: device.findObject(By.text(Pattern.compile(".*(ADD|LOAD).*COMIC.*", Pattern.CASE_INSENSITIVE)))
+            ?: device.findObject(By.text(Pattern.compile("(?:ADD COMICS|LOAD COMIC)", Pattern.CASE_INSENSITIVE)))
         requireNotNull(load) { "Load comic action unavailable" }.click()
         requireNotNull(device.wait(Until.findObject(By.text("FROM DEVICE (FOLDER)")), 5_000)).click()
         device.waitForIdle()
@@ -58,7 +58,7 @@ internal class LeafJourneys(private val device: UiDevice) {
         requireNotNull(device.findObject(By.desc("Menu"))).click()
         requireNotNull(device.wait(Until.findObject(By.text("Select comics")), 5_000)).click()
         requireNotNull(device.wait(Until.findObject(By.text(Pattern.compile("SELECT ALL", Pattern.CASE_INSENSITIVE))), 5_000)).click()
-        assertTrue("Expected exactly 24 synthetic comics", device.wait(Until.hasObject(By.text("24 COMICS SELECTED")), 5_000))
+        assertTrue("Expected exactly 24 synthetic comics", device.wait(Until.hasObject(By.text("24 SELECTED")), 5_000))
         requireNotNull(device.findObject(By.text(Pattern.compile("DONE", Pattern.CASE_INSENSITIVE)))).click()
         libraryReady()
     }
