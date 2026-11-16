@@ -78,6 +78,12 @@ internal class LeafJourneys(private val device: UiDevice) {
         assertTrue("Reader did not replace Library", device.wait(Until.gone(By.desc("Menu")), 10_000))
     }
 
+    // Handle only Android's first-run immersive hint, outside collection/measurement.
+    fun dismissReaderHint() {
+        device.wait(Until.findObject(By.res("com.android.systemui", "ok").text("Got it")), 3_000)?.click()
+        device.waitForIdle()
+    }
+
     fun turnPageAndReturn() {
         device.click(device.displayWidth / 10, device.displayHeight / 2)
         device.waitForIdle()

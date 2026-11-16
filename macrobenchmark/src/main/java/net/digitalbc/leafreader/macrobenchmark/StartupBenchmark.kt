@@ -26,6 +26,7 @@ class StartupBenchmark {
         LeafJourneys(UiDevice.getInstance(instrumentation)).apply {
             prepareFixtures()
             openFixture()
+            dismissReaderHint()
             turnPageAndReturn()
         }
     }

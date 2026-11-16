@@ -12,7 +12,7 @@ Use a coordinated native/device window. Select one dedicated emulator or the sep
 python3 scripts/create-r8-fixtures.py /tmp/LeafR8Fixtures
 # Explicitly select the QA device. These files contain synthetic artwork only.
 adb -s "$R8_TEST_SERIAL" push /tmp/LeafR8Fixtures /sdcard/Download/
-./gradlew :app:generateBaselineProfile \
+./gradlew --no-parallel --max-workers=1 :app:generateBaselineProfile \
   -Pandroid.testInstrumentationRunnerArguments.leaf.qaFixtures=true \
   -Pandroid.testInstrumentationRunnerArguments.class=net.digitalbc.leafreader.macrobenchmark.BaselineProfileGenerator
 ```
