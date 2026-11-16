@@ -1,0 +1,7 @@
+Jellyfin icon-transparent.svg
+Copyright the Jellyfin contributors.
+Source: https://github.com/jellyfin/jellyfin-ux/blob/master/branding/SVG/icon-transparent.svg
+License: Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+https://creativecommons.org/licenses/by-sa/4.0/
+Full license included in Jellyfin-Artwork-CC-BY-SA-4.0.txt.
+The SVG bytes are unchanged from the owner-selected HTML and official source; display size is adapted by native layout. No endorsement is implied.

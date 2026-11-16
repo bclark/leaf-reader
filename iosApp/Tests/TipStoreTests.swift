@@ -101,6 +101,53 @@ struct TipStoreTests {
         await store.stopForTesting()
     }
 
+    @Test func directPurchaseStaysBusyUntilObserverFinishesTheSameTransaction() async throws {
+        let client = FakeTipClient()
+        var releasePurchase: CheckedContinuation<Void, Never>?
+        var releaseFinish: CheckedContinuation<Void, Never>?
+        defer { releasePurchase?.resume(); releaseFinish?.resume() }
+        client.purchaseHook = { await withCheckedContinuation { releasePurchase = $0 } }
+        var finishCalls = 0
+        var finished = false
+        let transaction = VerifiedTip(id: 902, productID: TipCatalog.productIDs[0],
+            isConsumable: true, isRevoked: false, purchaseDate: Date(), finish: {
+                finishCalls += 1
+                await withCheckedContinuation { releaseFinish = $0 }
+                finished = true
+            })
+        client.result = .success(.verified(transaction))
+        let store = TipStore(client: client, defaults: defaults())
+        for id in ["finish-race-1", "finish-race-2", "finish-race-3"] {
+            store.promptPolicy.recordCompletion(itemID: id)
+        }
+        #expect(store.promptPolicy.isEligible)
+        store.start()
+        await store.loadProducts()
+        store.purchase(store.products[0])
+        try await settle { releasePurchase != nil }
+        client.continuation?.yield(.verified(transaction))
+        try await settle { releaseFinish != nil }
+
+        client.purchaseHook = nil
+        releasePurchase?.resume(); releasePurchase = nil
+        try await Task.sleep(nanoseconds: 30_000_000)
+        #expect(!finished)
+        #expect(store.promptPolicy.isEligible, "Verified suppression must wait for finish")
+        #expect(store.purchasingID == client.catalog[0].id,
+            "The direct purchase must await the observer's in-flight finish")
+        store.purchase(store.products[1])
+        try await Task.sleep(nanoseconds: 20_000_000)
+        #expect(client.purchaseCalls == 1, "Another charge must stay blocked until finish completes")
+
+        releaseFinish?.resume(); releaseFinish = nil
+        try await settle { store.purchasingID == nil }
+        #expect(finished)
+        #expect(finishCalls == 1)
+        #expect(store.notice == .thankYou)
+        #expect(!store.promptPolicy.isEligible, "The direct result must await cooldown persistence too")
+        await store.stopForTesting()
+    }
+
     @Test func cancellationWhileWaitingForRecoveryNeverStartsACharge() async throws {
         let client = FakeTipClient()
         var release: CheckedContinuation<Void, Never>?
@@ -367,5 +414,111 @@ struct TipStoreTests {
         #expect(store.pendingProductID == nil)
         #expect(store.notice == .thankYou)
         client.purchaseHook = nil
+    }
+
+    @Test func verifiedOriginalPurchaseDateReachesPolicyAfterFinishingWithoutReplayExtension() async throws {
+        let name = "LeafTipDateTests." + UUID().uuidString
+        let prefs = try #require(UserDefaults(suiteName: name))
+        defer { prefs.removePersistentDomain(forName: name) }
+        let purchase = Date(timeIntervalSince1970: 1_700_000_000)
+        var clock = purchase
+        let policy = TipPromptPolicy(defaults: prefs, now: { clock })
+        for id in ["one", "two", "three"] { policy.recordCompletion(itemID: id) }
+        let store = TipStore(client: FakeTipClient(), defaults: prefs, promptPolicy: policy)
+        var release: CheckedContinuation<Void, Never>?
+        let handling = Task {
+            await store.handle(.verified(VerifiedTip(id: 701, productID: TipCatalog.productIDs[0],
+                isConsumable: true, isRevoked: false, purchaseDate: purchase,
+                finish: { await withCheckedContinuation { release = $0 } })), acknowledge: false)
+        }
+        try await settle { release != nil }
+        #expect(policy.isEligible, "No cooldown is published before transaction finishing completes")
+        release?.resume(); await handling.value
+        #expect(!policy.isEligible)
+        clock = purchase.addingTimeInterval(400 * 24 * 60 * 60)
+        await store.handle(.verified(VerifiedTip(id: 701, productID: TipCatalog.productIDs[0],
+            isConsumable: true, isRevoked: false, purchaseDate: purchase, finish: {})), acknowledge: false)
+        #expect(policy.isEligible, "Old verified recovery must not use observation time as purchase time")
+        await store.handle(.verified(VerifiedTip(id: 702, productID: TipCatalog.productIDs[0],
+            isConsumable: true, isRevoked: false, purchaseDate: clock, finish: {})), acknowledge: false)
+        #expect(!policy.isEligible)
+    }
+
+    @Test(arguments: ["unsupported", "nonconsumable", "revoked", "missing-date"])
+    func onlySupportedNonrevokedDatedTipsSuppressPrompts(_ outcome: String) async throws {
+        let name = "LeafTipDateTests." + UUID().uuidString
+        let prefs = try #require(UserDefaults(suiteName: name))
+        defer { prefs.removePersistentDomain(forName: name) }
+        let clock = Date(timeIntervalSince1970: 1_700_000_000)
+        let policy = TipPromptPolicy(defaults: prefs, now: { clock })
+        for id in ["one", "two", "three"] { policy.recordCompletion(itemID: id) }
+        let store = TipStore(client: FakeTipClient(), defaults: prefs, promptPolicy: policy)
+        var finished = 0
+        await store.handle(.verified(VerifiedTip(id: 703,
+            productID: outcome == "unsupported" ? "unknown.product" : TipCatalog.productIDs[0],
+            isConsumable: outcome != "nonconsumable", isRevoked: outcome == "revoked",
+            purchaseDate: outcome == "missing-date" ? nil : clock,
+            finish: { finished += 1 })), acknowledge: false)
+        #expect(policy.isEligible)
+        #expect(finished == (["unsupported", "nonconsumable"].contains(outcome) ? 0 : 1))
+    }
+
+    @Test(arguments: ["pending", "cancelled", "unverified", "failure", "restricted"])
+    func unsuccessfulPurchasesNeverBecomeVerifiedPromptSuppression(_ outcome: String) async throws {
+        let name = "LeafTipDateTests." + UUID().uuidString
+        let prefs = try #require(UserDefaults(suiteName: name))
+        defer { prefs.removePersistentDomain(forName: name) }
+        let policy = TipPromptPolicy(defaults: prefs)
+        for id in ["one", "two", "three"] { policy.recordCompletion(itemID: id) }
+        let client = FakeTipClient()
+        let store = TipStore(client: client, defaults: prefs, promptPolicy: policy)
+        await store.loadProducts()
+        switch outcome {
+        case "pending": client.result = .pending
+        case "unverified": client.result = .success(.unverified)
+        case "failure": client.failure = true
+        case "restricted": client.canMakePayments = false
+        default: client.result = .cancelled
+        }
+        store.purchase(try #require(store.products.first))
+        try await settle { store.purchasingID == nil }
+        #expect(client.purchaseCalls == (outcome == "restricted" ? 0 : 1))
+        #expect(policy.isEligible)
+        #expect(store.pendingProductID == (outcome == "pending" ? TipCatalog.productIDs[0] : nil))
+    }
+
+    @Test func permanentPromptOptOutKeepsVoluntaryPurchasesAvailable() async throws {
+        let name = "LeafTipDateTests." + UUID().uuidString
+        let prefs = try #require(UserDefaults(suiteName: name))
+        defer { prefs.removePersistentDomain(forName: name) }
+        let policy = TipPromptPolicy(defaults: prefs)
+        for id in ["one", "two", "three"] { policy.recordCompletion(itemID: id) }
+        #expect(policy.claimPresentation() != nil)
+        policy.optOut()
+        let client = FakeTipClient()
+        client.result = .success(.verified(VerifiedTip(id: 704, productID: TipCatalog.productIDs[0],
+            isConsumable: true, isRevoked: false, purchaseDate: Date(), finish: {})))
+        let store = TipStore(client: client, defaults: prefs, promptPolicy: policy)
+        await store.loadProducts()
+        store.purchase(try #require(store.products.first))
+        try await settle { store.purchasingID == nil }
+        #expect(client.purchaseCalls == 1 && store.notice == .thankYou)
+        #expect(!policy.isEligible)
+    }
+
+    @Test func eligibilityAndPromptPolicyNeverLoadTheCatalog() throws {
+        let name = "LeafTipDateTests." + UUID().uuidString
+        let prefs = try #require(UserDefaults(suiteName: name))
+        defer { prefs.removePersistentDomain(forName: name) }
+        let policy = TipPromptPolicy(defaults: prefs)
+        let client = FakeTipClient()
+        var requests = 0
+        client.loadHook = { requests += 1 }
+        let store = TipStore(client: client, defaults: prefs, promptPolicy: policy)
+        for id in ["one", "two", "three"] { policy.recordCompletion(itemID: id) }
+        #expect(policy.isEligible)
+        policy.dismiss(try #require(policy.claimPresentation()))
+        #expect(requests == 0 && store.catalogState == .idle)
+        #expect(client.observerStarts == 0 && client.unfinishedCalls == 0)
     }
 }

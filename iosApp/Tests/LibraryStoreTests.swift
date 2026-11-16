@@ -136,6 +136,61 @@ final class LibraryStoreTests: XCTestCase {
 
     // MARK: - 1. Progress & Completion Logic Tests
 
+    func testImportCompletionCallbackRunsAfterPublicationAndBookkeeping() async throws {
+        let name = "leaf.import-onboarding." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let destination = tempDir.appendingPathComponent("Imported")
+        let library = LibraryStore(directory: destination)
+        let onboarding = FirstLaunchOnboarding(defaults: defaults, directory: destination)
+        let source = try makeTestCbz(named: "Onboarding-\(UUID().uuidString).cbz", pageCount: 2)
+        var completed: [URL] = []
+        defer {
+            ReadingProgress.clear(source); ComicMetadataStore.clear(source); CoverLoader.invalidate(source)
+            completed.forEach { CoverLoader.invalidate($0) }
+        }
+        let task = library.importComic(from: source) { published in
+            XCTAssertTrue(FileManager.default.fileExists(atPath: published.path))
+            XCTAssertTrue(library.comics.contains(published))
+            XCTAssertNotNil(ComicMetadataStore.get(published))
+            XCTAssertNil(ReadingProgress.get(published), "Import must preserve the unopened reading state")
+            XCTAssertGreaterThan(ReadingProgress.openedAt(published), 0)
+            XCTAssertFalse(library.importing)
+            completed.append(published)
+            onboarding.finish()
+        }
+        XCTAssertFalse(onboarding.isComplete)
+        await task.value
+        XCTAssertTrue(onboarding.isComplete)
+        XCTAssertEqual(completed.count, 1)
+        XCTAssertNil(library.importError)
+    }
+
+    func testFailedAndCancelledImportsNeverCallOnboardingSuccess() async throws {
+        let name = "leaf.import-onboarding." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let destination = tempDir.appendingPathComponent("Imported")
+        let library = LibraryStore(directory: destination)
+        let onboarding = FirstLaunchOnboarding(defaults: defaults, directory: destination)
+        let broken = tempDir.appendingPathComponent("broken.cbz")
+        try Data("invalid archive".utf8).write(to: broken)
+        await library.importComic(from: broken) { _ in onboarding.finish() }.value
+        XCTAssertFalse(onboarding.isComplete)
+        XCTAssertNotNil(library.importError)
+        XCTAssertTrue(library.comics.isEmpty)
+
+        library.importError = nil
+        let source = try makeTestCbz(named: "Cancelled-onboarding-\(UUID().uuidString).cbz")
+        defer { ReadingProgress.clear(source); ComicMetadataStore.clear(source); CoverLoader.invalidate(source) }
+        let task = library.importComic(from: source) { _ in onboarding.finish() }
+        task.cancel()
+        await task.value
+        XCTAssertFalse(onboarding.isComplete)
+        XCTAssertNil(library.importError)
+        XCTAssertTrue(library.comics.isEmpty)
+    }
+
     func testUnopenedComicIsNotCompleted() throws {
         let url = try makeTestCbz(named: "Unopened #01.cbz", pageCount: 5)
         XCTAssertNil(ReadingProgress.get(url))

@@ -6,6 +6,16 @@ import PDFKit
 
 @Suite(.serialized) @MainActor
 struct LibraryBrowseTests {
+    @Test func seriesIsTheColdDefaultAndChoicesKeepApprovedOrder() {
+        #expect(LibraryBrowseState.ViewMode.allCases == [.series, .lists, .all, .offline])
+        var session = LibraryBrowseState()
+        #expect(session.view == .series)
+        session.select(.all)
+        session.finishLaunchCheck()
+        #expect(session.view == .all)
+        #expect(LibraryBrowseState().view == .series)
+    }
+
     @Test func unreadStateSurvivesEveryViewAndExplicitOfflineSurvivesFailure() {
         var state = LibraryBrowseState()
         state.unreadOnly = true
@@ -35,7 +45,7 @@ struct LibraryBrowseTests {
         var successfulLaunch = LibraryBrowseState()
         successfulLaunch.finishLaunchCheck()
         successfulLaunch.handleUnreachableLaunch()
-        #expect(successfulLaunch.view == .all)
+        #expect(successfulLaunch.view == .series)
     }
 
     @Test func unknownProgressRemainsUnknownAndSearchCombinesWithUnread() {
