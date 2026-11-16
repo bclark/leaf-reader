@@ -352,6 +352,14 @@ final class FirstLaunchOnboardingUITests: XCTestCase {
         disconnectFixture(english)
     }
 
+    private func creatorMatchButton(_ app: XCUIApplication) -> XCUIElement {
+        let matches = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "QA Creator Match,"))
+        let match = matches.firstMatch
+        XCTAssertTrue(match.waitForExistence(timeout: 10))
+        XCTAssertEqual(matches.count, 1, "The fixture must expose one distinct comic button")
+        return match
+    }
+
     func testCinematicCreditsCreatorBackAndMissingMetadata() {
         let app = connectCinematicFixture()
         openCinematicFixture(app)
@@ -362,8 +370,7 @@ final class FirstLaunchOnboardingUITests: XCTestCase {
         let savedY = writer.frame.minY
         capture("cinematic-long-credit-and-title", app: app)
         writer.tap()
-        let match = app.staticTexts["QA Creator Match"]
-        XCTAssertTrue(match.waitForExistence(timeout: 10))
+        let match = creatorMatchButton(app)
         capture("cinematic-creator-results", app: app)
         match.tap()
         XCTAssertTrue(app.navigationBars["QA Creator Match"].waitForExistence(timeout: 10))
@@ -423,7 +430,7 @@ final class FirstLaunchOnboardingUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["No comics by this creator in this library."].exists)
         capture("cinematic-creator-failure-is-not-empty", app: app)
         app.buttons["Retry"].tap()
-        XCTAssertTrue(app.staticTexts["QA Creator Match"].waitForExistence(timeout: 10))
+        _ = creatorMatchButton(app)
         capture("cinematic-creator-retry-success", app: app)
         finishCinematicFixture(app)
     }
