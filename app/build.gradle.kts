@@ -1,4 +1,5 @@
 plugins {
+    alias(libs.plugins.baselineprofile)
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
@@ -78,6 +79,12 @@ android {
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
         }
+        // An isolated sandbox for synthetic profile/benchmark journeys; never replaces Leaf.
+        create("benchmark") {
+            initWith(getByName("performance"))
+            applicationIdSuffix = ".benchmark"
+            versionNameSuffix = "-benchmark"
+        }
     }
 
     compileOptions {
@@ -145,4 +152,16 @@ dependencies {
     implementation(libs.smbj)
     implementation(libs.okhttp)
     testImplementation(libs.okhttp.mockwebserver)
+}
+
+// Generate explicitly on a dedicated QA device; normal assemblies never start device tests.
+// Only the isolated benchmark app has a producer dependency. Committed main profiles also
+// feed Release/Performance because code namespaces are identical across application IDs.
+baselineProfile {
+    automaticGenerationDuringBuild = false
+    saveInSrc = true
+    mergeIntoMain = true
+    variants {
+        create("benchmark") { from(project(":macrobenchmark")) }
+    }
 }
