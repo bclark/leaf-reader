@@ -11,6 +11,55 @@ import LeafShared
 @Suite(.serialized)
 @MainActor
 struct JellyfinTests {
+    enum OnboardingSignInOutcome: CaseIterable, Equatable {
+        case refusedHTTP, credentialFailure, cancelled, success, cancelledAfterCommit
+    }
+
+    @Test(arguments: OnboardingSignInOutcome.allCases)
+    func onboardingCompletesOnlyAfterCommittedAuthentication(_ outcome: OnboardingSignInOutcome) async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = try JellyfinHTTPFixture(payload: Data())
+        let base = try await server.start()
+        let suite = "leaf.signin-onboarding." + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite); server.stop() }
+        let onboarding = FirstLaunchOnboarding(defaults: defaults, directory: root.appendingPathComponent("Comics"))
+        onboarding.showJellyfin()
+        let credentials: any SmbCredentialStore = outcome == .credentialFailure
+            ? OnboardingFailingCredentials() : JellyfinFixtureCredentials()
+        let browser = JellyfinBrowserModel(defaults: defaults, credentials: credentials,
+            imports: JellyfinImports(file: root.appendingPathComponent("imports.json")),
+            progressStore: JellyfinProgressStore(file: root.appendingPathComponent("progress.json")),
+            snapshotDirectory: root.appendingPathComponent("snapshots"))
+        var successes = 0
+        browser.signIn(url: base.absoluteString, username: "fixture", password: "fixture",
+            allowHTTP: outcome != .refusedHTTP, onSuccess: {
+                #expect(browser.connection != nil)
+                #expect(defaults.data(forKey: "leaf.jellyfin.profile") != nil)
+                successes += 1
+                onboarding.finish()
+                if outcome == .cancelledAfterCommit { browser.cancel() }
+            })
+        #expect(!onboarding.isComplete)
+        if outcome == .cancelled { browser.cancel() }
+        // A repeated tap while signing in must not create another connection/presentation outcome.
+        browser.signIn(url: base.absoluteString, username: "fixture", password: "fixture", allowHTTP: true,
+            onSuccess: { successes += 100 })
+        await browser.waitForIdle()
+        if outcome == .success || outcome == .cancelledAfterCommit {
+            #expect(successes == 1)
+            #expect(onboarding.isComplete)
+            #expect(browser.connection != nil)
+        } else {
+            #expect(successes == 0)
+            #expect(onboarding.step == .jellyfin)
+            #expect(browser.connection == nil)
+            #expect(defaults.data(forKey: "leaf.jellyfin.profile") == nil)
+            if outcome != .cancelled { #expect(browser.message != nil) }
+        }
+    }
+
     @Test(.timeLimit(.minutes(1))) func catalogueColdStartCachesWithoutImportingAndFallsBackOffline() async throws {
         let root = try directory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -1044,6 +1093,14 @@ struct JellyfinTests {
     }
 }
 
+
+private struct OnboardingFailingCredentials: SmbCredentialStore {
+    func password(profileID: String) throws -> String? { nil }
+    func save(password: String, profileID: String) throws {
+        throw NSError(domain: "LeafOnboardingCredentialFixture", code: 1)
+    }
+    func delete(profileID: String) throws { }
+}
 
 private final class JellyfinFixtureCredentials: SmbCredentialStore, @unchecked Sendable {
     private let lock = NSLock()

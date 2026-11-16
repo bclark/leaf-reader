@@ -22,7 +22,8 @@ struct LibraryView: View {
     @StateObject private var library = LibraryStore()
     @StateObject private var jellyfin = JellyfinBrowserModel()
     @StateObject private var catalogue = JellyfinCatalogueModel()
-    @AppStorage("leaf.jellyfin.onboardingChosen") private var onboardingChosen = false
+    @StateObject private var onboarding = FirstLaunchOnboarding()
+    @State private var onboardingFocusRequest = 0
     @State private var browse = LibraryBrowseState()
     @State private var offlineComics: Set<URL> = []
     @State private var offlineRevisions: Set<CoverLoader.Revision> = []
@@ -129,6 +130,66 @@ struct LibraryView: View {
     }
 
     var body: some View {
+        Group {
+            if onboarding.isComplete {
+                libraryNavigation
+            } else {
+                FirstLaunchOnboardingView(onboarding: onboarding, busy: library.importing,
+                    focusRequest: onboardingFocusRequest,
+                    chooseFile: { showPicker = true }, connect: { showJellyfinBrowser = true })
+            }
+        }
+        .sheet(isPresented: $showJellyfinBrowser, onDismiss: {
+            onboardingFocusRequest += 1
+            Task {
+                await catalogue.start(browser: jellyfin, force: true)
+                await jellyfin.restoreDownloads(library: library)
+            }
+        }) {
+            JellyfinBrowserView(model: jellyfin, onConnected: {
+                guard !onboarding.isComplete, showJellyfinBrowser else { return }
+                onboarding.finish()
+                showJellyfinBrowser = false
+            }).environmentObject(library)
+        }
+        .fileImporter(isPresented: $showPicker, allowedContentTypes: LibraryStore.importableTypes,
+            allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls):
+                urls.forEach { url in
+                    library.importComic(from: url) { _ in onboarding.finish() }
+                }
+            case .failure(let error):
+                if (error as? CocoaError)?.code != .userCancelled { library.importError = error.localizedDescription }
+            }
+        }
+        .onChange(of: showPicker) { presented in if !presented { onboardingFocusRequest += 1 } }
+        .onChange(of: library.importing) { busy in if !busy { onboardingFocusRequest += 1 } }
+        .alert("Import failed", isPresented: Binding(
+            get: { library.importError != nil },
+            set: { if !$0 {
+                // Native presentation bindings can clear during a view update.
+                // Publish the observed error change after that update completes.
+                let dismissedError = library.importError
+                DispatchQueue.main.async {
+                    if library.importError == dismissedError { library.importError = nil }
+                    onboardingFocusRequest += 1
+                }
+            } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(library.importError ?? "")
+        }
+        .task {
+            await jellyfin.restoreDownloads(library: library)
+            await catalogue.start(browser: jellyfin)
+            if catalogue.unreachable { browse.handleUnreachableLaunch() }
+            browse.finishLaunchCheck()
+        }
+    }
+
+    private var libraryNavigation: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 settings.ground.ignoresSafeArea()
@@ -201,14 +262,6 @@ struct LibraryView: View {
                 Button("From SMB Drive") { showSmbBrowser = true }
                 Button("From Jellyfin") { showJellyfinBrowser = true }
             }
-            .sheet(isPresented: $showJellyfinBrowser, onDismiss: {
-                Task {
-                    await catalogue.start(browser: jellyfin, force: true)
-                    await jellyfin.restoreDownloads(library: library)
-                }
-            }) {
-                JellyfinBrowserView(model: jellyfin).environmentObject(library)
-            }
             .navigationDestination(isPresented: $showRemoteDetail) {
                 if let remoteBook {
                     JellyfinDetailView(item: remoteBook, model: jellyfin,
@@ -222,12 +275,6 @@ struct LibraryView: View {
                         downloadedOnly: downloadedOnly, unreadOnly: $browse.unreadOnly, searchQuery: searchQuery)
                         .environmentObject(library)
                 }
-            }
-            .task {
-                await jellyfin.restoreDownloads(library: library)
-                await catalogue.start(browser: jellyfin)
-                if catalogue.unreachable { browse.handleUnreachableLaunch() }
-                browse.finishLaunchCheck()
             }
             .onChange(of: openComic?.url) { comic in
                 if comic != nil { searchFieldFocused = false; searchFieldAccessibilityFocused = false }
@@ -253,16 +300,6 @@ struct LibraryView: View {
             .sheet(isPresented: $showSmbBrowser) {
                 SmbBrowserView().environmentObject(library)
             }
-            .fileImporter(
-                isPresented: $showPicker,
-                allowedContentTypes: LibraryStore.importableTypes,
-                allowsMultipleSelection: true
-            ) { result in
-                switch result {
-                case .success(let urls): urls.forEach(library.importComic)
-                case .failure(let error): library.importError = error.localizedDescription
-                }
-            }
             .sheet(isPresented: $showSetSeriesSheet) {
                 setSeriesSheet.leafAppearance(settings.theme)
             }
@@ -281,14 +318,6 @@ struct LibraryView: View {
                 }
             }) {
                 createListSheet.leafAppearance(settings.theme)
-            }
-            .alert("Import failed", isPresented: Binding(
-                get: { library.importError != nil },
-                set: { if !$0 { library.importError = nil } }
-            )) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(library.importError ?? "")
             }
             .alert("Remove comic?", isPresented: Binding(
                 get: { pendingDelete != nil },
@@ -554,18 +583,8 @@ struct LibraryView: View {
                     if downloadedOnly && checkingOffline { ProgressView("Checking local comics…").padding() }
 
                     if showsEmptyLibrary {
-                        EmptyLibraryView(importing: library.importing, add: {
-                            onboardingChosen = true
-                            showImportSource = true
-                        }, connect: {
-                            onboardingChosen = true
-                            showJellyfinBrowser = true
-                        })
-                    } else if jellyfin.connection == nil && !onboardingChosen {
-                        JellyfinOnboardingCard(connect: {
-                            onboardingChosen = true
-                            showJellyfinBrowser = true
-                        }, skip: { onboardingChosen = true })
+                        EmptyLibraryView(importing: library.importing, add: { showImportSource = true },
+                            connect: { showJellyfinBrowser = true })
                     }
                     if let resume = continueComic, !isEditMode, searchQuery.isEmpty {
                         ContinueReadingCard(url: resume.url, progress: resume.progress) {
