@@ -2,5 +2,24 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <application android:label="Leaf Benchmark" tools:replace="android:label">
         <profileable android:shell="true" />
+        <!-- LauncherIcons derives alias names from applicationId, which differs in this sandbox. -->
+        <activity-alias android:name="net.digitalbc.leafreader.LightLauncher" tools:node="remove" />
+        <activity-alias android:name="net.digitalbc.leafreader.DarkLauncher" tools:node="remove" />
+        <activity-alias android:name="${applicationId}.LightLauncher" android:enabled="true"
+            android:exported="true" android:icon="@mipmap/ic_launcher"
+            android:targetActivity="net.digitalbc.leafreader.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.DarkLauncher" android:enabled="false"
+            android:exported="true" android:icon="@mipmap/ic_launcher_dark"
+            android:targetActivity="net.digitalbc.leafreader.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
     </application>
 </manifest>
