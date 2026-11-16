@@ -357,6 +357,7 @@ final class FirstLaunchOnboardingUITests: XCTestCase {
         let match = matches.firstMatch
         XCTAssertTrue(match.waitForExistence(timeout: 10))
         XCTAssertEqual(matches.count, 1, "The fixture must expose one distinct comic button")
+        XCTAssertEqual(match.label, "QA Creator Match, Jellyfin", "The decorative cover must not repeat the comic title")
         return match
     }
 
