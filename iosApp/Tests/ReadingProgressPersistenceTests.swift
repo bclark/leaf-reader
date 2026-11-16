@@ -21,6 +21,30 @@ struct ReadingProgressPersistenceTests {
         #expect(try ReadingProgress.savedSnapshot()[url.lastPathComponent] == ReadingProgress.get(url))
     }
 
+    @Test(.timeLimit(.minutes(1))) @MainActor
+    func backgroundOriginPublishesDefaultsOnMainAndFlushesBeforeReturning() async throws {
+        let url = URL(fileURLWithPath: "/Comics/" + UUID().uuidString + ".cbz")
+        defer { ReadingProgress.clear(url) }
+        let threads = PreferenceWriteThreads()
+        let token = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard, queue: nil) { _ in
+                if let saved = try? ReadingProgress.savedSnapshot(), saved[url.lastPathComponent] != nil {
+                    threads.record(Thread.isMainThread)
+                }
+            }
+        defer { NotificationCenter.default.removeObserver(token) }
+        try await Task.detached {
+            ReadingProgress.set(url, page: 2, step: -1, total: 5, rtl: true, completed: false)
+            ReadingProgress.setOpenedAt(url, timestamp: 1_234)
+            ReadingProgress.flushSync()
+            #expect(try ReadingProgress.savedSnapshot()[url.lastPathComponent] == ReadingProgress.get(url))
+            let data = try #require(UserDefaults.standard.data(forKey: "leaf.lastOpened.v1"))
+            #expect(try JSONDecoder().decode([String: Double].self, from: data)[url.lastPathComponent] == 1_234)
+        }.value
+        #expect(!threads.results.isEmpty)
+        #expect(threads.results.allSatisfy { $0 }, "Defaults callbacks must not contend with SwiftUI from the I/O queue")
+    }
+
     @Test func flushedProgressAndRecencyCannotBeOverwrittenByPendingSaves() async throws {
         let url = URL(fileURLWithPath: "/Comics/" + UUID().uuidString + ".cbz")
         defer { ReadingProgress.clear(url) }
@@ -60,4 +84,11 @@ private final class PreferenceReadbacks: @unchecked Sendable {
         let canRead = finished.wait(timeout: .now() + 1) == .success
         lock.lock(); recorded.append(canRead); lock.unlock()
     }
+}
+
+private final class PreferenceWriteThreads: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [Bool] = []
+    func record(_ onMain: Bool) { lock.withLock { values.append(onMain) } }
+    var results: [Bool] { lock.withLock { values } }
 }
