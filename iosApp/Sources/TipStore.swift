@@ -25,7 +25,18 @@ struct VerifiedTip {
     let productID: String
     let isConsumable: Bool
     let isRevoked: Bool
+    let purchaseDate: Date?
     let finish: () async -> Void
+
+    init(id: UInt64, productID: String, isConsumable: Bool, isRevoked: Bool,
+         purchaseDate: Date? = nil, finish: @escaping () async -> Void) {
+        self.id = id
+        self.productID = productID
+        self.isConsumable = isConsumable
+        self.isRevoked = isRevoked
+        self.purchaseDate = purchaseDate
+        self.finish = finish
+    }
 }
 
 enum TipVerification {
@@ -102,6 +113,7 @@ final class StoreKitTipClient: TipClient {
             id: transaction.id, productID: transaction.productID,
             isConsumable: transaction.productType == .consumable,
             isRevoked: transaction.revocationDate != nil,
+            purchaseDate: transaction.purchaseDate,
             finish: { await transaction.finish() }
         ))
     }
@@ -117,6 +129,7 @@ final class TipStore: ObservableObject {
     @Published private(set) var purchasingID: String?
     @Published private(set) var notice: Notice?
     @Published private(set) var pendingProductID: String?
+    let promptPolicy: TipPromptPolicy
 
     private let client: any TipClient
     private let defaults: UserDefaults
@@ -129,9 +142,11 @@ final class TipStore: ObservableObject {
     private var handledIDs: Set<UInt64> = []
     private var acknowledgedIDs: Set<UInt64> = []
 
-    init(client: (any TipClient)? = nil, defaults: UserDefaults = .standard) {
+    init(client: (any TipClient)? = nil, defaults: UserDefaults = .standard,
+         promptPolicy: TipPromptPolicy? = nil) {
         self.client = client ?? StoreKitTipClient()
         self.defaults = defaults
+        self.promptPolicy = promptPolicy ?? TipPromptPolicy(defaults: defaults)
         if let id = defaults.string(forKey: Self.pendingKey), TipCatalog.supportedIDs.contains(id) {
             pendingProductID = id
             notice = .pending
@@ -256,7 +271,7 @@ final class TipStore: ObservableObject {
         if purchasingID == transaction.productID { completedActivePurchase = true }
         let isNew = handledIDs.insert(transaction.id).inserted
         if !transaction.isRevoked, pendingProductID == transaction.productID { clearPending() }
-        // No entitlement, receipt storage, or durable side effect. Recovery stays quiet.
+        // No entitlement or receipt storage. Recovery stays quiet.
         if transaction.isRevoked {
             if notice == .thankYou { notice = nil }
         } else if acknowledge && (isNew || directPurchase),
@@ -268,6 +283,9 @@ final class TipStore: ObservableObject {
         guard handlingIDs.insert(transaction.id).inserted else { return }
         defer { handlingIDs.remove(transaction.id) }
         await transaction.finish()
+        if !transaction.isRevoked, let purchaseDate = transaction.purchaseDate {
+            promptPolicy.recordVerifiedTip(purchaseDate: purchaseDate)
+        }
     }
 
     private func clearPending() {
