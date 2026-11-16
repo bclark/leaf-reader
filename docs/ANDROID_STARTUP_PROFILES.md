@@ -16,7 +16,7 @@ adb -s "$R8_TEST_SERIAL" push /tmp/LeafR8Fixtures /sdcard/Download/
   -Pandroid.testInstrumentationRunnerArguments.leaf.qaFixtures=true
 ```
 
-Restrict connected-device selection when other devices are attached. With mergeIntoMain enabled, generation is aggregated, but the verified task graph contains only the two isolated profileQa flavor producers; no production app producer is configured. The test refuses to seed a nonempty library that lacks its synthetic fixtures. It imports the folder through Android's real SAF picker, using English test selectors, then exercises All, local Reader, a page turn, Continue and Library scrolling. No production automation hook, external server, authentication or private comic is involved. Setup happens outside measured blocks.
+Set `ANDROID_SERIAL="$R8_TEST_SERIAL"` for Gradle when other devices are attached. Verify fixture byte hashes after staging; on scoped-storage devices use MediaStore or the system Files UI rather than changing storage permissions. With mergeIntoMain enabled, generation is aggregated, but the verified task graph contains only the two isolated profileQa flavor producers; no production app producer is configured. The test refuses to seed a nonempty library that lacks its synthetic fixtures. It imports the folder through Android's real SAF picker, using English test selectors, then exercises All, local Reader, a page turn, Continue and Library scrolling. No production automation hook, external server, authentication or private comic is involved. Setup happens outside measured blocks.
 
 `startup` alone sets `includeInStartupProfile=true`. Reader/Continue/scroll collection is Baseline-only, preventing unrelated reading code from bloating startup DEX layout. Preserve the generated text, exact APK/maps/input identity and collection result. Confirm generated rules contain Leaf classes before committing them.
 
@@ -25,11 +25,13 @@ Restrict connected-device selection when other devices are attached. With mergeI
 Rebuild the minified benchmark APK with the generated profile, then run `StartupBenchmark` on a physical device in a serial native window. Compare ten cold-start iterations without compilation and with the Baseline Profile required; missing profiles must fail, not silently fall back. Five separate frame iterations cover Reader/Continue/Library.
 
 ```sh
-./gradlew :app:assembleFullProfileQa
+./gradlew :app:assembleFullBenchmarkProfileQa
 ./gradlew :macrobenchmark:connectedFullBenchmarkProfileQaAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=net.digitalbc.leafreader.macrobenchmark.StartupBenchmark \
   -Pandroid.testInstrumentationRunnerArguments.leaf.qaFixtures=true
 ```
+
+For the incremental Leaf-owned benefit, preserve a library-profile-only control APK before generation, then compare control and treatment with the same required-profile mode on the same populated QA install, preferably alternating A/B/A/B. None versus Require on the treatment alone includes existing dependency profiles and cannot isolate Leaf-owned gains. Preserve exact APK hashes, mappings, compilation configuration and iteration distributions; report inconclusive results honestly.
 
 Task names must be checked against the configured plugin variants with `:macrobenchmark:tasks --all`. Use only the isolated benchmark application ID. Retain Macrobenchmark JSON and Perfetto traces with device/OS, compilation mode, thermal/network/battery and fixture state. An emulator run validates the harness/profile generation; it does not establish physical startup performance. StartupTimingMetric reports initial display here; no app-owned fully-drawn signal is added.
 
