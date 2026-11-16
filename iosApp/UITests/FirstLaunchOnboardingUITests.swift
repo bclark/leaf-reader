@@ -295,4 +295,151 @@ final class FirstLaunchOnboardingUITests: XCTestCase {
         app.navigationBars.buttons["Done"].tap()
         XCTAssertTrue(app.segmentedControls["library.views"].waitForExistence(timeout: 5))
     }
+
+    private let cinematicWriter = "Alexandra Longname Example de la Biblioteca"
+    private let cinematicTitle = "QA A Very Long Comic Title for the Cinematic Detail Layout and Creator Navigation"
+
+    private func connectCinematicFixture() -> XCUIApplication {
+        let app = launch()
+        XCTAssertTrue(app.staticTexts["onboarding.welcomeTitle"].waitForExistence(timeout: 15))
+        app.buttons["onboarding.useJellyfin"].tap()
+        app.buttons["onboarding.connect"].tap()
+        let server = app.textFields["Server URL"]
+        XCTAssertTrue(server.waitForExistence(timeout: 5))
+        server.tap(); server.typeText("http://127.0.0.1:56823")
+        app.textFields["Username"].tap(); app.textFields["Username"].typeText("fixture")
+        app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("fixture")
+        let consent = app.switches["Allow unencrypted local HTTP"]
+        XCTAssertEqual(consent.value as? String, "0")
+        consent.switches.firstMatch.tap()
+        let signIn = app.buttons["Sign in"]
+        for _ in 0..<6 { if signIn.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(signIn.isEnabled && signIn.isHittable)
+        signIn.tap()
+        XCTAssertTrue(app.segmentedControls["library.views"].waitForExistence(timeout: 15))
+        return app
+    }
+
+    private func openCinematicFixture(_ app: XCUIApplication) {
+        let card = app.buttons["library.continue"].firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        XCTAssertTrue(card.label.contains(cinematicTitle))
+        card.tap()
+        XCTAssertTrue(app.scrollViews.staticTexts[cinematicTitle].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.otherElements["ReaderCanvas"].exists)
+    }
+
+    private func revealDetailControl(_ control: XCUIElement, _ app: XCUIApplication) {
+        let scroll = app.scrollViews.firstMatch
+        for _ in 0..<12 {
+            let viewport = scroll.frame.intersection(app.frame)
+            if control.exists && control.isHittable && viewport.insetBy(dx: -1, dy: -1).contains(control.frame) { return }
+            if control.exists && control.frame.minY < viewport.minY { scroll.swipeDown() }
+            else { scroll.swipeUp() }
+        }
+        XCTFail("Detail control must fit fully inside the scroll viewport")
+    }
+
+    private func finishCinematicFixture(_ app: XCUIApplication) {
+        app.terminate()
+        let english = launch()
+        XCTAssertTrue(english.segmentedControls["library.views"].waitForExistence(timeout: 10))
+        disconnectFixture(english)
+    }
+
+    func testCinematicCreditsCreatorBackAndMissingMetadata() {
+        let app = connectCinematicFixture()
+        openCinematicFixture(app)
+        let writer = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", cinematicWriter)).firstMatch
+        revealDetailControl(writer, app)
+        XCTAssertGreaterThanOrEqual(writer.frame.height, 44)
+        XCTAssertTrue(writer.label.contains("Writer"))
+        let savedY = writer.frame.minY
+        capture("cinematic-long-credit-and-title", app: app)
+        writer.tap()
+        let match = app.staticTexts["QA Creator Match"]
+        XCTAssertTrue(match.waitForExistence(timeout: 10))
+        capture("cinematic-creator-results", app: app)
+        match.tap()
+        XCTAssertTrue(app.navigationBars["QA Creator Match"].waitForExistence(timeout: 10))
+        let read = app.buttons["Read"]
+        revealDetailControl(read, app)
+        XCTAssertGreaterThanOrEqual(read.frame.height, 44)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Find comics by ")).firstMatch.exists)
+        capture("cinematic-missing-cover-and-credits", app: app)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(match.waitForExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(writer.waitForExistence(timeout: 5))
+        XCTAssertEqual(writer.frame.minY, savedY, accuracy: 8)
+        capture("cinematic-back-restores-detail-position", app: app)
+        finishCinematicFixture(app)
+    }
+
+    func testSpanishCinematicCreditRolesAreLocalized() {
+        let initial = connectCinematicFixture()
+        initial.terminate()
+        let app = launch(theme: "dark", largeText: true, spanish: true)
+        openCinematicFixture(app)
+        let writer = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", cinematicWriter)).firstMatch
+        revealDetailControl(writer, app)
+        capture("cinematic-spanish-large-credit", app: app)
+        XCTAssertTrue(app.staticTexts["Guionista"].exists)
+        XCTAssertTrue(writer.label.contains("Guionista"))
+        XCTAssertGreaterThanOrEqual(writer.frame.height, 44)
+        let artist = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Jordan Example")).firstMatch
+        revealDetailControl(artist, app)
+        XCTAssertTrue(artist.label.contains("Artista"))
+        capture("cinematic-spanish-large-second-role", app: app)
+        let read = app.buttons["Leer"]
+        revealDetailControl(read, app)
+        XCTAssertGreaterThanOrEqual(read.frame.height, 44)
+        finishCinematicFixture(app)
+    }
+
+    func testCachedCinematicDetailsAndCreatorErrorsCanRetry() {
+        let app = connectCinematicFixture()
+        openCinematicFixture(app)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.terminate(); app.launch()
+        openCinematicFixture(app)
+        let saved = app.staticTexts["Saved details. Connect to refresh."]
+        XCTAssertTrue(saved.waitForExistence(timeout: 5))
+        let error = app.staticTexts["Jellyfin could not complete the request. Try again later."]
+        XCTAssertTrue(error.waitForExistence(timeout: 5))
+        let retry = app.buttons["Retry"]
+        revealDetailControl(retry, app)
+        capture("cinematic-cached-details-error", app: app)
+        retry.tap()
+        XCTAssertTrue(error.waitForNonExistence(timeout: 5))
+        let writer = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", cinematicWriter)).firstMatch
+        revealDetailControl(writer, app)
+        writer.tap()
+        XCTAssertTrue(error.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["No comics by this creator in this library."].exists)
+        capture("cinematic-creator-failure-is-not-empty", app: app)
+        app.buttons["Retry"].tap()
+        XCTAssertTrue(app.staticTexts["QA Creator Match"].waitForExistence(timeout: 10))
+        capture("cinematic-creator-retry-success", app: app)
+        finishCinematicFixture(app)
+    }
+
+
+    func testNativePickerAccessibilityDiagnostic() {
+        let app = launch()
+        XCTAssertTrue(app.staticTexts["onboarding.welcomeTitle"].waitForExistence(timeout: 15))
+        app.buttons["onboarding.chooseFile"].tap()
+        let ready = app.buttons["Cancel"].waitForExistence(timeout: 5)
+        let timing = XCTAttachment(string: "Original five-second Cancel selector exists=\(ready). Diagnostic collection is not picker acceptance.")
+        timing.name = "native-picker-selector-observation"; timing.lifetime = .keepAlways; add(timing)
+        let screen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screen.name = "native-picker-full-owned-screen"; screen.lifetime = .keepAlways; add(screen)
+        for bundle in ["net.digitalbc.leafreader", "com.apple.DocumentsApp", "com.apple.springboard"] {
+            let application = XCUIApplication(bundleIdentifier: bundle)
+            let hierarchy = XCTAttachment(string: application.debugDescription)
+            hierarchy.name = "native-picker-accessibility-" + bundle
+            hierarchy.lifetime = .keepAlways; add(hierarchy)
+        }
+    }
+
 }
