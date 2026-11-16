@@ -7,6 +7,7 @@ struct JellyfinBrowserView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @StateObject var model = JellyfinBrowserModel()
+    var onConnected: (@MainActor () -> Void)? = nil
     @State private var server = ""
     @State private var username = ""
     @State private var password = ""
@@ -31,7 +32,8 @@ struct JellyfinBrowserView: View {
                         Text("HTTP exposes your password, token, and comics to others on the network. Use only with a trusted local server.")
                             .font(.footnote).foregroundStyle(.secondary)
                         Button("Sign in") {
-                            model.signIn(url: server, username: username, password: password, allowHTTP: allowHTTP)
+                            model.signIn(url: server, username: username, password: password, allowHTTP: allowHTTP,
+                                onSuccess: onConnected)
                             password = ""
                         }
                         .disabled(model.busy || username.isEmpty || password.isEmpty)

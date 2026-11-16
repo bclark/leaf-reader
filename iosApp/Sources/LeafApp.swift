@@ -3,8 +3,14 @@ import SwiftUI
 @main
 struct LeafApp: App {
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var tips = TipStore()
-    @StateObject private var settings = LeafSettings()
+    @StateObject private var tips: TipStore
+    @StateObject private var settings: LeafSettings
+
+    init() {
+        FirstLaunchOnboarding.prepare()
+        _tips = StateObject(wrappedValue: TipStore())
+        _settings = StateObject(wrappedValue: LeafSettings())
+    }
 
     private var observesPurchases: Bool {
         let environment = ProcessInfo.processInfo.environment
