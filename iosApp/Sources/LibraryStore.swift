@@ -58,10 +58,12 @@ final class LibraryStore: ObservableObject {
     }
 
     /// File-picker entry point; the async operation holds security scope through copying.
-    func importComic(from url: URL) {
+    @discardableResult
+    func importComic(from url: URL, onSuccess: @escaping @MainActor (URL) -> Void = { _ in }) -> Task<Void, Never> {
         Task {
             do {
-                _ = try await importComicAwaitingCompletion(from: url, collision: .replace)
+                let published = try await importComicAwaitingCompletion(from: url, collision: .replace)
+                onSuccess(published)
             } catch is CancellationError {
                 // Cancellation is not a failed comic.
             } catch {

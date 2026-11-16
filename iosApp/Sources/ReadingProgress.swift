@@ -73,7 +73,9 @@ enum ReadingProgress {
     private static let defaults = UserDefaults.standard
 
     private static let lock = NSLock()
-    private static let ioQueue = DispatchQueue(label: "leaf.readingprogress.io", qos: .utility)
+    // Defaults observers can synchronously enter SwiftUI. Keeping publication on main
+    // prevents a UI callback's synchronous flush from waiting on that same UI lock.
+    private static let persistenceQueue = DispatchQueue.main
     private static var inMemoryProgress: [String: Progress]?
     private static var inMemoryOpened: [String: Double]?
     private static var saveWorkItem: DispatchWorkItem?
@@ -123,7 +125,7 @@ enum ReadingProgress {
         let item = DispatchWorkItem { persistCurrentSnapshot() }
         saveWorkItem = item
         lock.unlock()
-        ioQueue.asyncAfter(deadline: .now() + 0.08, execute: item)
+        persistenceQueue.asyncAfter(deadline: .now() + 0.08, execute: item)
     }
 
     /// Force synchronous flush of any pending writes to disk on app exit or backgrounding.
@@ -133,14 +135,15 @@ enum ReadingProgress {
         saveWorkItem = nil
         lock.unlock()
 
-        // Drain prior writes without holding the lock needed by preference observers.
-        ioQueue.sync {
+        let write = {
             persistCurrentSnapshot()
             defaults.synchronize()
         }
+        if Thread.isMainThread { write() }
+        else { persistenceQueue.sync(execute: write) }
     }
 
-    /// Called only on ioQueue. Read the latest maps when a write executes, so an older
+    /// Called only on main. Read the latest maps when a write executes, so an older
     /// queued save cannot overwrite a newer flush. Defaults callbacks may read progress.
     private static func persistCurrentSnapshot() {
         lock.lock()
@@ -260,7 +263,7 @@ enum ReadingProgress {
         if inMemoryOpened == nil { _ = inMemoryOpenedLocked() }
         inMemoryOpened?[url.lastPathComponent] = Date().timeIntervalSince1970
         lock.unlock()
-        ioQueue.async { persistCurrentSnapshot() }
+        persistenceQueue.async { persistCurrentSnapshot() }
     }
 
     /// Sets explicit last-opened timestamp (e.g. when restoring from backup).
@@ -270,7 +273,7 @@ enum ReadingProgress {
         if inMemoryOpened == nil { _ = inMemoryOpenedLocked() }
         inMemoryOpened?[url.lastPathComponent] = timestamp
         lock.unlock()
-        ioQueue.async { persistCurrentSnapshot() }
+        persistenceQueue.async { persistCurrentSnapshot() }
     }
 
     /// Last-opened timestamp for a comic (0 if never opened) — the library sort key.
