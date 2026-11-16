@@ -46,6 +46,7 @@ internal class LeafJourneys(private val device: UiDevice) {
         assertTrue("Fixture import did not finish; push the generated folder into Downloads first",
             device.wait(Until.hasObject(fixture), 90_000))
         assertTrue("Fixture import is still running", device.wait(Until.gone(By.desc("Cancel import")), 90_000))
+        device.wait(Until.findObject(By.text(Pattern.compile("ALL", Pattern.CASE_INSENSITIVE))), 5_000)?.click()
         device.waitForIdle()
     }
 
