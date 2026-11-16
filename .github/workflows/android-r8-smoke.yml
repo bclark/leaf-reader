@@ -1,0 +1,65 @@
+name: Android minified smoke
+
+# Called by existing CI/release workflows; no new push, schedule or dispatch trigger.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  minified-smoke:
+    name: Minified ${{ matrix.flavor }} runtime
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [full, fdroid]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.1.0'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: JVM regressions and minified artifacts
+        env:
+          FLAVOR: ${{ matrix.flavor }}
+        run: |
+          case "$FLAVOR" in full) VARIANT=Full ;; fdroid) VARIANT=Fdroid ;; *) exit 1 ;; esac
+          ./gradlew :shared:jvmTest \
+            ":app:test${VARIANT}DebugUnitTest" \
+            ":app:assemble${VARIANT}Release" \
+            ":app:assemble${VARIANT}Performance" \
+            ":r8smoke:assemble${VARIANT}Performance" --stacktrace
+          python3 scripts/r8-smoke-probes.py "app/build/outputs/mapping/${FLAVOR}Release/mapping.txt"
+      - name: Minified emulator smoke
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          FLAVOR: ${{ matrix.flavor }}
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: false
+          script: |
+            case "$FLAVOR" in full) VARIANT=Full ;; fdroid) VARIANT=Fdroid ;; *) exit 1 ;; esac
+            ./gradlew ":r8smoke:connected${VARIANT}PerformanceAndroidTest" --stacktrace
+      - name: Preserve minified evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-r8-${{ matrix.flavor }}
+          path: |
+            app/build/outputs/mapping/
+            app/build/outputs/apk/
+            app/build/test-results/
+            shared/build/test-results/
+            r8smoke/build/outputs/mapping/
+            r8smoke/build/outputs/apk/
+            r8smoke/build/outputs/androidTest-results/
+            r8smoke/build/reports/
+          if-no-files-found: warn
