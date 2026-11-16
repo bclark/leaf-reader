@@ -3,7 +3,7 @@ import SwiftUI
 /// View selection and the unread predicate are independent for the entire Library journey.
 struct LibraryBrowseState {
     enum ViewMode: String, CaseIterable, Identifiable {
-        case all, series, lists, offline
+        case series, lists, all, offline
         var id: String { rawValue }
         var title: LocalizedStringKey {
             switch self {
@@ -31,7 +31,7 @@ struct LibraryBrowseState {
         }
     }
 
-    var view: ViewMode = .all
+    var view: ViewMode = .series
     var unreadOnly = false
     private(set) var hasChosenView = false
     private var handledLaunchFailure = false
@@ -75,6 +75,7 @@ struct LibraryBrowseState {
 
 struct LibraryViewSelector: View {
     @Binding var selection: LibraryBrowseState.ViewMode
+    var onBrand = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -85,7 +86,7 @@ struct LibraryViewSelector: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("library.views")
             } else {
-                LibrarySegmentedControl(selection: $selection, typeSize: typeSize)
+                LibrarySegmentedControl(selection: $selection, typeSize: typeSize, onBrand: onBrand)
             }
         }
         .tint(Leaf.goldText)
@@ -105,6 +106,7 @@ private struct LibrarySegmentedControl: UIViewRepresentable {
     @Binding var selection: LibraryBrowseState.ViewMode
     /// Read so a text-size change re-runs `updateUIView` and rescales the titles.
     let typeSize: DynamicTypeSize
+    let onBrand: Bool
 
     private static let height: CGFloat = 48
     private static let modes = LibraryBrowseState.ViewMode.allCases
@@ -135,10 +137,14 @@ private struct LibrarySegmentedControl: UIViewRepresentable {
 
     func updateUIView(_ control: UISegmentedControl, context: Context) {
         context.coordinator.selection = $selection
+        control.backgroundColor = onBrand ? UIColor(Color(hex: 0x122519)) : UIColor(Leaf.raisedSurface)
+        control.selectedSegmentTintColor = onBrand ? UIColor(Color(hex: 0x4A7C59)) : UIColor { traits in
+            UIColor(Self.hex(traits.userInterfaceStyle == .dark ? 0x4A7C59 : 0x1C3A27))
+        }
         let index = Self.modes.firstIndex(of: selection) ?? 0
         if control.selectedSegmentIndex != index { control.selectedSegmentIndex = index }
         control.setTitleTextAttributes([
-            .foregroundColor: UIColor(Leaf.text), .font: Self.font(weight: 500),
+            .foregroundColor: UIColor(onBrand ? Leaf.paperWhite : Leaf.text), .font: Self.font(weight: 500),
         ], for: .normal)
         control.setTitleTextAttributes([
             .foregroundColor: UIColor(Leaf.paperWhite), .font: Self.font(weight: 700),
@@ -232,87 +238,9 @@ extension View {
     }
 }
 
-/// Resume card for the most recently opened unfinished comic, shown at the top of the library.
-struct ContinueReadingCard: View {
-    @ObservedObject private var covers = CoverLoader.shared
-    @EnvironmentObject private var settings: LeafSettings
-    @Environment(\.dynamicTypeSize) private var typeSize
-    let url: URL
-    let progress: Progress
-    let open: () -> Void
-    @State private var cover: UIImage?
-
-    private var title: String { ComicMetadataStore.displayFilename(for: url) }
-
-    var body: some View {
-        Button(action: open) {
-            let layout = typeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
-                : AnyLayout(HStackLayout(alignment: .top, spacing: 14))
-            layout {
-                Group {
-                    if let cover {
-                        LibraryCoverArtwork(image: cover)
-                    } else {
-                        GeneratedCover(title: title, columns: 4)
-                    }
-                }
-                .frame(width: 92, height: 131)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Continue reading")
-                        .textCase(.uppercase)
-                        .leafControlFont(11, weight: 700)
-                        .tracking(0.8)
-                        .foregroundColor(Leaf.goldText)
-                    Text(title)
-                        .font(.custom("Anton-Regular", size: 22, relativeTo: .title3))
-                        .foregroundColor(Leaf.text)
-                        .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                        .multilineTextAlignment(.leading)
-                    Text("Page \(progress.page + 1) of \(progress.total)")
-                        .leafControlFont(13, weight: 500)
-                        .foregroundColor(Leaf.secondaryText)
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            // Ink disappears on the AMOLED raised surface; this track shows in every theme.
-                            Capsule().fill(Leaf.secondaryText.opacity(0.35))
-                            // Same reading as the grid card: pages reached out of the total.
-                            Capsule().fill(Leaf.ochre).frame(width: geo.size.width
-                                * CGFloat(min(max(Double(progress.page + 1) / Double(max(progress.total, 1)), 0), 1)))
-                        }
-                    }
-                    .frame(height: 4)
-                    .padding(.top, 4)
-                    Spacer(minLength: 8)
-                    HStack(spacing: 8) {
-                        Image(systemName: "book").font(.system(size: 17, weight: .semibold))
-                        Text("Continue").leafControlFont(16, weight: 700)
-                    }
-                    .foregroundColor(Leaf.ink)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(Leaf.ochre, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-                .frame(minHeight: typeSize.isAccessibilitySize ? nil : 131, alignment: .top)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(settings.groundSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Leaf.text.opacity(0.12), lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("library.continue")
-        .task(id: covers.revisions(for: [url])) {
-            cover = await CoverLoader.load(for: url).cover
-        }
-    }
-}
-
 /// First-run library with no comics and no Jellyfin connection.
 struct EmptyLibraryView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let importing: Bool
     let add: () -> Void
     let connect: () -> Void
@@ -336,19 +264,20 @@ struct EmptyLibraryView: View {
                     .foregroundColor(Leaf.secondaryText)
             }
             VStack(spacing: 12) {
-                Button(action: add) {
+                Button { if !importing { add() } } label: {
                     HStack(spacing: 10) {
                         if importing {
                             ProgressView().tint(Leaf.ink)
                         } else {
                             Image(systemName: "plus").font(.system(size: 17, weight: .bold))
                         }
-                        Text("Add Comics").leafControlFont(17, weight: 700)
+                        Text("Add comics").leafControlFont(17, weight: 700)
                     }
                     .foregroundColor(Leaf.ink)
                     .frame(maxWidth: .infinity, minHeight: 52)
                     .background(Leaf.ochre, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
+                .disabled(importing)
                 .accessibilityIdentifier("library.empty.add")
                 Button(action: connect) {
                     HStack(spacing: 10) {
@@ -357,7 +286,8 @@ struct EmptyLibraryView: View {
                     }
                     .foregroundColor(Leaf.paperWhite)
                     .frame(maxWidth: .infinity, minHeight: 52)
-                    .background(Leaf.leafSecondary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(colorScheme == .dark ? Leaf.leafSecondary : Leaf.leafPrimary,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .accessibilityIdentifier("library.empty.connect")
             }

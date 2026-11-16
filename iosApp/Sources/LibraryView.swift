@@ -22,7 +22,8 @@ struct LibraryView: View {
     @StateObject private var library = LibraryStore()
     @StateObject private var jellyfin = JellyfinBrowserModel()
     @StateObject private var catalogue = JellyfinCatalogueModel()
-    @AppStorage("leaf.jellyfin.onboardingChosen") private var onboardingChosen = false
+    @StateObject private var onboarding = FirstLaunchOnboarding()
+    @State private var onboardingFocusRequest = 0
     @State private var browse = LibraryBrowseState()
     @State private var offlineComics: Set<URL> = []
     @State private var offlineRevisions: Set<CoverLoader.Revision> = []
@@ -89,15 +90,35 @@ struct LibraryView: View {
         offlineRevisions == Set(covers.revisions(for: library.comics)) ? offlineComics : []
     }
 
-    /// Most recently opened comic that is started but not finished.
-    private var continueComic: (url: URL, progress: Progress)? {
-        library.comics
-            .compactMap { url -> (url: URL, progress: Progress)? in
-                guard let progress = ReadingProgress.get(url), progress.page > 0, !progress.isCompleted,
-                      !downloadedOnly || readableOfflineComics.contains(url) else { return nil }
-                return (url, progress)
-            }
-            .max { ReadingProgress.openedAt($0.url) < ReadingProgress.openedAt($1.url) }
+    @State private var readableContinue: Set<URL> = []
+    @State private var continueRevisions: [CoverLoader.Revision] = []
+
+    private var localContinue: [LibraryContinueItem.Local] {
+        library.comics.compactMap { url in
+            ReadingProgress.get(url).map { .init(url: url, progress: $0, openedAt: ReadingProgress.openedAt(url)) }
+        }
+    }
+
+    private var remoteContinueAvailable: Bool {
+        !downloadedOnly && catalogue.isCurrent(for: jellyfin.connection) && jellyfin.client != nil && !jellyfin.needsSignIn
+            && !catalogue.fromCache && !catalogue.unreachable && !catalogue.unavailable && !catalogue.requiresSignIn
+    }
+
+    private var continueItems: [LibraryContinueItem] {
+        let revisions = covers.revisions(for: library.comics)
+        return LibraryContinueItem.ranked(local: continueRevisions == revisions
+            ? localContinue.filter { readableContinue.contains($0.url) } : [],
+            remote: catalogue.books, downloadedIDs: Set(jellyfin.downloaded.keys),
+            remoteAvailable: remoteContinueAvailable)
+    }
+
+    private func resume(_ item: LibraryContinueItem) {
+        if let url = item.url {
+            openComic = OpenComic(url: url)
+        } else if remoteContinueAvailable, let book = item.book {
+            remoteBook = book
+            showRemoteDetail = true
+        }
     }
 
     /// Nothing local and no server: the empty state replaces the grid, tile and onboarding card.
@@ -129,7 +150,70 @@ struct LibraryView: View {
     }
 
     var body: some View {
+        Group {
+            if onboarding.isComplete {
+                libraryNavigation
+            } else {
+                FirstLaunchOnboardingView(onboarding: onboarding, busy: library.importing,
+                    focusRequest: onboardingFocusRequest,
+                    chooseFile: { showPicker = true }, connect: { showJellyfinBrowser = true })
+            }
+        }
+        .environment(\.tipPromptAllowed, !isEditMode && !isSearchOpen && !showMenu
+            && !showPicker && !showImportSource && !showSmbBrowser && !showJellyfinBrowser)
+        .sheet(isPresented: $showJellyfinBrowser, onDismiss: {
+            onboardingFocusRequest += 1
+            Task {
+                await catalogue.start(browser: jellyfin, force: true)
+                await jellyfin.restoreDownloads(library: library)
+            }
+        }) {
+            JellyfinBrowserView(model: jellyfin, onConnected: {
+                guard !onboarding.isComplete, showJellyfinBrowser else { return }
+                onboarding.finish()
+                showJellyfinBrowser = false
+            }).environmentObject(library)
+        }
+        .fileImporter(isPresented: $showPicker, allowedContentTypes: LibraryStore.importableTypes,
+            allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls):
+                urls.forEach { url in
+                    library.importComic(from: url) { _ in onboarding.finish() }
+                }
+            case .failure(let error):
+                if (error as? CocoaError)?.code != .userCancelled { library.importError = error.localizedDescription }
+            }
+        }
+        .onChange(of: showPicker) { presented in if !presented { onboardingFocusRequest += 1 } }
+        .onChange(of: library.importing) { busy in if !busy { onboardingFocusRequest += 1 } }
+        .alert("Import failed", isPresented: Binding(
+            get: { library.importError != nil },
+            set: { if !$0 {
+                // Native presentation bindings can clear during a view update.
+                // Publish the observed error change after that update completes.
+                let dismissedError = library.importError
+                DispatchQueue.main.async {
+                    if library.importError == dismissedError { library.importError = nil }
+                    onboardingFocusRequest += 1
+                }
+            } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(library.importError ?? "")
+        }
+        .task {
+            await jellyfin.restoreDownloads(library: library)
+            await catalogue.start(browser: jellyfin)
+            if catalogue.unreachable { browse.handleUnreachableLaunch() }
+            browse.finishLaunchCheck()
+        }
+    }
+
+    private var libraryNavigation: some View {
         NavigationStack {
+            GeometryReader { window in
             ZStack(alignment: .bottom) {
                 settings.ground.ignoresSafeArea()
                 Halftone(color: Leaf.crimson, alpha: 0.05).ignoresSafeArea()
@@ -142,14 +226,13 @@ struct LibraryView: View {
                     .allowsHitTesting(false)
 
                 VStack(spacing: 0) {
-                    appBar
+                    appBar(wide: window.size.width >= 840 && dynamicTypeSize < .xxxLarge)
                     if !isEditMode {
-                        filterBar
+                        if window.size.width < 840 || dynamicTypeSize >= .xxxLarge { filterBar }
                         HStack(spacing: 8) {
-                            if !showsRemote && !library.comics.isEmpty { libraryEditActions }
                             UnreadFilterChip(isOn: $browse.unreadOnly) { unreadButtonFocused = true }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                         .padding(.horizontal, 18)
                     }
                     GeometryReader { geo in
@@ -162,6 +245,7 @@ struct LibraryView: View {
                 if isEditMode {
                     editActionBar
                 }
+            }
             }
             .navigationBarHidden(true)
             .comicReaderPresentation(item: $openComic, namespace: coverTransition) {
@@ -201,14 +285,6 @@ struct LibraryView: View {
                 Button("From SMB Drive") { showSmbBrowser = true }
                 Button("From Jellyfin") { showJellyfinBrowser = true }
             }
-            .sheet(isPresented: $showJellyfinBrowser, onDismiss: {
-                Task {
-                    await catalogue.start(browser: jellyfin, force: true)
-                    await jellyfin.restoreDownloads(library: library)
-                }
-            }) {
-                JellyfinBrowserView(model: jellyfin).environmentObject(library)
-            }
             .navigationDestination(isPresented: $showRemoteDetail) {
                 if let remoteBook {
                     JellyfinDetailView(item: remoteBook, model: jellyfin,
@@ -222,12 +298,6 @@ struct LibraryView: View {
                         downloadedOnly: downloadedOnly, unreadOnly: $browse.unreadOnly, searchQuery: searchQuery)
                         .environmentObject(library)
                 }
-            }
-            .task {
-                await jellyfin.restoreDownloads(library: library)
-                await catalogue.start(browser: jellyfin)
-                if catalogue.unreachable { browse.handleUnreachableLaunch() }
-                browse.finishLaunchCheck()
             }
             .onChange(of: openComic?.url) { comic in
                 if comic != nil { searchFieldFocused = false; searchFieldAccessibilityFocused = false }
@@ -253,16 +323,6 @@ struct LibraryView: View {
             .sheet(isPresented: $showSmbBrowser) {
                 SmbBrowserView().environmentObject(library)
             }
-            .fileImporter(
-                isPresented: $showPicker,
-                allowedContentTypes: LibraryStore.importableTypes,
-                allowsMultipleSelection: true
-            ) { result in
-                switch result {
-                case .success(let urls): urls.forEach(library.importComic)
-                case .failure(let error): library.importError = error.localizedDescription
-                }
-            }
             .sheet(isPresented: $showSetSeriesSheet) {
                 setSeriesSheet.leafAppearance(settings.theme)
             }
@@ -281,14 +341,6 @@ struct LibraryView: View {
                 }
             }) {
                 createListSheet.leafAppearance(settings.theme)
-            }
-            .alert("Import failed", isPresented: Binding(
-                get: { library.importError != nil },
-                set: { if !$0 { library.importError = nil } }
-            )) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(library.importError ?? "")
             }
             .alert("Remove comic?", isPresented: Binding(
                 get: { pendingDelete != nil },
@@ -336,11 +388,13 @@ struct LibraryView: View {
     }
 
     // Top App Bar
-    private var appBar: some View {
+    private func appBar(wide: Bool) -> some View {
         VStack(spacing: 10) {
             HStack(alignment: .center) {
                 LeafWordmark()
-                Spacer()
+                Spacer(minLength: 12)
+                if wide && !isEditMode { viewSelector(onBrand: true).frame(maxWidth: 440) }
+                Spacer(minLength: wide ? 12 : 0)
                 HStack(spacing: 4) {
                     UnreadFilterButton(isOn: $browse.unreadOnly, onBrand: true)
                         .accessibilityFocused($unreadButtonFocused)
@@ -367,7 +421,12 @@ struct LibraryView: View {
                     .accessibilityLabel(isSearchOpen ? Text("Close") : Text("SEARCH COMICS, SERIES OR LISTS…"))
                     .accessibilityFocused($searchButtonFocused)
 
-                    Button { showMenu = true } label: {
+                    Menu {
+                        Button("Select comics") { isEditMode = true; selectedComics = [] }
+                            .disabled(library.comics.isEmpty || showsRemote || isEditMode)
+                        Divider()
+                        Button("Settings and more") { showMenu = true }
+                    } label: {
                         Image(systemName: "line.3.horizontal")
                             .font(.system(size: 18, weight: .bold))
                             .foregroundColor(Leaf.paperWhite)
@@ -435,14 +494,18 @@ struct LibraryView: View {
     }
 
     private var filterBar: some View {
+        viewSelector(onBrand: false)
+            .padding(.horizontal, 18)
+            .padding(.top, 4)
+    }
+
+    private func viewSelector(onBrand: Bool) -> some View {
         LibraryViewSelector(selection: Binding(get: { browse.view }, set: { view in
             guard view != browse.view else { return }
             pendingScrollTarget = scrollPositions[view] ?? (view.rawValue + ":top", .top)
             restoringView = view
             browse.select(view)
-        }))
-            .padding(.horizontal, 18)
-            .padding(.top, 4)
+        }), onBrand: onBrand)
     }
 
     // Android leads the visual hierarchy; reflow preserves iOS accessibility.
@@ -554,26 +617,10 @@ struct LibraryView: View {
                     if downloadedOnly && checkingOffline { ProgressView("Checking local comics…").padding() }
 
                     if showsEmptyLibrary {
-                        EmptyLibraryView(importing: library.importing, add: {
-                            onboardingChosen = true
-                            showImportSource = true
-                        }, connect: {
-                            onboardingChosen = true
-                            showJellyfinBrowser = true
-                        })
-                    } else if jellyfin.connection == nil && !onboardingChosen {
-                        JellyfinOnboardingCard(connect: {
-                            onboardingChosen = true
-                            showJellyfinBrowser = true
-                        }, skip: { onboardingChosen = true })
+                        EmptyLibraryView(importing: library.importing, add: { showImportSource = true },
+                            connect: { showJellyfinBrowser = true })
                     }
-                    if let resume = continueComic, !isEditMode, searchQuery.isEmpty {
-                        ContinueReadingCard(url: resume.url, progress: resume.progress) {
-                            openComic = OpenComic(url: resume.url)
-                        }
-                        .padding(.horizontal, 18)
-                        .padding(.top, 12)
-                    }
+                    if !isEditMode && !isSearchOpen { continueSection(wide: UIDevice.current.userInterfaceIdiom == .pad && width >= 600) }
                     if jellyfin.connection != nil {
                         JellyfinCatalogueStatus(catalogue: catalogue, browser: jellyfin,
                             connect: { showJellyfinBrowser = true })
@@ -791,12 +838,56 @@ struct LibraryView: View {
         }
     }
 
+    private func continueSection(wide: Bool) -> some View {
+        let limit = wide ? 5 : 1
+        let entries = Array(continueItems.prefix(limit))
+        return VStack(alignment: .leading, spacing: 8) {
+            if !entries.isEmpty {
+                if wide {
+                    Text("Continue reading").textCase(.uppercase)
+                        .leafControlFont(11, weight: 700).tracking(0.8).foregroundColor(Leaf.goldText)
+                        .accessibilityAddTraits(.isHeader)
+                        .padding(.horizontal, 18)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 12) {
+                            ForEach(entries) { entry in continueCard(entry, wide: true).frame(width: 340) }
+                        }.padding(.horizontal, 18)
+                    }
+                } else {
+                    ForEach(entries) { entry in continueCard(entry, wide: false).padding(.horizontal, 18) }
+                }
+            }
+        }
+        .padding(.top, entries.isEmpty ? 0 : 12)
+        .task(id: "\(limit):\(covers.revisions(for: library.comics)):\(localContinue.map { "\($0.url.lastPathComponent):\($0.openedAt):\($0.progress)" })") {
+            let revisions = covers.revisions(for: library.comics)
+            let sorted = LibraryContinueItem.ranked(local: localContinue, remote: [], downloadedIDs: [], remoteAvailable: false)
+            var readable: Set<URL> = []
+            for item in sorted {
+                guard !Task.isCancelled, let url = item.url else { return }
+                let loaded = await CoverLoader.load(for: url)
+                guard !Task.isCancelled else { return }
+                if loaded.pageCount > 0 && loaded.cover != nil { readable.insert(url) }
+                if readable.count >= limit { break }
+            }
+            guard !Task.isCancelled, covers.revisions(for: library.comics) == revisions else { return }
+            readableContinue = readable
+            continueRevisions = revisions
+        }
+    }
+
+    private func continueCard(_ item: LibraryContinueItem, wide: Bool) -> some View {
+        ContinueReadingCard(item: item, client: jellyfin.client, profileID: jellyfin.connection?.id,
+            wide: wide, open: { resume(item) })
+    }
+
     @ViewBuilder
     private var libraryPrimaryAction: some View {
         if !isEditMode && !showsEmptyLibrary {
             HStack {
                 Spacer()
                 Button {
+                    guard selectedFilter == .readingLists || !library.importing else { return }
                     if selectedFilter == .readingLists {
                         newListNameInput = ""
                         showCreateListSheet = true
@@ -809,7 +900,7 @@ struct LibraryView: View {
                             Image(systemName: "plus")
                                 .font(.system(size: primaryActionTextSize, weight: .bold))
                         }
-                        Text(selectedFilter == .readingLists ? "Create Reading List" : "Add Comics")
+                        Text(selectedFilter == .readingLists ? "Create Reading List" : "Add comics")
                             .font(.archivo(primaryActionTextSize, weight: 700))
                     }
                     .foregroundColor(Leaf.ink)
@@ -821,7 +912,8 @@ struct LibraryView: View {
                     .comicShadow(offset: 3, color: .black.opacity(0.75), corner: 12)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(selectedFilter == .readingLists ? Text("Create Reading List") : Text("Add Comics"))
+                .accessibilityLabel(selectedFilter == .readingLists ? Text("Create Reading List") : Text("Add comics"))
+                .disabled(library.importing && selectedFilter != .readingLists)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 20)

@@ -3,13 +3,40 @@ import UIKit
 
 /// Runs only on task-owned simulators seeded with synthetic local files and lists.
 final class LibraryHeaderUITests: XCTestCase {
-    private func launch(theme: String = "light", largeText: Bool = false, spanish: Bool = false) -> XCUIApplication {
+    private func launch(theme: String = "light", largeText: Bool = false, spanish: Bool = false,
+                        selectAll: Bool = true) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-leaf.jellyfin.onboardingChosen", "YES", "-leaf.appTheme", theme,
             "-AppleLanguages", spanish ? "(es-MX)" : "(en)", "-AppleLocale", spanish ? "es_MX" : "en_US"]
         if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
         app.launch()
+        // Arrangement/grid regressions explicitly choose All; production cold launch remains Series.
+        if selectAll && !largeText && !spanish {
+            let views = app.segmentedControls["library.views"]
+            XCTAssertTrue(views.waitForExistence(timeout: 15))
+            views.buttons["All"].tap()
+        }
         return app
+    }
+
+    func testSeriesColdDefaultOrderAndInSessionSelection() {
+        continueAfterFailure = false
+        let app = launch(selectAll: false)
+        let views = app.segmentedControls["library.views"]
+        XCTAssertTrue(views.waitForExistence(timeout: 15))
+        XCTAssertTrue(views.buttons["Series"].isSelected)
+        let order = ["Series", "Lists", "All", "Offline"]
+        for (left, right) in zip(order, order.dropFirst()) {
+            XCTAssertLessThan(views.buttons[left].frame.midX, views.buttons[right].frame.midX)
+        }
+        capture("series-cold-default", app: app)
+        views.buttons["Lists"].tap()
+        XCUIDevice.shared.press(.home); app.activate()
+        XCTAssertTrue(views.waitForExistence(timeout: 10))
+        XCTAssertTrue(views.buttons["Lists"].isSelected)
+        app.terminate(); app.launch()
+        XCTAssertTrue(views.waitForExistence(timeout: 10))
+        XCTAssertTrue(views.buttons["Series"].isSelected)
     }
 
     private func capture(_ name: String, app: XCUIApplication) {
@@ -198,6 +225,12 @@ final class LibraryHeaderUITests: XCTestCase {
         XCTAssertTrue(views.waitForExistence(timeout: 15))
         let series = app.buttons["QA Series"]
         XCTAssertTrue(series.exists && series.isHittable)
+        // A prior reader return can add Continue and move this card to the next row.
+        // Arrange enough visible cover before measuring the original upward gesture.
+        for _ in 0..<4 {
+            if series.frame.intersection(app.scrollViews.firstMatch.frame).height > 120 { break }
+            scrollUp(app, column: 0.75)
+        }
         let viewport = app.scrollViews.firstMatch.frame
         let frame = series.frame.intersection(viewport)
         XCTAssertGreaterThan(frame.height, 120)
@@ -269,14 +302,10 @@ final class LibraryHeaderUITests: XCTestCase {
         XCTAssertEqual(target.frame.minY, savedShelfY, accuracy: 3,
             "Returning to All must preserve the shelf's partial scroll offset")
         capture("library-scrolled-return", app: app)
-        let add = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "LOAD COMIC")).firstMatch
-        for _ in 0..<3 {
-            if add.exists && add.isHittable && add.frame.maxY <= app.scrollViews.firstMatch.frame.maxY { break }
-            // Scroll through the card column, including its Series/List gesture regions.
-            scrollUp(app)
-        }
+        let add = app.buttons["Add comics"]
         XCTAssertTrue(add.exists && add.isHittable)
-        XCTAssertLessThanOrEqual(add.frame.maxY, app.scrollViews.firstMatch.frame.maxY)
+        XCTAssertGreaterThanOrEqual(add.frame.minY, app.scrollViews.firstMatch.frame.maxY - 1,
+            "The reserved Add Comics band must stay outside scrolling covers")
         add.tap()
         XCTAssertTrue(app.buttons["From Files"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["From SMB Drive"].exists)
@@ -285,6 +314,9 @@ final class LibraryHeaderUITests: XCTestCase {
         if app.buttons["Cancel"].exists { app.buttons["Cancel"].tap() }
         else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.1)).tap() }
         app.buttons["MENU"].tap()
+        XCTAssertTrue(app.buttons["Settings and more"].waitForExistence(timeout: 5))
+        capture("library-menu-dropdown", app: app)
+        app.buttons["Settings and more"].tap()
         let direction = app.switches["Default right-to-left reading"]
         for _ in 0..<6 {
             if direction.exists && direction.isHittable { break }
@@ -302,7 +334,9 @@ final class LibraryHeaderUITests: XCTestCase {
         let app = launch()
         let views = app.segmentedControls["library.views"]
         XCTAssertTrue(views.waitForExistence(timeout: 15))
-        app.buttons["EDIT"].tap()
+        app.buttons["MENU"].tap()
+        XCTAssertTrue(app.buttons["Select comics"].waitForExistence(timeout: 5))
+        app.buttons["Select comics"].tap()
         let comic = app.buttons.containing(.staticText, identifier: "QA Completed").firstMatch
         XCTAssertTrue(comic.exists && comic.isHittable)
         comic.tap()
@@ -387,8 +421,9 @@ final class LibraryHeaderUITests: XCTestCase {
         let views = app.segmentedControls["library.views"]
         XCTAssertTrue(views.waitForExistence(timeout: 15))
         views.buttons["Offline"].tap()
-        XCTAssertTrue(app.buttons["EDIT"].waitForExistence(timeout: 10))
-        app.buttons["EDIT"].tap()
+        app.buttons["MENU"].tap()
+        XCTAssertTrue(app.buttons["Select comics"].waitForExistence(timeout: 5))
+        app.buttons["Select comics"].tap()
         let selectAll = app.buttons["SELECT ALL"]
         XCTAssertTrue(selectAll.waitForExistence(timeout: 5))
         selectAll.tap()
@@ -398,7 +433,7 @@ final class LibraryHeaderUITests: XCTestCase {
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         XCTAssertTrue(app.alerts.staticTexts["Delete 16 comics?"].exists)
         confirm.tap()
-        let message = app.staticTexts["No readable local copies yet. Add comics from Files or SMB, or download a Jellyfin comic."]
+        let message = app.staticTexts["Connect your Jellyfin library, or read files stored on this device. You can connect later from Add Comics."]
         XCTAssertTrue(message.waitForExistence(timeout: 15))
         app.buttons["library.unread"].tap()
         XCTAssertTrue(app.buttons["library.clearUnread"].exists)
@@ -407,7 +442,11 @@ final class LibraryHeaderUITests: XCTestCase {
         app.buttons["library.clearUnread"].tap()
         XCTAssertTrue(message.exists)
         XCTAssertTrue(views.buttons["Offline"].isSelected)
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "LOAD COMIC")).firstMatch.exists)
+        let add = app.buttons["library.empty.add"]
+        let connect = app.buttons["library.empty.connect"]
+        XCTAssertTrue(add.exists && add.isHittable && connect.exists && connect.isHittable)
+        XCTAssertGreaterThanOrEqual(add.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(connect.frame.height, 44)
         capture("offline-empty", app: app)
     }
 

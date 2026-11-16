@@ -4,12 +4,15 @@ import SwiftUI
 struct OpenComic: Identifiable {
     let url: URL
     let opensAtCover: Bool
+    let wasCompletedAtOpen: Bool
     let cover: UIImage?
     var id: String { url.absoluteString }
 
     @MainActor init(url: URL) {
         self.url = url
-        opensAtCover = (ReadingProgress.get(url)?.page ?? 0) == 0
+        let progress = ReadingProgress.get(url)
+        opensAtCover = (progress?.page ?? 0) == 0
+        wasCompletedAtOpen = progress?.isCompleted == true
         cover = opensAtCover ? CoverLoader.cachedCover(for: url) : nil
     }
 }
@@ -20,6 +23,11 @@ extension View {
         namespace: Namespace.ID,
         onDismiss: @escaping () -> Void
     ) -> some View {
+        modifier(ComicReaderPolicyBridge(item: item, namespace: namespace, onDismiss: onDismiss))
+    }
+
+    func leafReaderCover(item: Binding<OpenComic?>, namespace: Namespace.ID,
+                         onDismiss: @escaping () -> Void) -> some View {
         fullScreenCover(item: item, onDismiss: onDismiss) { comic in
             ReaderView(comicURL: comic.url, openingCover: comic.cover)
                 .modifier(ComicOpeningTransition(comic: comic, namespace: namespace))
@@ -49,6 +57,22 @@ private struct ComicOpeningTransition: ViewModifier {
             content.navigationTransition(.zoom(sourceID: comic.url, in: namespace))
         } else {
             content
+        }
+    }
+}
+
+private struct ComicReaderPolicyBridge: ViewModifier {
+    @Environment(\.tipPromptPolicy) private var policy
+    let item: Binding<OpenComic?>
+    let namespace: Namespace.ID
+    let onDismiss: () -> Void
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let policy {
+            content.modifier(ContextualTipReaderPresentation(item: item, namespace: namespace,
+                onDismiss: onDismiss, policy: policy))
+        } else {
+            content.leafReaderCover(item: item, namespace: namespace, onDismiss: onDismiss)
         }
     }
 }
