@@ -9,15 +9,16 @@ Generation is explicit, never part of ordinary assembly. Only Full profileQa has
 Use a coordinated native/device window. Select one dedicated emulator or the separate benchmark app sandbox on an available QA phone. Never clear or reinstall the normal Leaf package. Device/account/auth/security/radio settings stay unchanged.
 
 ```sh
+: "${R8_TEST_SERIAL:?Set the dedicated QA serial first}"
 python3 scripts/create-r8-fixtures.py /tmp/LeafR8Fixtures
 # Explicitly select the QA device. These files contain synthetic artwork only.
 adb -s "$R8_TEST_SERIAL" push /tmp/LeafR8Fixtures /sdcard/Download/
-./gradlew --no-parallel --max-workers=1 :app:generateBaselineProfile \
+ANDROID_SERIAL="$R8_TEST_SERIAL" ./gradlew --no-parallel --max-workers=1 :app:generateBaselineProfile \
   -Pandroid.testInstrumentationRunnerArguments.leaf.qaFixtures=true \
   -Pandroid.testInstrumentationRunnerArguments.class=net.digitalbc.leafreader.macrobenchmark.BaselineProfileGenerator
 ```
 
-Set `ANDROID_SERIAL="$R8_TEST_SERIAL"` for Gradle when other devices are attached. Verify fixture byte hashes after staging; on scoped-storage devices use MediaStore or the system Files UI rather than changing storage permissions. With mergeIntoMain enabled, generation is aggregated, but the verified task graph contains only the isolated Full profileQa producer; no production app producer is configured. The synthetic CBZ/Library/Reader workload uses shared code, so its main profile feeds both flavors. Fdroid has separate compile/minified smoke coverage; this collector does not cover flavor-specific RAR paths. The test refuses to seed a nonempty library that lacks its synthetic fixtures. It imports the folder through Android's real SAF picker, using English test selectors, then exercises All, local Reader, a page turn, Continue and Library scrolling. No production automation hook, external server, authentication or private comic is involved. Fixture import/count checks and first-run Android immersive-hint dismissal happen outside measured blocks. After each process restart, Reader entry explicitly selects All, since Library initially shows Series; matching Series titles are not accepted as Reader. Page controls must visibly move page1 to page2, saved Continue metadata must show page2, and the actionable card must settle before a single tap. These are bounded observable preconditions, not blind retries. The separate fixtureJourney smoke repeats three cold restarts. In-app Back is exercised; platform Back remains separate acceptance.
+Set `ANDROID_SERIAL="$R8_TEST_SERIAL"` for Gradle when other devices are attached. Verify fixture byte hashes after staging; on scoped-storage devices use MediaStore or the system Files UI rather than changing storage permissions. With mergeIntoMain enabled, generation is aggregated, but the verified task graph contains only the isolated Full profileQa producer; no production app producer is configured. The synthetic CBZ/Library/Reader workload uses shared code, so its main profile feeds both flavors. Fdroid has separate compile/minified smoke coverage; this collector does not cover flavor-specific RAR paths. The test refuses to seed a nonempty library that lacks its synthetic fixtures. It imports the folder through Android's real SAF picker, using English test selectors, then exercises All, local Reader, a page turn, Continue and Library scrolling. No production automation hook, external server, authentication or private comic is involved. Fixture import/count checks and first-run Android immersive-hint dismissal happen outside measured blocks. After each process restart, Reader entry explicitly selects All, since Library initially shows Series; matching Series titles are not accepted as Reader. Page controls must visibly move page1 to page2, saved Continue metadata must show page2, and the actionable card must settle before a single tap. These are bounded observable preconditions, not blind retries. The measurement harness checks hierarchy stability without screenshot readbacks, avoiding GPU capture work inside frame measurement. The separate fixtureJourney smoke repeats three cold restarts. In-app Back is exercised; platform Back remains separate acceptance.
 
 `startup` alone sets `includeInStartupProfile=true`. Reader/Continue/scroll collection is Baseline-only, preventing unrelated reading code from bloating startup DEX layout. Preserve the generated text, exact APK/maps/input identity and collection result. Confirm generated rules contain Leaf classes before committing them.
 
@@ -27,7 +28,7 @@ Rebuild the minified benchmark APK with the generated profile, then run `Startup
 
 ```sh
 ./gradlew :app:assembleFullBenchmarkProfileQa
-./gradlew :macrobenchmark:connectedFullBenchmarkProfileQaAndroidTest \
+ANDROID_SERIAL="$R8_TEST_SERIAL" ./gradlew --no-parallel --max-workers=1 :macrobenchmark:connectedFullBenchmarkProfileQaAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=net.digitalbc.leafreader.macrobenchmark.StartupBenchmark \
   -Pandroid.testInstrumentationRunnerArguments.leaf.qaFixtures=true
 ```
@@ -37,3 +38,12 @@ For the incremental Leaf-owned benefit, preserve a library-profile-only control 
 Task names must be checked against the configured plugin variants with `:macrobenchmark:tasks --all`. Use only the isolated benchmark application ID. Retain Macrobenchmark JSON and Perfetto traces with device/OS, compilation mode, thermal/network/battery and fixture state. An emulator run validates the harness/profile generation; it does not establish physical startup performance. StartupTimingMetric reports initial display here; no app-owned fully-drawn signal is added.
 
 The synthetic workload is repeatable and offline but not representative of every reader library, remote cover workload or Series peel interaction. Minimum OS, broader physical devices, real SMB/Jellyfin, upgrades, accessibility and release gates remain separate. Do not disable benchmark errors or alter device settings to make a measurement pass.
+
+
+## Collection evidence — 16 November 2026
+
+Full QA collection source `bdb1369df379c8905824688fa494c126c75acf1b`, task-owned API37/16KB emulator, all three tests pass with zero failures/skips. Startup stabilized at iteration6; Reader/Continue/Library at iteration12. The independent smoke test also exercises three cold restarts. No physical timing result follows from collection.
+
+Generated Baseline:21,953 rules,2,007 owned by the `net.digitalbc.leafreader` app namespace; SHA256 `1718742b88d4d2ac36a7040e63394ff13dc94354471b2263c1f797f9e024cfde`. Startup:18,711 rules,1,375 app rules; SHA256 `763ec6215255d7e618b27749941440738e5d41057b540370a054749b78165adc`. Startup has no `ReaderScreen` method entries; Baseline has31. Startup's Reader-package enum/settings references are legitimate cold Library configuration, not a Reader journey.
+
+The preserved library-only control contains zero Leaf app entries and uses shipping R89.2.14. A fresh build at the exact producer configuration is byte-for-byte identical to the earlier control: APK SHA256 `89d0a4b4412a6de0442d87c5a543c73057d74e5139a1d3fcd35157978b94b589`. Test-only hierarchy-stability changes after collection do not change application code; physical measurements must use the current runner and record exact APK identities. Keep raw failed experiments separate from the accepted collection receipt. Package validation and physical comparison remain required.

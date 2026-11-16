@@ -43,3 +43,17 @@ Real minified SMB disconnect/session/tree cleanup and reconnect; RAR4/RAR5 comic
 ## CI and release automation
 
 The reusable Android minified smoke workflow has only `workflow_call`. Existing CI calls it for both flavors; the release publication job depends on it. It retains maps, APKs and test results even on failure. No workflow is enabled or dispatched by adding this source. Keep the owner's CI-disabled setting until separately authorized; local emulator acceptance is not a GitHub Actions run. CI uses disposable API35 emulators for correctness, not startup timing acceptance.
+
+
+## Configuration Analyzer on the current shipping toolchain
+
+Shipping AGP9.2.1 embeds R89.2.14, which predates Configuration Analyzer. For analysis only, create a separate worktree at the exact reviewed source and add a `pluginManagement.buildscript` dependency on `com.android.tools:r8:9.4.14` using Google/Maven Central repositories. Never ship or measure startup from that compiler override. Then run:
+
+```sh
+./gradlew :app:assembleFullRelease --no-build-cache \
+  -Dcom.android.tools.r8.dumpkeepradiushtmltodirectory=/tmp/leaf-r8-analyzer/full
+./gradlew :app:assembleFdroidRelease --no-build-cache \
+  -Dcom.android.tools.r8.dumpkeepradiushtmltodirectory=/tmp/leaf-r8-analyzer/fdroid
+```
+
+Both analysis-only runs passed on16November2026; mapping headers identify9.4.14. Full59/Fdroid58 keep-radius rules; the app's SMB rule retains3classes/3methods/0fields each. SevenZip's conservative boundary appears only in Full. Keep-radius overlaps other rules and is not exclusive byte savings. Preserve original/decoded reports and verify any offline decoder's pinned integrity/license. Shipping9.2.14 minified smoke, size and profile checks remain separate. Do not expect AGP9.3 standalone `analyze...R8Config` tasks on9.2.

@@ -80,7 +80,7 @@ internal class LeafJourneys(private val device: UiDevice) {
         val card = requireNotNull(device.wait(Until.findObject(By.descStartsWith("Continue reading, Leaf R8 Fixture")), 10_000))
         val action = if (card.isClickable) card else requireNotNull(card.parent)
         check(action.isClickable) { "Continue semantics have no clickable card parent" }
-        expect("Continue card did not settle", !action.waitForStable().isTimeout)
+        expect("Continue card did not settle", !action.waitForStable(requireStableScreenshot = false).isTimeout)
         System.err.println("LEAF_CONTINUE_TARGET " + action.visibleBounds)
         action.click()
         expect("Continue did not open Reader", device.wait(Until.gone(By.desc("Menu")), 10_000))
@@ -140,7 +140,7 @@ internal class LeafJourneys(private val device: UiDevice) {
         clickControl("Back")
         libraryReady()
         val root = requireNotNull(device.findObject(By.pkg(TARGET_PACKAGE)))
-        expect("Library did not settle after Reader", !root.waitForStable().isTimeout)
+        expect("Library did not settle after Reader", !root.waitForStable(requireStableScreenshot = false).isTimeout)
     }
 
     fun scrollLibrary() {
