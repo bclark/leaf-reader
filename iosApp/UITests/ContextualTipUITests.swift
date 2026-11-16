@@ -52,12 +52,15 @@ final class ContextualTipUITests: XCTestCase {
     }
     private func reveal(_ element: XCUIElement, _ app: XCUIApplication) {
         for _ in 0..<10 {
-            if element.exists && element.isHittable { return }
             let promptScroll = app.scrollViews.containing(.staticText, identifier: "tipPrompt.title").firstMatch
-            if promptScroll.exists { promptScroll.swipeUp() }
-            else { app.scrollViews.firstMatch.swipeUp() }
+            let scroll = promptScroll.exists ? promptScroll : app.scrollViews.firstMatch
+            let viewport = scroll.exists ? scroll.frame.intersection(app.frame) : app.frame
+            if element.exists && element.isHittable
+                && viewport.insetBy(dx: -1, dy: -1).contains(element.frame) { return }
+            if element.exists && element.frame.minY < viewport.minY { scroll.swipeDown() }
+            else { scroll.swipeUp() }
         }
-        XCTAssertTrue(element.exists && element.isHittable)
+        XCTFail("Control must be fully visible and hittable inside its scroll viewport: \(element.identifier)")
     }
     private func openVoluntarySupport(_ app: XCUIApplication) {
         app.buttons["MENU"].tap()
