@@ -36,6 +36,15 @@ class BaselineProfileGenerator {
         }
     }
 
+    @Test fun fixtureJourney() {
+        LeafJourneys(UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())).apply {
+            openFixture()
+            turnPageAndReturn()
+            continueFixture()
+            scrollLibrary()
+        }
+    }
+
     @Test fun startup() = profile.collect(TARGET_PACKAGE, includeInStartupProfile = true) {
         pressHome()
         startActivityAndWait()

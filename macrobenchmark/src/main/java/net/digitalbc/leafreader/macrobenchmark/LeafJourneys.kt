@@ -67,11 +67,14 @@ internal class LeafJourneys(private val device: UiDevice) {
         val card = requireNotNull(device.wait(Until.findObject(By.descStartsWith("Continue reading, Leaf R8 Fixture")), 10_000))
         card.click()
         assertTrue("Continue did not open Reader", device.wait(Until.gone(By.desc("Menu")), 10_000))
+        readerControls()
         returnToLibrary()
     }
 
     fun openFixture() {
         libraryReady()
+        // A process restart restores Series; matching titles there are not Reader entries.
+        requireNotNull(device.findObject(By.text(Pattern.compile("ALL", Pattern.CASE_INSENSITIVE)))).click()
         requireNotNull(device.wait(Until.findObject(fixture), 10_000)).click()
         device.waitForIdle()
         assertTrue("Reader did not replace Library", device.wait(Until.gone(By.desc("Menu")), 10_000))
@@ -83,10 +86,21 @@ internal class LeafJourneys(private val device: UiDevice) {
         device.waitForIdle()
     }
 
+    private fun readerControls() {
+        if (!device.hasObject(By.desc("Next page"))) {
+            device.click(device.displayWidth / 2, device.displayHeight / 2)
+        }
+        assertTrue("Expected the eight-page fixture Reader, not Series detail",
+            device.wait(Until.hasObject(By.desc("Next page")), 5_000))
+    }
+
     fun turnPageAndReturn() {
-        device.click(device.displayWidth / 10, device.displayHeight / 2)
+        readerControls()
+        device.findObject(By.desc("Previous page"))?.takeIf { it.isEnabled }?.click()
         device.waitForIdle()
-        device.click(device.displayWidth * 9 / 10, device.displayHeight / 2)
+        val next = requireNotNull(device.findObject(By.desc("Next page")))
+        check(next.isEnabled) { "Fixture unexpectedly reached its final page" }
+        next.click()
         device.waitForIdle()
         returnToLibrary()
     }
