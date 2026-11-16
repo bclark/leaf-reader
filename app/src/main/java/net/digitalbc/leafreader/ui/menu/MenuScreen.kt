@@ -687,10 +687,10 @@ fun MenuScreen(
                 if (jellyfinConnected) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Column {
+                        Column(Modifier.weight(1f)) {
                             val serverDisplay = settings.jellyfinServerName.ifBlank { settings.jellyfinServerUrl }
                             Text(
                                 serverDisplay,
