@@ -13,7 +13,8 @@ python3 scripts/create-r8-fixtures.py /tmp/LeafR8Fixtures
 # Explicitly select the QA device. These files contain synthetic artwork only.
 adb -s "$R8_TEST_SERIAL" push /tmp/LeafR8Fixtures /sdcard/Download/
 ./gradlew :app:generateBaselineProfile \
-  -Pandroid.testInstrumentationRunnerArguments.leaf.qaFixtures=true
+  -Pandroid.testInstrumentationRunnerArguments.leaf.qaFixtures=true \
+  -Pandroid.testInstrumentationRunnerArguments.class=net.digitalbc.leafreader.macrobenchmark.BaselineProfileGenerator
 ```
 
 Set `ANDROID_SERIAL="$R8_TEST_SERIAL"` for Gradle when other devices are attached. Verify fixture byte hashes after staging; on scoped-storage devices use MediaStore or the system Files UI rather than changing storage permissions. With mergeIntoMain enabled, generation is aggregated, but the verified task graph contains only the two isolated profileQa flavor producers; no production app producer is configured. The test refuses to seed a nonempty library that lacks its synthetic fixtures. It imports the folder through Android's real SAF picker, using English test selectors, then exercises All, local Reader, a page turn, Continue and Library scrolling. No production automation hook, external server, authentication or private comic is involved. Setup happens outside measured blocks.
