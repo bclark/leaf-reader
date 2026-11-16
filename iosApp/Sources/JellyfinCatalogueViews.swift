@@ -146,6 +146,7 @@ struct JellyfinComicCard: View {
             .aspectRatio(0.7, contentMode: .fit)
             .clipShape(RoundedCornerShape(cornerRadius: 4))
             .shadow(color: .black.opacity(0.24), radius: columns >= 4 ? 3 : 5, y: 3)
+            .accessibilityHidden(true)
             Text(book.name)
                 .leafControlFont(columns >= 4 ? 10 : 12, weight: 800)
                 .foregroundStyle(Leaf.text).lineLimit(2)
