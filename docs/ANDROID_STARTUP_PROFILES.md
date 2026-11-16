@@ -1,8 +1,8 @@
 # Leaf Android startup profiles and benchmarks
 
-The `benchmark` build type inherits the release-like Performance optimizations and existing development signing. Its separate `net.digitalbc.leafreader.benchmark` application ID and "Leaf Benchmark" label protect the normal Leaf install. It is nondebuggable/profileable. The Baseline Profile plugin creates an unminified producer variant for collection and a minified benchmark variant for measurement.
+The `profileQa` build type inherits the release-like Performance optimizations and existing development signing. Its separate `net.digitalbc.leafreader.benchmark` application ID and "Leaf Benchmark" label protect the normal Leaf install. It is nondebuggable/profileable. The Baseline Profile plugin creates an unminified producer variant for collection and a minified benchmark variant for measurement.
 
-Generation is explicit, never part of ordinary assembly. Only the benchmark build type has a producer dependency; committing generated profiles into `app/src/main/generated/baselineProfiles` also lets Release/Performance consume them. Code namespaces are identical across application IDs. Never hand-author profile entries or treat generated rules as measured speedups.
+Generation is explicit, never part of ordinary assembly. Only the profileQa build type has a producer dependency; committing generated profiles into `app/src/main/generated/baselineProfiles` also lets Release/Performance consume them. Code namespaces are identical across application IDs. Never hand-author profile entries or treat generated rules as measured speedups.
 
 ## Fixtures and collection
 
@@ -12,7 +12,7 @@ Use a coordinated native/device window. Select one dedicated emulator or the sep
 python3 scripts/create-r8-fixtures.py /tmp/LeafR8Fixtures
 # Explicitly select the QA device. These files contain synthetic artwork only.
 adb -s "$R8_TEST_SERIAL" push /tmp/LeafR8Fixtures /sdcard/Download/
-./gradlew :app:generateFullBenchmarkBaselineProfile \
+./gradlew :app:generateFullProfileQaBaselineProfile \
   -Pandroid.testInstrumentationRunnerArguments.leaf.qaFixtures=true
 ```
 
@@ -25,8 +25,8 @@ Restrict connected-device selection when other devices are attached; do not run 
 Rebuild the minified benchmark APK with the generated profile, then run `StartupBenchmark` on a physical device in a serial native window. Compare ten cold-start iterations without compilation and with the Baseline Profile required; missing profiles must fail, not silently fall back. Five separate frame iterations cover Reader/Continue/Library.
 
 ```sh
-./gradlew :app:assembleFullBenchmark
-./gradlew :macrobenchmark:connectedFullBenchmarkBenchmarkAndroidTest \
+./gradlew :app:assembleFullProfileQa
+./gradlew :macrobenchmark:connectedFullBenchmarkProfileQaAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=net.digitalbc.leafreader.macrobenchmark.StartupBenchmark \
   -Pandroid.testInstrumentationRunnerArguments.leaf.qaFixtures=true
 ```

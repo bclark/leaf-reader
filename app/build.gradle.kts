@@ -81,7 +81,7 @@ android {
             matchingFallbacks += listOf("release")
         }
         // An isolated sandbox for synthetic profile/benchmark journeys; never replaces Leaf.
-        create("benchmark") {
+        create("profileQa") {
             initWith(getByName("performance"))
             applicationIdSuffix = ".benchmark"
             versionNameSuffix = "-benchmark"
@@ -165,6 +165,6 @@ baselineProfile {
     saveInSrc = true
     mergeIntoMain = true
     variants {
-        create("benchmark") { from(project(":macrobenchmark")) }
+        create("profileQa") { from(project(":macrobenchmark")) }
     }
 }

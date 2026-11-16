@@ -19,7 +19,7 @@ android {
         create("fdroid") { dimension = "distribution" }
     }
     buildTypes {
-        create("benchmark") {
+        create("profileQa") {
             isDebuggable = true
             signingConfig = signingConfigs.getByName("debug")
         }
@@ -33,7 +33,7 @@ android {
 }
 
 androidComponents {
-    beforeVariants { it.enable = it.buildType in listOf("benchmark", "nonMinifiedBenchmark", "benchmarkBenchmark") }
+    beforeVariants { it.enable = it.buildType in listOf("profileQa", "nonMinifiedProfileQa", "benchmarkProfileQa") }
 }
 
 baselineProfile { useConnectedDevices = true }
