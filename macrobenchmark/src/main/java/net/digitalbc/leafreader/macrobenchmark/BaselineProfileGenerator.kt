@@ -9,9 +9,19 @@ import androidx.test.uiautomator.UiDevice
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
+import java.io.ByteArrayOutputStream
 
 @RunWith(AndroidJUnit4::class)
 class BaselineProfileGenerator {
+    @get:Rule val diagnostics = object : TestWatcher() {
+        override fun failed(error: Throwable, description: Description) {
+            val hierarchy = ByteArrayOutputStream()
+            UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).dumpWindowHierarchy(hierarchy)
+            System.err.println("LEAF_PROFILE_FAILURE_UI " + hierarchy.toString("UTF-8"))
+        }
+    }
     @get:Rule val profile = BaselineProfileRule()
 
     @Before fun prepareIsolatedLibrary() {
