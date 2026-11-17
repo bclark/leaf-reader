@@ -5,9 +5,9 @@ Features:
 * Archive Support — Reads CBZ (ZIP) archives and PDF files across all builds, plus CBR (RAR/RAR5) archives in full releases.
 * Reading Layouts — Single-page view or two-page spreads in landscape and portrait, with smart cover page handling and fit-to-page / fit-to-width modes.
 * Interactive Transitions — Smooth page turns with interactive 3D page curl or side-by-side sliding.
-* Jellyfin — Browse your server libraries, download comics, import server progress and report reading progress back. Reporting is best effort; failed offline writes are not durably retried.
+* Jellyfin — Browse your server libraries, save comics for offline reading, and sync page position and read status with your configured account. Unsent changes are retained for retry. Use Sync reading position in comic details after reconnecting; if positions conflict, Leaf asks which one to keep.
 * Local SMB Drive — Connect directly to your home NAS or local network share to browse and download comic archives directly into your library.
 * Portable Backup & Restore — Export and restore your reading progress, reading lists, and layout preferences as JSON without exposing sensitive credentials or local paths.
-* Privacy-First & Offline — No accounts, no advertising, no analytics, no tracking, and no cloud dependencies. Optional network access connects directly to your configured SMB and Jellyfin servers. Jellyfin-linked reading reports progress to your server.
+* Privacy-First & Offline — No Leaf account, advertising, analytics, or tracking. Local comics remain readable without a network connection. Optional network access connects directly to your configured SMB and Jellyfin servers. Optional Jellyfin uses your existing server account; linked reading can report progress to that server.
 
 Leaf is free and open source under the Mozilla Public License 2.0 (MPL-2.0), forked with appreciation from Chika by Chakra.
