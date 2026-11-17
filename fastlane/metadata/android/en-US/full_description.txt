@@ -1,13 +1,18 @@
-Leaf is an offline comic and manga reader for Android. Open your CBZ, CBR, or PDF comics and enjoy smooth whole-page reading, customizable single-page and two-page spreads, interactive page transitions, and local network drive imports.
+Leaf is a free, open-source comic and manga reader for Android. Bring your own comics, choose your reading layout, and pick up where you left off.
 
-Features:
+READ OFFLINE
+Open CBZ, supported CBR archives, and PDF files from your device. Download comics from your own Jellyfin server or SMB network share to read without a connection.
 
-* Archive Support — Reads CBZ (ZIP) archives and PDF files across all builds, plus CBR (RAR/RAR5) archives in full releases.
-* Reading Layouts — Single-page view or two-page spreads in landscape and portrait, with smart cover page handling and fit-to-page / fit-to-width modes.
-* Interactive Transitions — Smooth page turns with interactive 3D page curl or side-by-side sliding.
-* Jellyfin — Browse your server libraries, download comics, import server progress and report reading progress back. Reporting is best effort; failed offline writes are not durably retried.
-* Local SMB Drive — Connect directly to your home NAS or local network share to browse and download comic archives directly into your library.
-* Portable Backup & Restore — Export and restore your reading progress, reading lists, and layout preferences as JSON without exposing sensitive credentials or local paths.
-* Privacy-First & Offline — No accounts, no advertising, no analytics, no tracking, and no cloud dependencies. Optional network access connects directly to your configured SMB and Jellyfin servers. Jellyfin-linked reading reports progress to your server.
+MAKE THE PAGE FIT
+Switch between single pages and two-page spreads in portrait or landscape. Choose fit-to-page or fit-to-width, smart cover handling, and page-curl or sliding transitions.
 
-Leaf is free and open source under the Mozilla Public License 2.0 (MPL-2.0), forked with appreciation from Chika by Chakra.
+KEEP YOUR PLACE
+Save your reading progress and organize comics into reading lists. Export and restore your reading progress, lists, and layout preferences.
+
+CONNECT YOUR OWN LIBRARY
+Browse comics on your Jellyfin server or SMB share. These connections are optional: you can use Leaf with local files without a server or a Leaf account.
+
+Leaf can import Jellyfin reading progress and report progress to your server. Linked reading updates that cannot be confirmed are kept on this device for retry. After reconnecting, choose Sync reading position in comic details. If positions conflict, choose which one to keep. Changes made in other clients may need an explicit sync.
+
+BRING YOUR OWN CONTENT
+Leaf does not include comics or provide a Jellyfin server. Remote libraries require a server or network share you have permission to access. CBR compatibility depends on the archive.
