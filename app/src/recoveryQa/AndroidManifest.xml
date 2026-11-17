@@ -3,6 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools">
     <application android:label="Leaf Recovery QA" android:allowBackup="false"
         tools:replace="android:label,android:allowBackup">
+        <activity android:name="net.digitalbc.leafreader.qa.OnboardingQaActivity" android:exported="true" />
         <profileable android:shell="true" />
         <activity android:name="net.digitalbc.leafreader.qa.HalftoneQaActivity" android:exported="true" />
         <activity android:name="net.digitalbc.leafreader.qa.RecoveryQaActivity"

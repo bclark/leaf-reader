@@ -147,30 +147,8 @@ fun AppNavHost() {
             navArgument("section") { type = NavType.StringType; defaultValue = "" },
         )) { menuEntry ->
             val connectedOnEntry = rememberSaveable { libraryVm.hasJellyfinConfig }
-            val amoled by app.amoledTheme.collectAsState()
-            val themeMode by app.themeMode.collectAsState()
-            val launcherIcon by app.launcherIcon.collectAsState()
-            val pageSlide by app.pageSlideEnabled.collectAsState()
-            val fitMode by app.pageFitMode.collectAsState()
-            val portraitSpread by app.portraitSpread.collectAsState()
-            val landscapeSpread by app.landscapeSpread.collectAsState()
-            MenuScreen(
-                themeMode = themeMode,
-                onSetThemeMode = app::setThemeMode,
-                launcherIcon = launcherIcon,
-                onSetLauncherIcon = app::setLauncherIcon,
-                amoledTheme = amoled,
-                onSetAmoledTheme = app::setAmoledTheme,
-                pageSlideEnabled = pageSlide,
-                onSetPageSlideEnabled = app::setPageSlideEnabled,
-                pageFitMode = fitMode,
-                onSetPageFitMode = app::setPageFitMode,
-                portraitSpread = portraitSpread,
-                landscapeSpread = landscapeSpread,
-                onSetPortraitSpread = app::setPortraitSpread,
-                onSetLandscapeSpread = app::setLandscapeSpread,
-                settings = app.settings,
-                repository = app.libraryRepository,
+            net.digitalbc.leafreader.ui.menu.AppMenuScreen(
+                app = app,
                 openJellyfinSetup = menuEntry.arguments?.getString("section") == "jellyfin",
                 catalogueRefreshAt = { catalogueState.refreshTimeFor(catalogueVm.positionScope) },
                 onBack = {

@@ -102,3 +102,7 @@ Full text: [`THIRD_PARTY_LICENSES/AGPL-3.0.txt`](https://github.com/bclark/leaf-
 
 - Leaf is a fork of **Chika** (created by Chakra / Chalchitra Krida). Upstream source is maintained at https://github.com/batunii/chika.
 - The **Leaf** name, logo, and wordmarks are brand assets of this project. Trademark and brand rights for Chika / Chitra Katha remain reserved by their respective owners and are not governed by the code license.
+
+## Jellyfin onboarding artwork
+
+Copyright the Jellyfin contributors. Official icon-transparent.svg, licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), reused from the verified iOS artwork packet. Android VectorDrawable adaptation retains its paths and gradient; adaptation under the same license. Original SVG, attribution, provenance and full license are bundled in THIRD_PARTY_LICENSES/Jellyfin-Artwork-* and Jellyfin-icon-transparent.svg. No endorsement is implied.

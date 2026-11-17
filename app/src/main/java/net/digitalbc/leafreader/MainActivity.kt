@@ -74,7 +74,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    AppNavHost()
+                    net.digitalbc.leafreader.ui.onboarding.FirstLaunchHost(app) { AppNavHost() }
                 }
             }
         }

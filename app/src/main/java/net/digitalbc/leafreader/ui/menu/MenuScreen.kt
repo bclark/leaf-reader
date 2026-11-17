@@ -123,6 +123,10 @@ fun MenuScreen(
     repository: LibraryRepository? = null,
     openJellyfinSetup: Boolean = false,
     catalogueRefreshAt: () -> Long = { 0L },
+    onboardingConnector: (suspend (String, Boolean, String, String) -> Result<net.digitalbc.leafreader.data.jellyfin.JellyfinAuth>)? = null,
+    onboardingConnecting: Boolean? = null,
+    onboardingFailure: Boolean = false,
+    onJellyfinConnected: () -> Unit = {},
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -140,20 +144,32 @@ fun MenuScreen(
     var smbValid by remember { mutableStateOf<Boolean?>(null) }
     var smbStatusMessage by remember { mutableStateOf<String?>(null) }
 
-    var jellyfinUrl by remember { mutableStateOf(settings.jellyfinServerUrl) }
-    var jellyfinAllowHttp by remember { mutableStateOf(settings.jellyfinAllowInsecureHttp) }
-    var jellyfinUsername by remember { mutableStateOf(settings.jellyfinUsername) }
+    var jellyfinUrl by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(settings.jellyfinServerUrl) }
+    var jellyfinAllowHttp by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(settings.jellyfinAllowInsecureHttp) }
+    var jellyfinUsername by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(settings.jellyfinUsername) }
     var jellyfinPassword by remember { mutableStateOf("") }
     var jellyfinConnecting by remember { mutableStateOf(false) }
+    val connecting = onboardingConnecting ?: jellyfinConnecting
     var jellyfinConnected by remember { mutableStateOf(settings.hasJellyfinConfig && repository?.getJellyfinAuth() != null) }
     var jellyfinStatusMessage by remember { mutableStateOf<String?>(null) }
     var showJellyfinHttpConfirmDialog by remember { mutableStateOf(false) }
 
+    var jellyfinJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    fun leaveMenu() {
+        scope.launch {
+            jellyfinJob?.let { it.cancel(); it.join() }
+            onBack()
+        }
+    }
+    androidx.activity.compose.BackHandler(enabled = openJellyfinSetup) { leaveMenu() }
+
     fun connectToJellyfin(allowHttp: Boolean) {
         jellyfinConnecting = true
         jellyfinStatusMessage = "Connecting to Jellyfin…"
-        scope.launch {
-            val result = repository?.connectJellyfin(
+        jellyfinJob = scope.launch {
+            val result = if (onboardingConnector != null)
+                onboardingConnector(jellyfinUrl, allowHttp, jellyfinUsername, jellyfinPassword)
+            else repository?.connectJellyfin(
                 serverUrl = jellyfinUrl,
                 allowInsecureHttp = allowHttp,
                 username = jellyfinUsername,
@@ -165,6 +181,7 @@ fun MenuScreen(
                 jellyfinConnected = true
                 val auth = result.getOrNull()
                 jellyfinStatusMessage = "✓ Connected to ${auth?.serverName ?: "Jellyfin"}"
+                onJellyfinConnected()
             } else {
                 val err = result?.exceptionOrNull()
                 jellyfinStatusMessage = "✕ ${err?.message ?: "Connection failed"}"
@@ -271,7 +288,7 @@ fun MenuScreen(
                         .size(38.dp)
                         .clip(CircleShape)
                         .background(Cream.copy(alpha = 0.14f))
-                        .clickable(onClick = onBack),
+                        .clickable(onClick = ::leaveMenu),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -834,7 +851,7 @@ fun MenuScreen(
                             .background(Ochre)
                             .clickable(
                                 role = Role.Button,
-                                enabled = !jellyfinConnecting && jellyfinUrl.isNotBlank() && jellyfinUsername.isNotBlank(),
+                                enabled = !connecting && jellyfinUrl.isNotBlank() && jellyfinUsername.isNotBlank(),
                             ) {
                                 if (isHttp && !jellyfinAllowHttp) {
                                     showJellyfinHttpConfirmDialog = true
@@ -846,7 +863,7 @@ fun MenuScreen(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (jellyfinConnecting) {
+                        if (connecting) {
                             CircularProgressIndicator(
                                 color = Ink,
                                 strokeWidth = 2.dp,
@@ -855,7 +872,7 @@ fun MenuScreen(
                             Spacer(Modifier.size(8.dp))
                         }
                         Text(
-                            if (jellyfinConnecting) stringResource(R.string.jellyfin_connecting) else stringResource(R.string.jellyfin_connect),
+                            if (connecting) stringResource(R.string.jellyfin_connecting) else stringResource(R.string.jellyfin_connect),
                             fontFamily = Anton,
                             fontSize = 14.sp,
                             letterSpacing = 0.5.sp,
@@ -864,7 +881,7 @@ fun MenuScreen(
                     }
                 }
 
-                jellyfinStatusMessage?.let { status ->
+                (jellyfinStatusMessage ?: if (onboardingFailure) stringResource(R.string.onboarding_connection_error) else null)?.let { status ->
                     Text(
                         status,
                         fontFamily = Archivo,
