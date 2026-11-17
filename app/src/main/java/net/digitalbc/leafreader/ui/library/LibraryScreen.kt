@@ -755,15 +755,18 @@ fun LibraryScreen(
                             }, loadCover = { item, width -> viewModel.loadJellyfinCover(item, width) })
                     }
                 }
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (remoteSeries != null || catalogueState?.collection != null) androidx.compose.material3.FilterChip(
-                            selected = downloadedOnly,
-                            onClick = { viewModel.downloadedOnly.value = !requestedDownloads },
-                            label = { Text("Downloaded") }, modifier = Modifier.heightIn(min = 48.dp))
-                        if (remoteMode) {
-                            Text(catalogueState?.library?.name?.let { if (searchQuery.isBlank()) "Jellyfin · $it" else "Search · $it" } ?: "Jellyfin",
+                val showDownloadedFilter = remoteSeries != null || catalogueState?.collection != null
+                val showSearchContext = remoteMode && searchQuery.isNotBlank()
+                if (showDownloadedFilter || showSearchContext) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (showDownloadedFilter) androidx.compose.material3.FilterChip(
+                                selected = downloadedOnly,
+                                onClick = { viewModel.downloadedOnly.value = !requestedDownloads },
+                                label = { Text("Downloaded") }, modifier = Modifier.heightIn(min = 48.dp))
+                            if (showSearchContext) Text(
+                                catalogueState?.library?.name?.let { "Search · $it" } ?: "Jellyfin",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(12.dp))
                         }
@@ -2534,7 +2537,7 @@ private fun Modifier.onePointerCoverPeel(
 internal data class StackCover(val id: String, val coverPath: String?, val issueNumber: Float?, val remote: JellyfinItem? = null)
 private data class StackPresentation(
     val seriesName: String, val volume: String?, val issues: List<StackCover>,
-    val topCoverComic: StackCover, val progressFraction: Float, val subtitle: String,
+    val topCoverComic: StackCover, val progressFraction: Float,
     val remote: Boolean = false,
 ) {
     val totalIssues get() = issues.size
@@ -2563,23 +2566,19 @@ private fun ComicStackCard(stack: LibraryItem.SeriesStack, columns: Int = 2,
     val covers = remember(stack.issues) { stack.issues.map { StackCover(it.id.toString(), it.coverPath, it.issueNumber) } }
     CoverStackCard(StackPresentation(stack.seriesName, stack.volume, covers,
         covers.firstOrNull { it.id == stack.topCoverComic.id.toString() } ?: covers.first(),
-        stack.progressFraction,
-        androidx.compose.ui.res.pluralStringResource(
-            if (stack.progressFraction >= 1f) net.digitalbc.leafreader.R.plurals.library_series_completed
-            else net.digitalbc.leafreader.R.plurals.library_series_unread, stack.totalIssues, stack.totalIssues, stack.unreadIssues)),
+        stack.progressFraction),
         columns = columns, selectedCoverId = selectedCoverId, onCoverSelected = onCoverSelected, onClick = onClick)
 }
 
 @Composable
 internal fun RemoteSeriesStackCard(
     group: net.digitalbc.leafreader.data.jellyfin.JellyfinSeriesGroup,
-    columns: Int, partial: Boolean, loadCover: suspend (JellyfinItem) -> Bitmap?, coverWidthPx: Int = 400,
+    columns: Int, loadCover: suspend (JellyfinItem) -> Bitmap?, coverWidthPx: Int = 400,
     selectedCoverId: String? = null, onCoverSelected: (String) -> Unit = {}, onClick: () -> Unit,
 ) {
     val covers = remember(group.entries) { group.entries.map { StackCover(it.item.id, null, it.issueNumber?.toFloat(), it.item) } }
     androidx.compose.runtime.key(group.key) {
-        CoverStackCard(StackPresentation(group.name, null, covers, covers.first(), 0f,
-            "${covers.size} ${if (partial) "loaded comics" else "comics"} · Jellyfin", remote = true),
+        CoverStackCard(StackPresentation(group.name, null, covers, covers.first(), 0f, remote = true),
             loadRemoteCover = loadCover, remoteCoverWidthPx = coverWidthPx, columns = columns,
             selectedCoverId = selectedCoverId, onCoverSelected = onCoverSelected, onClick = onClick)
     }
@@ -2807,14 +2806,6 @@ private fun CoverStackCard(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp),
-        )
-        Text(
-            stack.subtitle,
-            fontFamily = Archivo,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = if (columns >= 4) 8.5.sp else 9.5.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 2.dp),
         )
     }
 }

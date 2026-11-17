@@ -12,12 +12,5 @@
     <string name="library_select_all">Select all</string>
     <string name="library_deselect_all">Deselect all</string>
     <string name="library_done">Done</string>
-    <plurals name="library_series_completed">
-        <item quantity="one">%1$d issue · read</item>
-        <item quantity="other">%1$d issues · read</item>
-    </plurals>
-    <plurals name="library_series_unread">
-        <item quantity="one">%1$d issue · %2$d unread</item>
-        <item quantity="other">%1$d issues · %2$d unread</item>
-    </plurals>
+    <string name="jellyfin_last_catalogue_refresh">Last catalogue refresh · %1$s</string>
 </resources>

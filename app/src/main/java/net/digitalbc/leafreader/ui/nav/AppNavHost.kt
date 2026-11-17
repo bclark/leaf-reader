@@ -172,6 +172,7 @@ fun AppNavHost() {
                 settings = app.settings,
                 repository = app.libraryRepository,
                 openJellyfinSetup = menuEntry.arguments?.getString("section") == "jellyfin",
+                catalogueRefreshAt = { catalogueState.refreshTimeFor(catalogueVm.positionScope) },
                 onBack = {
                     if (connectedOnEntry != libraryVm.hasJellyfinConfig) {
                         if (!libraryVm.hasJellyfinConfig) libraryVm.ensureJellyfinLanding()
