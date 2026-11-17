@@ -159,6 +159,7 @@ struct LibraryView: View {
                     chooseFile: { showPicker = true }, connect: { showJellyfinBrowser = true })
             }
         }
+        .environmentObject(library)
         .environment(\.tipPromptAllowed, !isEditMode && !isSearchOpen && !showMenu
             && !showPicker && !showImportSource && !showSmbBrowser && !showJellyfinBrowser)
         .sheet(isPresented: $showJellyfinBrowser, onDismiss: {
