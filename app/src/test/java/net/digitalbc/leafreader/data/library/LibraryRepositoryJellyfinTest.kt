@@ -104,14 +104,18 @@ class LibraryRepositoryJellyfinTest {
 
     @After
     fun tearDown() {
-        repository.jellyfinSyncScope.coroutineContext[Job]?.cancel()
-        runBlocking {
-            repository.observationScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
-        }
+        runBlocking { stopRepository() }
         server.shutdown()
         db.close()
         RuntimeEnvironment.getApplication().deleteDatabase("sync-durability.db")
         credStore.clear()
+    }
+
+    private suspend fun stopRepository() {
+        val jobs = listOf(repository.jellyfinSyncScope, repository.observationScope)
+            .mapNotNull { it.coroutineContext[Job] }
+        jobs.forEach { it.cancel() }
+        jobs.forEach { it.join() }
     }
 
     private suspend fun clearModels(store: androidx.lifecycle.ViewModelStore) {
@@ -751,8 +755,7 @@ class LibraryRepositoryJellyfinTest {
                 return result
             }
         }
-        repository.jellyfinSyncScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
-        repository.observationScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
+        stopRepository()
         repository = LibraryRepository(RuntimeEnvironment.getApplication(), comicDao, settings, db.readingListDao(), db,
             remoteComicLinkDao = links, jellyfinClient = JellyfinClient("session-relink"), jellyfinCredentialStore = credStore)
         enqueueArchive()
@@ -1492,7 +1495,7 @@ class LibraryRepositoryJellyfinTest {
                 return outboxDao.getPendingForComic(comicId)
             }
         }
-        repository.jellyfinSyncScope.coroutineContext[Job]?.cancel()
+        stopRepository()
         repository = newRepository(held.client, outbox = observedDao,
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
         val bulk = repository.jellyfinSyncScope.launch { repository.flushJellyfinOutbox() }
@@ -1566,7 +1569,7 @@ class LibraryRepositoryJellyfinTest {
 
     @Test
     fun pendingProgressAndUnreadSurviveDatabaseReopenAndFlush() = runBlocking {
-        repository.jellyfinSyncScope.coroutineContext[Job]?.cancel()
+        stopRepository()
         db.close()
         val context = RuntimeEnvironment.getApplication()
         context.deleteDatabase("sync-durability.db")
@@ -1582,7 +1585,7 @@ class LibraryRepositoryJellyfinTest {
         saveOffline(comic, 2)
         val pending = outboxDao.getPendingForComic(comic)
         assertEquals(false, pending?.markPlayed)
-        repository.jellyfinSyncScope.coroutineContext[Job]?.cancel()
+        stopRepository()
         db.close()
         db = openDiskDb()
         refreshDaos()
@@ -1682,8 +1685,7 @@ class LibraryRepositoryJellyfinTest {
     }
 
     @Test fun manualRemovalAndRedownloadPreserveCanonicalHistoryListsAndPendingRevisionAcrossReopen() = runBlocking {
-        repository.jellyfinSyncScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
-        repository.observationScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
+        stopRepository()
         db.close()
         val context = RuntimeEnvironment.getApplication()
         context.deleteDatabase("sync-durability.db")
@@ -1706,8 +1708,7 @@ class LibraryRepositoryJellyfinTest {
         assertEquals(members, db.readingListDao().getAllItems())
         assertEquals(pending, outboxDao.getPendingForComic(id))
         assertTrue(repository.observeDownloadedJellyfinCopies().first().isEmpty())
-        repository.jellyfinSyncScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
-        repository.observationScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
+        stopRepository()
         db.close(); db = open(); refreshDaos(); repository = newRepository(JellyfinClient("retention-reopen"))
         assertEquals(pending, outboxDao.getPendingForComic(id))
         enqueueArchive()
@@ -1764,8 +1765,7 @@ class LibraryRepositoryJellyfinTest {
                 return result
             }
         }
-        repository.jellyfinSyncScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
-        repository.observationScope.coroutineContext[Job]?.let { it.cancel(); it.join() }
+        stopRepository()
         repository = LibraryRepository(RuntimeEnvironment.getApplication(), comicDao, settings, db.readingListDao(), db,
             remoteComicLinkDao = links, jellyfinClient = JellyfinClient("retention-cancel"), jellyfinCredentialStore = credStore)
         enqueueArchive()
@@ -1855,8 +1855,8 @@ class LibraryRepositoryJellyfinTest {
         jellyfinClient = client, jellyfinCredentialStore = credStore, jellyfinSyncScope = scope,
     )
 
-    private fun configureSync(held: HeldProgress) {
-        repository.jellyfinSyncScope.coroutineContext[Job]?.cancel()
+    private suspend fun configureSync(held: HeldProgress) {
+        stopRepository()
         repository = newRepository(held.client)
         server.dispatcher = held
         credStore.saveAuth(JellyfinAuth("token-u", "u", "srv", "Bryan"))
