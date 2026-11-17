@@ -73,31 +73,29 @@ internal fun LazyGridScope.mainCatalogueGrid(
             }
         }
     }
-    item(span = { GridItemSpan(maxLineSpan) }) {
-        Column {
-            if (state.indexing) Text("Indexing catalogue · ${state.indexedRecords} of ${state.indexTotal} records")
-            else if (!state.indexComplete && state.loaded)
-                Text("Saved catalogue is partial · ${state.indexedRecords} records indexed")
-            else if (state.offline) Text("Searching and browsing saved metadata · connection needed for remote-only comics")
-            state.indexError?.let {
-                Text(it, color = MaterialTheme.colorScheme.error)
-                TextButton(onClick = onRetry, enabled = !state.indexing,
-                    modifier = Modifier.heightIn(min = 48.dp)) { Text("Retry refresh") }
+    if (state.indexing || (!state.indexComplete && state.loaded) || state.offline ||
+        state.indexError != null || state.collection != null || state.partialSearch) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column {
+                if (state.indexing) Text("Indexing catalogue · ${state.indexedRecords} of ${state.indexTotal} records")
+                else if (!state.indexComplete && state.loaded)
+                    Text("Saved catalogue is partial · ${state.indexedRecords} records indexed")
+                else if (state.offline) Text("Searching and browsing saved metadata · connection needed for remote-only comics")
+                state.indexError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = onRetry, enabled = !state.indexing,
+                        modifier = Modifier.heightIn(min = 48.dp)) { Text("Retry refresh") }
+                }
+                state.collection?.let { Text("Collection · ${it.name}") }
+                if (state.partialSearch) Text("Offline search covers only saved members of this collection.")
             }
-            state.collection?.let { Text("Collection · ${it.name}") }
-            if (state.partialSearch) Text("Offline search covers only saved members of this collection.")
-            if (state.updatedAt > 0) Text("Metadata updated · " + java.text.DateFormat.getDateTimeInstance(
-                java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(state.updatedAt)))
         }
     }
     if (state.view == JellyfinCatalogueView.SERIES && selectedSeries == null) {
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            Text(if (state.hasMore) "Series index · ${state.nextIndex} of ${state.total} records loaded" else "Series · Jellyfin")
-        }
         state.seriesGroups.forEach { group ->
             item(key = "remote-series:${group.key}", contentType = "remote-series") {
                 androidx.compose.runtime.CompositionLocalProvider(LocalRemoteCoverOffline provides state.offline) {
-                    RemoteSeriesStackCard(group, columns, state.hasMore, loadCover, coverWidthPx,
+                    RemoteSeriesStackCard(group, columns, loadCover, coverWidthPx,
                         selectedCoverId = coverSelections["remote:${group.key}"],
                         onCoverSelected = { onCoverSelected("remote:${group.key}", it) }) { onSeries(group.key) }
                 }

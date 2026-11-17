@@ -42,6 +42,9 @@ data class CatalogueState(
     val downloadedSeriesGroups: List<JellyfinSeriesGroup> = emptyList(),
     internal val indexedEntries: List<JellyfinCatalogueEntry> = emptyList(),
 ) {
+    internal fun refreshTimeFor(scope: String): Long =
+        if (scope.isNotEmpty() && accountScope == scope && library != null) updatedAt else 0L
+
     val downloadedFallback get() = launchFailure != null && !browsingSaved
     val usesIndex get() = creator == null && collection == null && search.isBlank() &&
         view in listOf(JellyfinCatalogueView.ALL, JellyfinCatalogueView.SERIES, JellyfinCatalogueView.UNREAD)

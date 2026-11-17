@@ -12,14 +12,5 @@
     <string name="library_select_all">Seleccionar todo</string>
     <string name="library_deselect_all">Deseleccionar todo</string>
     <string name="library_done">Listo</string>
-    <plurals name="library_series_completed">
-        <item quantity="one">%1$d número · leído</item>
-        <item quantity="many">%1$d números · leídos</item>
-        <item quantity="other">%1$d números · leídos</item>
-    </plurals>
-    <plurals name="library_series_unread">
-        <item quantity="one">%1$d número · %2$d sin leer</item>
-        <item quantity="many">%1$d números · %2$d sin leer</item>
-        <item quantity="other">%1$d números · %2$d sin leer</item>
-    </plurals>
+    <string name="jellyfin_last_catalogue_refresh">Última actualización del catálogo · %1$s</string>
 </resources>

@@ -122,6 +122,7 @@ fun MenuScreen(
     settings: AppSettings,
     repository: LibraryRepository? = null,
     openJellyfinSetup: Boolean = false,
+    catalogueRefreshAt: () -> Long = { 0L },
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -707,6 +708,18 @@ fun MenuScreen(
                             )
                         }
                         OchreBadge("CONNECTED")
+                    }
+                    val refreshedAt = catalogueRefreshAt()
+                    if (refreshedAt > 0L) {
+                        Text(
+                            stringResource(R.string.jellyfin_last_catalogue_refresh,
+                                java.text.DateFormat.getDateTimeInstance(
+                                    java.text.DateFormat.SHORT, java.text.DateFormat.SHORT
+                                ).format(java.util.Date(refreshedAt))),
+                            fontFamily = Archivo,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
 
                     Row(
