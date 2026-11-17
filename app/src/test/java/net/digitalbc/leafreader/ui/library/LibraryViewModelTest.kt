@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
@@ -106,6 +107,172 @@ class LibraryViewModelTest {
         settings.jellyfinServerUrl = "https://example.test"
         settings.jellyfinServerId = "server"
         settings.jellyfinUserId = "user"
+    }
+
+    private fun fileImportViewModel(
+        dispatcher: kotlinx.coroutines.CoroutineDispatcher = testDispatcher,
+        importer: suspend (android.net.Uri, (Float) -> Unit, () -> Boolean) -> Result<Long>,
+    ) = LibraryViewModel(
+        repository, settings, defaultDispatcher = testDispatcher,
+        importFile = importer, importDispatcher = dispatcher,
+    ).also { stores += ViewModelStore().apply { put("file-import", it) } }
+
+    private suspend fun fileResult(vm: LibraryViewModel, id: Long): FileImportState =
+        withTimeout(3000) { vm.fileImportState.first { it?.operationId == id && it.finished }!! }
+
+    private fun fileUri(id: Int) = android.net.Uri.parse("content://fixture/$id")
+
+    @Test
+    fun fileImportReportsOnlyConfirmedIdsAndKeepsPartialFailureMessage() = runBlocking {
+        val vm = fileImportViewModel { uri, _, _ ->
+            if (uri == fileUri(2)) Result.failure(java.io.IOException("Invalid archive"))
+            else Result.success(uri.lastPathSegment!!.toLong())
+        }
+        val id = vm.importComics(listOf(fileUri(1), fileUri(2), fileUri(3)))!!
+        val result = fileResult(vm, id)
+        assertEquals(3, result.requestedCount)
+        assertEquals(listOf(1L, 3L), result.importedComicIds)
+        assertEquals(1, result.failedCount)
+        assertFalse(result.cancelled)
+        assertFalse(vm.importing.value)
+        assertEquals("Imported 2 of 3 comics (1 failed).", vm.message.value)
+        vm.consumeFileImportResult(id)
+        assertNull(vm.fileImportState.value)
+    }
+
+    @Test
+    fun failedFileImportCannotReportSuccessOrReuseAnEarlierResult() = runBlocking {
+        val vm = fileImportViewModel { uri, _, _ ->
+            if (uri == fileUri(1)) Result.success(1L) else Result.failure(java.io.IOException("Invalid archive"))
+        }
+        val first = vm.importComics(listOf(fileUri(1)))!!
+        fileResult(vm, first)
+        val second = vm.importComics(listOf(fileUri(2)))!!
+        val result = fileResult(vm, second)
+        assertTrue(second > first)
+        assertTrue(result.importedComicIds.isEmpty())
+        assertEquals(1, result.failedCount)
+        vm.consumeFileImportResult(first)
+        assertEquals(result, vm.fileImportState.value)
+    }
+
+    @Test
+    fun emptySelectionDoesNotCancelRunningBatchAndSelectionsAreSnapshotted() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        val seen = mutableListOf<android.net.Uri>()
+        val vm = fileImportViewModel { uri, _, _ ->
+            seen += uri
+            if (uri == fileUri(1)) release.await()
+            Result.success(uri.lastPathSegment!!.toLong())
+        }
+        val selection = mutableListOf(fileUri(1), fileUri(2))
+        val id = vm.importComics(selection)!!
+        selection.clear()
+        assertNull(vm.importComics(emptyList()))
+        vm.consumeFileImportResult(id)
+        assertEquals(id, vm.fileImportState.value?.operationId)
+        assertFalse(vm.fileImportState.value!!.finished)
+        release.complete(Unit)
+        assertEquals(listOf(1L, 2L), fileResult(vm, id).importedComicIds)
+        assertEquals(listOf(fileUri(1), fileUri(2)), seen)
+    }
+
+    @Test
+    fun cancellingPartialImportReportsRetainedSuccessWithoutInventingFailedFiles() = runBlocking {
+        val secondStarted = CompletableDeferred<Unit>()
+        val vm = fileImportViewModel { uri, _, _ ->
+            if (uri == fileUri(2)) {
+                secondStarted.complete(Unit)
+                CompletableDeferred<Unit>().await()
+            }
+            Result.success(uri.lastPathSegment!!.toLong())
+        }
+        val id = vm.importComics(listOf(fileUri(1), fileUri(2), fileUri(3)))!!
+        secondStarted.await()
+        vm.cancelImport()
+        val result = fileResult(vm, id)
+        assertTrue(result.cancelled)
+        assertEquals(listOf(1L), result.importedComicIds)
+        assertEquals(0, result.failedCount)
+        assertFalse(vm.importing.value)
+    }
+
+    @Test
+    fun replacementWaitsForCleanupAndOldCompletionCannotCompleteOrConsumeNewBatch() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        val seen = mutableListOf<Int>()
+        val vm = fileImportViewModel { uri, _, _ ->
+            val value = uri.lastPathSegment!!.toInt()
+            seen += value
+            if (value == 1) withContext(NonCancellable) { release.await() }
+            Result.success(value.toLong())
+        }
+        try {
+            val oldId = vm.importComics(listOf(fileUri(1)))!!
+            val newId = vm.importComics(listOf(fileUri(2)))!!
+            assertEquals(listOf(1), seen)
+            vm.consumeFileImportResult(oldId)
+            assertEquals(newId, vm.fileImportState.value?.operationId)
+            assertFalse(vm.fileImportState.value!!.finished)
+            release.complete(Unit)
+            val result = fileResult(vm, newId)
+            assertEquals(listOf(1, 2), seen)
+            assertEquals(listOf(2L), result.importedComicIds)
+            assertFalse(result.cancelled)
+            vm.consumeFileImportResult(oldId)
+            assertEquals(result, vm.fileImportState.value)
+        } finally {
+            release.complete(Unit)
+        }
+    }
+
+    @Test
+    fun cancellationWhileWaitingForOldCleanupStillFinishesItsOwnResult() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        val vm = fileImportViewModel { uri, _, _ ->
+            assertEquals(fileUri(1), uri)
+            withContext(NonCancellable) { release.await() }
+            Result.success(1L)
+        }
+        try {
+            vm.importComics(listOf(fileUri(1)))
+            val id = vm.importComics(listOf(fileUri(2)))!!
+            vm.cancelImport()
+            val result = fileResult(vm, id)
+            assertTrue(result.cancelled)
+            assertTrue(result.importedComicIds.isEmpty())
+            release.complete(Unit)
+            assertEquals(result, vm.fileImportState.value)
+        } finally {
+            release.complete(Unit)
+        }
+    }
+
+    @Test
+    fun cancellationBeforeDispatchDoesNotLeaveTheBatchPending() = runBlocking {
+        val dispatcher = StandardTestDispatcher()
+        val vm = fileImportViewModel(dispatcher) { _, _, _ -> error("Cancelled batch must not import") }
+        val id = vm.importComics(listOf(fileUri(1)))!!
+        vm.cancelImport()
+        dispatcher.scheduler.runCurrent()
+        assertTrue(fileResult(vm, id).cancelled)
+        assertTrue(vm.fileImportState.value!!.importedComicIds.isEmpty())
+    }
+
+    @Test
+    fun repositoryCancellationResultStopsTheBatchWithoutReportingAFileFailure() = runBlocking {
+        var calls = 0
+        val vm = fileImportViewModel { _, _, _ ->
+            calls++
+            Result.failure(kotlinx.coroutines.CancellationException("Cancelled"))
+        }
+        val id = vm.importComics(listOf(fileUri(1), fileUri(2)))!!
+        val result = fileResult(vm, id)
+        assertEquals(1, calls)
+        assertTrue(result.cancelled)
+        assertEquals(0, result.failedCount)
+        assertTrue(result.importedComicIds.isEmpty())
+        assertEquals("Import cancelled.", vm.message.value)
     }
 
     @Test
