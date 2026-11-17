@@ -2531,7 +2531,7 @@ private fun Modifier.onePointerCoverPeel(
     }
 }
 
-private data class StackCover(val id: String, val coverPath: String?, val issueNumber: Float?, val remote: JellyfinItem? = null)
+internal data class StackCover(val id: String, val coverPath: String?, val issueNumber: Float?, val remote: JellyfinItem? = null)
 private data class StackPresentation(
     val seriesName: String, val volume: String?, val issues: List<StackCover>,
     val topCoverComic: StackCover, val progressFraction: Float, val subtitle: String,
@@ -2549,6 +2549,13 @@ private fun stackCover(cover: StackCover?, load: (suspend (JellyfinItem) -> Bitm
     }
     return local ?: remote?.asImageBitmap()
 }
+
+/** Keep artwork state with its comic while that comic changes stack roles. */
+@Composable
+internal fun stackCoverImages(covers: List<StackCover>, load: (suspend (JellyfinItem) -> Bitmap?)?, widthPx: Int): Map<String, ImageBitmap?> =
+    covers.distinctBy { it.id }.associate { cover ->
+        cover.id to androidx.compose.runtime.key(cover.id) { stackCover(cover, load, widthPx) }
+    }
 
 @Composable
 private fun ComicStackCard(stack: LibraryItem.SeriesStack, columns: Int = 2,
@@ -2616,6 +2623,7 @@ private fun CoverStackCard(
         else null
     }
 
+    val coverImages = stackCoverImages(listOfNotNull(currentTopComic, layer2Comic, layer3Comic), loadRemoteCover, remoteCoverWidthPx)
     val coroutineScope = rememberCoroutineScope()
     val offsetY = remember { Animatable(0f) }
     var cardHeightPx by remember { mutableFloatStateOf(0f) }
@@ -2652,7 +2660,7 @@ private fun CoverStackCard(
         ) {
             // Neat Stack Layer 3 (for 3+ issues) - highest top offset
             if (stack.totalIssues >= 3) {
-                val cover3 = stackCover(layer3Comic, loadRemoteCover, remoteCoverWidthPx)
+                val cover3 = coverImages[layer3Comic?.id]
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -2674,7 +2682,7 @@ private fun CoverStackCard(
 
             // Neat Stack Layer 2 (for 2+ issues) - middle top offset
             if (stack.totalIssues >= 2) {
-                val cover2 = stackCover(layer2Comic, loadRemoteCover, remoteCoverWidthPx)
+                val cover2 = coverImages[layer2Comic?.id]
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -2746,7 +2754,7 @@ private fun CoverStackCard(
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .border(width = borderWidth, color = Color.Transparent, shape = RoundedCornerShape(4.dp)),
             ) {
-                val cover1 = stackCover(currentTopComic, loadRemoteCover, remoteCoverWidthPx)
+                val cover1 = coverImages[currentTopComic.id]
                 if (cover1 != null) {
                     Image(cover1, stack.seriesName, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 } else {
