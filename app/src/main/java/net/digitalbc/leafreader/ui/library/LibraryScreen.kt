@@ -406,7 +406,7 @@ fun LibraryScreen(
     val actualColumns = libraryColumns.coerceIn(if (configuration.fontScale > 1.3f) 1 else 2, maximumColumns)
     val gridPositions = rememberSaveableStateHolder()
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+    val picker = rememberComicFilePicker { uris ->
         if (!uris.isNullOrEmpty()) viewModel.importComics(uris)
     }
 
@@ -1087,7 +1087,7 @@ fun LibraryScreen(
                             .background(LeafPrimary)
                             .clickable {
                                 showSourceDialog = false
-                                picker.launch(arrayOf("*/*"))
+                                picker.launch(comicFileMimeTypes)
                             }
                             .padding(vertical = 12.dp, horizontal = 16.dp),
                         horizontalArrangement = Arrangement.Center,

@@ -44,8 +44,35 @@ class FirstLaunchStateStore internal constructor(
         return persist(next)
     }
 
+    /** Installation-local recovery receipt, saved before importing or presenting setup. */
+    @Synchronized
+    fun beginImport(existingIds: Set<Long>) {
+        if (!preferences.edit().putString(PENDING, "IMPORT")
+                .putStringSet(BASELINE, existingIds.map(Long::toString).toSet()).commit())
+            throw IOException("Import intent could not be saved")
+    }
+
+    @Synchronized
+    fun beginSetup() {
+        if (!preferences.edit().putString(PENDING, "SETUP").remove(BASELINE).commit())
+            throw IOException("Setup intent could not be saved")
+    }
+
+    @Synchronized
+    fun pendingOperation(): Pair<String, Set<Long>>? = preferences.getString(PENDING, null)?.let { phase ->
+        phase to preferences.getStringSet(BASELINE, emptySet()).orEmpty().mapNotNull(String::toLongOrNull).toSet()
+    }
+
+    @Synchronized
+    fun clearPending() {
+        if (!preferences.edit().remove(PENDING).remove(BASELINE).commit())
+            throw IOException("Pending intent could not be cleared")
+    }
+
     private fun persist(state: FirstLaunchState): FirstLaunchState {
-        if (!preferences.edit().putString(STATE, state.name).commit()) {
+        val editor = preferences.edit().putString(STATE, state.name)
+        if (state == FirstLaunchState.COMPLETE) editor.remove(PENDING).remove(BASELINE)
+        if (!editor.commit()) {
             throw IOException("First-launch state could not be saved")
         }
         current = state
@@ -56,6 +83,8 @@ class FirstLaunchStateStore internal constructor(
         // Separate from leaf.settings so this marker cannot suppress legacy settings migration.
         const val PREFERENCES = "leaf.onboarding"
         const val STATE = "state"
+        private const val PENDING = "pending"
+        private const val BASELINE = "existingComicIds"
 
         @Suppress("DEPRECATION")
         fun hasExistingInstall(context: Context): Boolean = try {

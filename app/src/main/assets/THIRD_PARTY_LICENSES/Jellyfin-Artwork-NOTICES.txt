@@ -1,0 +1,9 @@
+Jellyfin icon-transparent.svg
+Copyright the Jellyfin contributors.
+Source: https://github.com/jellyfin/jellyfin-ux/blob/master/branding/SVG/icon-transparent.svg
+License: Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+https://creativecommons.org/licenses/by-sa/4.0/
+Full license included in Jellyfin-Artwork-CC-BY-SA-4.0.txt.
+The SVG bytes are unchanged from the owner-selected HTML and official source; display size is adapted by native layout. No endorsement is implied.
+
+Android adaptation: ic_onboarding_jellyfin.xml converts these unchanged paths and gradient to Android VectorDrawable; adaptation under CC BY-SA 4.0. Original SVG SHA-256: 817c25b47442b192250448fe48cd5f265fe9183bc75aa12030bbe335495255d1.

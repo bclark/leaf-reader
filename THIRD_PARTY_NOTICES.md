@@ -112,3 +112,7 @@ Full text: [`THIRD_PARTY_LICENSES/AGPL-3.0.txt`](THIRD_PARTY_LICENSES/AGPL-3.0.t
 - The selected release declares swift-atomics only for its own test target. It is not linked into the Leaf app.
 
 See [iOS SMB spike evidence](docs/SMB_IOS_SPIKE_RESULTS.md) for verification and pending acceptance checks.
+
+## Jellyfin onboarding artwork
+
+Copyright the Jellyfin contributors. Official icon-transparent.svg, licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), reused from the verified iOS artwork packet. Android VectorDrawable adaptation retains its paths and gradient; adaptation under the same license. Original SVG, attribution, provenance and full license are bundled in THIRD_PARTY_LICENSES/Jellyfin-Artwork-* and Jellyfin-icon-transparent.svg. No endorsement is implied.

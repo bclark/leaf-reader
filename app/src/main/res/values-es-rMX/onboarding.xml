@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="onboarding_welcome_title">ABRE TU PRIMER CÓMIC</string>
+    <string name="onboarding_welcome_body">Elige un CBZ, CBR o PDF de tu dispositivo. Una vez importado, podrás leerlo sin conexión.</string>
+    <string name="onboarding_choose_file">Elegir un archivo</string>
+    <string name="onboarding_use_jellyfin">Uso Jellyfin</string>
+    <string name="onboarding_later">Quizá más tarde</string>
+    <string name="onboarding_jellyfin_title">TRAE TU BIBLIOTECA DE JELLYFIN</string>
+    <string name="onboarding_jellyfin_body">Conecta tu servidor para explorar tu colección en Leaf. Descarga cómics para leerlos sin conexión.</string>
+    <string name="onboarding_connect">Conectar Jellyfin</string>
+    <string name="onboarding_without_jellyfin">Usar sin Jellyfin</string>
+    <string name="onboarding_importing">Importando tus cómics…</string>
+    <string name="onboarding_saving">Preparando Leaf…</string>
+    <string name="onboarding_save_error">Leaf no pudo guardar tu elección. Vuelve a intentarlo para conservarla al reiniciar.</string>
+    <string name="onboarding_retry_save">Volver a guardar</string>
+    <string name="onboarding_import_error">No se importó ningún cómic. Elige otro archivo o continúa sin uno.</string>
+    <string name="onboarding_interrupted">Se interrumpió la importación. Tus cómics guardados están a salvo; elige un archivo para volver a intentarlo.</string>
+    <string name="onboarding_back">Atrás</string>
+    <string name="onboarding_prepare_error">Leaf no pudo preparar esta acción. Vuelve a intentarlo.</string>
+    <string name="onboarding_connection_error">No se pudo conectar. Revisa los datos del servidor y vuelve a intentarlo.</string>
+</resources>

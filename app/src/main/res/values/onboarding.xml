@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="onboarding_welcome_title">OPEN YOUR FIRST COMIC</string>
+    <string name="onboarding_welcome_body">Choose a CBZ, CBR, or PDF from your device. Once imported, it’s ready to read offline.</string>
+    <string name="onboarding_choose_file">Choose a file</string>
+    <string name="onboarding_use_jellyfin">I use Jellyfin</string>
+    <string name="onboarding_later">Maybe later</string>
+    <string name="onboarding_jellyfin_title">BRING YOUR JELLYFIN LIBRARY</string>
+    <string name="onboarding_jellyfin_body">Connect your server to browse your collection in Leaf. Download comics to read them offline.</string>
+    <string name="onboarding_connect">Connect Jellyfin</string>
+    <string name="onboarding_without_jellyfin">Use without Jellyfin</string>
+    <string name="onboarding_importing">Importing your comics…</string>
+    <string name="onboarding_saving">Getting Leaf ready…</string>
+    <string name="onboarding_save_error">Leaf couldn’t save your choice. Retry to keep it after relaunch.</string>
+    <string name="onboarding_retry_save">Retry saving</string>
+    <string name="onboarding_import_error">No comic was imported. Choose another file or continue without one.</string>
+    <string name="onboarding_interrupted">The import was interrupted. Your retained comics are safe; choose a file to try again.</string>
+    <string name="onboarding_back">Back</string>
+    <string name="onboarding_prepare_error">Leaf couldn’t prepare this action. Please try again.</string>
+    <string name="onboarding_connection_error">Connection failed. Check your server details and try again.</string>
+</resources>
