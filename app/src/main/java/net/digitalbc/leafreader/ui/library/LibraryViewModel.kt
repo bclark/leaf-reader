@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicLong
 
 enum class LibraryFilter(val label: String) {
     SERIES("SERIES"),
@@ -94,6 +95,16 @@ data class JellyfinDetailState(
     val readyComicId: Long? = null,
 )
 
+/** One local picker batch. Only retained repository successes appear in [importedComicIds]. */
+data class FileImportState(
+    val operationId: Long,
+    val requestedCount: Int,
+    val finished: Boolean = false,
+    val importedComicIds: List<Long> = emptyList(),
+    val failedCount: Int = 0,
+    val cancelled: Boolean = false,
+)
+
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class LibraryViewModel(
     private val repository: LibraryRepository,
@@ -106,10 +117,21 @@ class LibraryViewModel(
         repository.listJellyfinItems(it, syncReadingProgress = false)
     },
     private val defaultDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default,
+    private val importFile: suspend (Uri, (Float) -> Unit, () -> Boolean) -> Result<Long> = repository::importComic,
+    private val importDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
     private val listSmbDirectory: suspend (String) -> Result<List<SmbEntry>> = repository::listSmbDirectory,
 ) : ViewModel() {
 
     private var importJob: Job? = null
+    private val fileImportIds = AtomicLong()
+    private val _fileImportState = MutableStateFlow<FileImportState?>(null)
+    val fileImportState: StateFlow<FileImportState?> = _fileImportState.asStateFlow()
+
+    fun consumeFileImportResult(operationId: Long) {
+        _fileImportState.update { state ->
+            if (state?.operationId == operationId && state.finished) null else state
+        }
+    }
 
     /** Search query for filtering comics in the library. */
     private val _searchQuery = MutableStateFlow("")
@@ -643,6 +665,7 @@ class LibraryViewModel(
         if (items.isEmpty()) return
         val selectedItems = items.toList()
         val session = repository.captureJellyfinImportSession()
+        _fileImportState.value = null
         val previousImport = importJob
         previousImport?.cancel()
         importJob = viewModelScope.launch(Dispatchers.IO) {
@@ -699,41 +722,46 @@ class LibraryViewModel(
 
     fun importComic(uri: Uri) = importComics(listOf(uri))
 
-    fun importComics(uris: List<Uri>) {
-        if (uris.isEmpty()) return
+    fun importComics(uris: List<Uri>): Long? {
+        if (uris.isEmpty()) return null
+        val selectedUris = uris.toList()
+        val operationId = fileImportIds.incrementAndGet()
+        _fileImportState.value = FileImportState(operationId, selectedUris.size)
+        val importedComicIds = mutableListOf<Long>()
+        var failedCount = 0
+        var wasCancelled = false
         val previousImport = importJob
         previousImport?.cancel()
-        importJob = viewModelScope.launch(Dispatchers.IO) {
+        val job = viewModelScope.launch(importDispatcher) {
             previousImport?.join()
             _importing.value = true
             _importProgress.value = 0f
             _importDetail.value = null
             var importedCount = 0
-            var failedCount = 0
-            var wasCancelled = false
-            val total = uris.size
+            val total = selectedUris.size
 
             try {
-                for ((index, uri) in uris.withIndex()) {
+                for ((index, uri) in selectedUris.withIndex()) {
                     if (!isActive) {
                         wasCancelled = true
                         break
                     }
                     _importStatus.value = if (total > 1) "Importing ${index + 1} of $total…" else "Importing comic…"
-                    val result = repository.importComic(
-                        uri = uri,
-                        onProgress = { fileProgress ->
+                    val result = importFile(
+                        uri,
+                        { fileProgress ->
                             val overall = (index + fileProgress) / total
                             _importProgress.value = overall
                             val pct = (overall * 100).toInt().coerceIn(0, 100)
                             _importDetail.value = "$pct% completed"
                         },
-                        isCancelled = { !isActive },
+                        { !isActive },
                     )
                     if (result.isSuccess) {
                         importedCount++
+                        importedComicIds += result.getOrThrow()
                     } else {
-                        if (!isActive) {
+                        if (!isActive || result.exceptionOrNull() is CancellationException) {
                             wasCancelled = true
                             break
                         }
@@ -758,6 +786,19 @@ class LibraryViewModel(
                 }
             }
         }
+        importJob = job
+        // Completion also covers cancellation before dispatch or while waiting for an old batch.
+        job.invokeOnCompletion { error ->
+            _fileImportState.update { state ->
+                if (state?.operationId == operationId) state.copy(
+                    finished = true,
+                    importedComicIds = importedComicIds.toList(),
+                    failedCount = failedCount,
+                    cancelled = wasCancelled || error is CancellationException,
+                ) else state
+            }
+        }
+        return operationId
     }
 
     fun importFolder(treeUri: Uri) {
@@ -814,6 +855,7 @@ class LibraryViewModel(
         }
         val password = settings.smbPassword
         val selectedEntries = entries.toList()
+        _fileImportState.value = null
         val previousImport = importJob
         previousImport?.cancel()
         importJob = viewModelScope.launch(Dispatchers.IO) {
