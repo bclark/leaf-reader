@@ -7,6 +7,12 @@
     @net.engio.mbassy.listener.Handler <methods>;
 }
 
+# MBassador's default @Handler invocation is constructed with
+# Class.getConstructor(SubscriptionContext.class), not a direct constructor call.
+-keep,allowobfuscation,includedescriptorclasses class net.engio.mbassy.dispatch.ReflectiveHandlerInvocation {
+    public <init>(net.engio.mbassy.subscription.SubscriptionContext);
+}
+
 # Strip info/debug/verbose logging from release builds (errors and warnings are kept).
 -assumenosideeffects class android.util.Log {
     public static int v(...);
