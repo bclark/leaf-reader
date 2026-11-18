@@ -39,6 +39,14 @@ class MinifiedSmokeTest {
         }
     }
 
+    @Test fun reflectiveSmbInvocationConstructorSurvivesMinification() {
+        val invocation = probes.getJSONObject("invocation")
+        val owner = target.classLoader.loadClass(invocation.getString("owner"))
+        val context = target.classLoader.loadClass(invocation.getString("context"))
+        // MBassador performs this exact lookup before any SMB socket is opened.
+        owner.getConstructor(context)
+    }
+
     @Test fun nativeArchiveCallbacksWorkInFullAndAreAbsentInFdroid() {
         val loader = target.classLoader
         if (!probes.getBoolean("sevenzip")) {

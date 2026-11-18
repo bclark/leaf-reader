@@ -35,7 +35,13 @@ def probes(mapping):
     annotation = 'net.engio.mbassy.listener.Handler'
     if annotation not in classes:
         raise ValueError('Runtime SMB handler annotation is absent')
+    invocation = 'net.engio.mbassy.dispatch.ReflectiveHandlerInvocation'
+    context = 'net.engio.mbassy.subscription.SubscriptionContext'
+    constructor = re.compile(r'void <init>\(' + re.escape(context) + r'\)(?::\d+)* -> <init>$')
+    if context not in classes or not any(constructor.search(line) for line in methods.get(invocation, [])):
+        raise ValueError('Minified SMB reflective invocation constructor is absent')
     return {'handlers': result, 'annotation': classes[annotation],
+            'invocation': {'owner': classes[invocation], 'context': classes[context]},
             'sevenzip': 'net.sf.sevenzipjbinding.SevenZip' in classes,
             'mappingSha256': hashlib.sha256(mapping.encode()).hexdigest()}
 
