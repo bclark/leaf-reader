@@ -9,6 +9,35 @@ import java.io.EOFException
 import java.io.InputStream
 
 class SmbTransferTest {
+    @Test fun cancelledOperationSkipsProtocolCloseButNormalOperationCloses() {
+        var closes = 0
+        val resource = AutoCloseable { closes++ }
+        resource.useSmbResource({ false }) { assertSame(resource, it) }
+        assertEquals(1, closes)
+        var cancelled = false
+        val cancellation = CancellationException()
+        try {
+            resource.useSmbResource({ cancelled }) {
+                cancelled = true
+                throw cancellation
+            }
+            fail("Expected cancellation")
+        } catch (actual: CancellationException) { assertSame(cancellation, actual) }
+        assertEquals(1, closes)
+    }
+
+    @Test fun normalCloseFailureDoesNotReplaceTheOriginalFailure() {
+        val failure = IllegalStateException("operation")
+        val closeFailure = IllegalStateException("close")
+        try {
+            AutoCloseable { throw closeFailure }.useSmbResource({ false }) { throw failure }
+            fail("Expected operation failure")
+        } catch (actual: IllegalStateException) {
+            assertSame(failure, actual)
+            assertArrayEquals(arrayOf(closeFailure), actual.suppressed)
+        }
+    }
+
     @Test fun streamsBytesAndReportsProgressWithoutClaimingImportCompletion() {
         val bytes = ByteArray(2 * 1024 * 1024 + 17) { (it % 251).toByte() }
         val events = mutableListOf<SmbTransferProgress>()

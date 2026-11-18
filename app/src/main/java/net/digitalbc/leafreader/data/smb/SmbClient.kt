@@ -73,7 +73,7 @@ object SmbClient {
         try {
             withShare(config, password, isCancelled) { share ->
                 share.openFile(fullPath, EnumSet.of(AccessMask.GENERIC_READ), null,
-                    EnumSet.of(SMB2ShareAccess.FILE_SHARE_READ), SMB2CreateDisposition.FILE_OPEN, null).use { remote ->
+                    EnumSet.of(SMB2ShareAccess.FILE_SHARE_READ), SMB2CreateDisposition.FILE_OPEN, null).useSmbResource(isCancelled) { remote ->
                     // Stat again at open time: a server file may have changed since the listing.
                     val total = remote.fileInformation.standardInformation.endOfFile
                     remote.inputStream.use { input ->
@@ -103,7 +103,7 @@ object SmbClient {
 
         try {
             SMBClient(smbConfig).use { client ->
-                client.connect(config.host, config.port).use { connection ->
+                client.connect(config.host, config.port).useSmbResource(isCancelled) { connection ->
                     // Closing this operation's connection releases a blocked read on cancellation.
                     // Initial socket connection still has the finite SMBJ timeout.
                     val monitor = Executors.newSingleThreadScheduledExecutor { work ->
@@ -114,8 +114,8 @@ object SmbClient {
                     }, 0, 100, TimeUnit.MILLISECONDS)
                     try {
                         checkSmbCancellation(isCancelled)
-                        connection.authenticate(auth).use { session ->
-                            (session.connectShare(config.share) as DiskShare).use { share ->
+                        connection.authenticate(auth).useSmbResource(isCancelled) { session ->
+                            (session.connectShare(config.share) as DiskShare).useSmbResource(isCancelled) { share ->
                                 checkSmbCancellation(isCancelled)
                                 val result = block(share)
                                 checkSmbCancellation(isCancelled)
@@ -125,6 +125,9 @@ object SmbClient {
                     } finally {
                         poll.cancel(true)
                         monitor.shutdownNow()
+                        // Cancelled operations must not wait for graceful SMB close RPCs.
+                        // Also close here if cancellation raced the monitor's next poll.
+                        if (isCancelled()) runCatching { connection.close(true) }
                     }
                 }
             }
@@ -136,6 +139,12 @@ object SmbClient {
 
     private fun wirePath(path: String): String = path.replace('/', '\\')
 }
+
+/** The operation's connection is force-closed on cancellation; skip protocol-level closes. */
+internal inline fun <T : AutoCloseable, R> T.useSmbResource(
+    crossinline isCancelled: () -> Boolean,
+    block: (T) -> R,
+): R = java.io.Closeable { if (!isCancelled()) close() }.use { block(this) }
 
 internal fun checkSmbCancellation(isCancelled: () -> Boolean) {
     if (isCancelled()) throw CancellationException("SMB operation cancelled")
