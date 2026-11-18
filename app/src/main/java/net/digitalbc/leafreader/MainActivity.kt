@@ -3,6 +3,9 @@ package net.digitalbc.leafreader
 import android.os.Bundle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -28,6 +31,14 @@ class MainActivity : ComponentActivity() {
 
     private fun finishStartup(app: ComicReaderApp) {
         lifecycleScope.launch {
+            try {
+                // Decide eligibility before recovery opens Room and before legacy settings migrate.
+                withContext(Dispatchers.IO) { app.firstLaunchState.initialize() }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                android.util.Log.w("LeafStartup", "First-launch state unavailable; continuing Library startup", error)
+            }
             val recovery = app.libraryRepository.recoverPendingBackupPreferences()
             if (recovery.isFailure) {
                 android.app.AlertDialog.Builder(this@MainActivity)
