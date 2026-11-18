@@ -7,7 +7,7 @@
     <string name="library_unread_only">Solo sin leer</string>
     <string name="library_clear_unread">Quitar filtro sin leer</string>
     <string name="library_no_unread">No hay cómics sin leer en esta vista.</string>
-    <string name="library_offline_empty">Aún no hay copias disponibles. Importa un cómic de Archivos o SMB, o descarga uno de Jellyfin.</string>
+    <string name="library_offline_empty">Aún no hay cómics guardados para leer sin conexión. Importa uno desde Archivos o SMB, o descárgalo desde Jellyfin. Desconectar un servidor no elimina las copias guardadas.</string>
     <string name="library_default_rtl">Lectura de derecha a izquierda por defecto</string>
     <string name="library_select_all">Seleccionar todo</string>
     <string name="library_deselect_all">Deseleccionar todo</string>

@@ -114,21 +114,6 @@ private fun ContinueCard(candidate: ContinueReading, busy: Boolean, progress: Fl
 }
 
 @Composable
-internal fun LibraryBottomAction(lists: Boolean, importing: Boolean, onClick: () -> Unit) {
-    HorizontalDivider()
-    val gutter = if (LocalConfiguration.current.screenWidthDp >= 600) 32.dp else 18.dp
-    Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = gutter, vertical = 12.dp)) {
-        Button(onClick, enabled = !importing, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Ochre, contentColor = Ink, disabledContainerColor = Ochre, disabledContentColor = Ink)) {
-            if (importing) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-            else Icon(Icons.Default.Add, null)
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(if (lists) R.string.library_create_reading_list else R.string.library_add_comics), fontFamily = Archivo)
-        }
-    }
-}
-
-@Composable
 internal fun LibraryEmpty(onAdd: () -> Unit, onConnect: () -> Unit, importing: Boolean) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {

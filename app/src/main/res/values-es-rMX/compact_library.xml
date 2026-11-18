@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="compact_confirm_removal">Confirmar eliminación de descargas</string>
+    <string name="compact_confirm_removal_body">Preguntar antes de eliminar copias locales de Jellyfin. Se conservan los originales y el progreso de lectura.</string>
+    <string name="compact_remove_title">¿Eliminar copias descargadas?</string>
+    <plurals name="compact_remove_body"><item quantity="one">Se eliminará %1$d copia descargada de este dispositivo. Se conservarán los elementos de Jellyfin, el progreso, las listas y los archivos originales. Otros elementos seleccionados sin cambios: %2$d.</item><item quantity="other">Se eliminarán %1$d copias descargadas de este dispositivo. Se conservarán los elementos de Jellyfin, el progreso, las listas y los archivos originales. Otros elementos seleccionados sin cambios: %2$d.</item><item quantity="many">Se eliminarán %1$d copias descargadas de este dispositivo. Se conservarán los elementos de Jellyfin, el progreso, las listas y los archivos originales. Otros elementos seleccionados sin cambios: %2$d.</item></plurals>
+    <string name="compact_copy_failed">No se pudo completar la acción. Revisa la conexión y la selección y vuelve a intentarlo.</string>
+    <string name="compact_done">Terminar selección</string>
+    <string name="compact_select">Seleccionar cómics</string>
+    <string name="compact_details">Ver detalles del cómic</string>
+    <string name="compact_cancel">Cancelar</string>
+    <string name="compact_remove">Eliminar copias</string>
+    <plurals name="compact_download_count"><item quantity="one">Descargar %1$d</item><item quantity="other">Descargar %1$d</item><item quantity="many">Descargar %1$d</item></plurals>
+    <plurals name="compact_remove_count"><item quantity="one">Eliminar %1$d descarga</item><item quantity="other">Eliminar %1$d descargas</item><item quantity="many">Eliminar %1$d descargas</item></plurals>
+    <plurals name="compact_selected"><item quantity="one">%1$d cómic seleccionado</item><item quantity="other">%1$d cómics seleccionados</item><item quantity="many">%1$d cómics seleccionados</item></plurals>
+</resources>

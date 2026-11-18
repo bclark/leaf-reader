@@ -15,16 +15,35 @@ internal data class RemoteListSelection(val entry: JellyfinCatalogueEntry, val i
 
 @Composable
 internal fun RemoteListActions(
-    selection: RemoteListSelection?, libraryId: String?, viewModel: LibraryViewModel, onDismiss: () -> Unit,
+    selection: RemoteListSelection?, libraryId: String?, viewModel: LibraryViewModel,
+    canDownload: Boolean = false, canRemove: Boolean = false,
+    onDownload: () -> Unit = {}, onRemove: () -> Unit = {}, onSelect: (() -> Unit)? = null,
+    onDismiss: () -> Unit,
 ) {
     if (selection == null) return
     val lists by viewModel.readingLists.collectAsStateWithLifecycle()
     var name by remember(selection.identity) { mutableStateOf("") }
     AlertDialog(onDismissRequest = onDismiss,
-        title = { Text("Add to Leaf list") },
+        title = { Text(selection.entry.item.name) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text(selection.entry.item.name)
+                TextButton(onClick = { onDismiss(); viewModel.openJellyfinDetail(selection.entry.item) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.compact_details))
+                }
+                if (canDownload) TextButton(onClick = { onDismiss(); onDownload() },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    Text(androidx.compose.ui.res.pluralStringResource(net.digitalbc.leafreader.R.plurals.compact_download_count, 1, 1))
+                }
+                if (canRemove) TextButton(onClick = { onDismiss(); onRemove() },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    Text(androidx.compose.ui.res.pluralStringResource(net.digitalbc.leafreader.R.plurals.compact_remove_count, 1, 1))
+                }
+                if (onSelect != null) TextButton(onClick = { onDismiss(); onSelect() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.compact_select))
+                }
+                HorizontalDivider()
+                Text("Add to Leaf list")
                 Text("List membership does not download the comic.")
                 lists.forEach { list ->
                     TextButton(onClick = {

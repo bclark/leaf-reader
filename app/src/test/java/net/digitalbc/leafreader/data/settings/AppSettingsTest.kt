@@ -6,6 +6,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AppSettingsTest {
+    @Test fun downloadRemovalConfirmationDefaultsOnAndOptOutPersists() {
+        val stored = mutableMapOf<String, Any>()
+        val settings = AppSettings(preferences(stored))
+        assertTrue(settings.confirmDownloadRemoval)
+        settings.confirmDownloadRemoval = false
+        assertFalse(AppSettings(preferences(stored)).confirmDownloadRemoval)
+        settings.confirmDownloadRemoval = true
+        assertTrue(AppSettings(preferences(stored)).confirmDownloadRemoval)
+    }
+
     @Test fun freshInstallKeepsBothOrientationsSingle() {
         val settings = AppSettings(preferences(mutableMapOf()))
         assertFalse(settings.portraitSpread)

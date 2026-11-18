@@ -84,6 +84,7 @@ internal fun JellyfinDetailScreen(
     syncError: String? = null,
     onRemoveDownload: (() -> Unit)? = null,
     removingDownload: Boolean = false,
+    confirmRemovalRequired: Boolean = true,
 ) {
     var confirmRemoval by remember(state.identity) { mutableStateOf(false) }
     if (confirmRemoval && onRemoveDownload != null) {
@@ -193,7 +194,7 @@ internal fun JellyfinDetailScreen(
                             }
                             DetailActions(state, importing, importProgress, importDetail,
                                 onRead, onDownload, onCancel, onCheckCopy, onSync, syncing, syncError,
-                                onRemoveDownload?.let { { confirmRemoval = true } }, removingDownload)
+                                onRemoveDownload?.let { remove -> ({ if (confirmRemovalRequired) confirmRemoval = true else remove() }) }, removingDownload)
                         }
                     }
                 }
