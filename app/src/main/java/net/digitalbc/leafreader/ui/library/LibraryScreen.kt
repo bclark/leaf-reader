@@ -833,7 +833,7 @@ fun LibraryScreen(
                 catalogueState?.launchFailure?.let { failure ->
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         JellyfinLaunchNotice(failure = failure, retrying = catalogueState.loading || catalogueState.indexing,
-                            showingDownloads = downloadedOnly,
+                            showingDownloads = downloadedOnly || catalogueState?.canBrowseSaved != true,
                             onRetry = { catalogue?.retryConnection() }, onSettings = onOpenMenu)
                     }
                 }
