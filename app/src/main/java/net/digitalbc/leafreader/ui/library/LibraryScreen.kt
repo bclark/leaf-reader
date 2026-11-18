@@ -63,6 +63,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -207,6 +210,7 @@ fun LibraryScreen(
     val progressConflicts by viewModel.progressConflicts.collectAsStateWithLifecycle()
     val coverSelections by viewModel.coverSelections.collectAsStateWithLifecycle()
     val currentFilter by viewModel.libraryFilter.collectAsStateWithLifecycle()
+    var isSearchOpen by rememberSaveable { mutableStateOf(false) }
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
@@ -230,21 +234,35 @@ fun LibraryScreen(
         catalogue?.closeCollection()
         viewModel.setSearchQuery(collectionRootQuery)
     }
-    val downloadedOnly = currentFilter == LibraryFilter.OFFLINE ||
-        (requestedDownloads && (remoteSeries != null || catalogueState?.collection != null))
+    val downloadedOnly = !isSearchOpen && (currentFilter == LibraryFilter.OFFLINE ||
+        (requestedDownloads && (remoteSeries != null || catalogueState?.collection != null)))
     LaunchedEffect(launchFallback, catalogueState?.accountScope) {
         if (launchFallback) viewModel.setLibraryFilter(LibraryFilter.OFFLINE)
     }
-    var remoteListSelection by remember { mutableStateOf<RemoteListSelection?>(null) }
+    var remoteListSelection by remember(catalogueState?.accountScope) { mutableStateOf<RemoteListSelection?>(null) }
+    var remoteSelecting by remember(catalogueState?.accountScope) { mutableStateOf(false) }
+    var remoteSelected by remember(catalogueState?.accountScope) { mutableStateOf<Map<String, RemoteListSelection>>(emptyMap()) }
+    var pendingRemoteRemoval by remember(catalogueState?.accountScope) { mutableStateOf<List<RemoteListSelection>?>(null) }
+    val removingRemote by viewModel.removingDownload.collectAsStateWithLifecycle()
+    val copyFailure = androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.compact_copy_failed)
+    fun toggleRemote(entry: JellyfinCatalogueEntry) {
+        val identity = viewModel.captureRemoteIdentity(entry.item) ?: return
+        remoteSelected = if (entry.item.id in remoteSelected) remoteSelected - entry.item.id
+            else remoteSelected + (entry.item.id to RemoteListSelection(entry, identity))
+    }
+    fun removeRemote(items: List<RemoteListSelection>) {
+        if (viewModel.confirmDownloadRemoval) pendingRemoteRemoval = items.toList()
+        else { viewModel.removeRemoteSelection(items, copyFailure); remoteSelecting = false; remoteSelected = emptyMap() }
+    }
     val remoteMode = viewModel.hasJellyfinConfig && catalogue != null &&
         (currentFilter != LibraryFilter.OFFLINE) && !isEditMode
     val downloadedCopies by viewModel.downloadedCopies.collectAsStateWithLifecycle()
-    val representedLocalIds = if (remoteMode && currentFilter == LibraryFilter.SERIES)
+    val representedLocalIds = if (remoteMode && (currentFilter == LibraryFilter.SERIES || isSearchOpen))
         catalogueState?.entries.orEmpty().mapNotNull { downloadedCopies[it.item.id]?.id }.toSet() else emptySet()
-    val readableIds = readableDownloads.map { it.id }.toSet() - representedLocalIds
+    val readableIds = (if (downloadedOnly) readableDownloads.map { it.id } else comics.map { it.id }).toSet() - representedLocalIds
     val displayedLocalItems: List<LibraryItem> = when {
-        remoteMode && currentFilter != LibraryFilter.READING_LISTS && !downloadedOnly -> emptyList()
-        downloadedOnly -> libraryItems.mapNotNull { item ->
+        remoteMode && currentFilter != LibraryFilter.READING_LISTS && !downloadedOnly && !isSearchOpen -> emptyList()
+        downloadedOnly || (remoteMode && isSearchOpen) -> libraryItems.mapNotNull { item ->
             when (item) {
                 is LibraryItem.SingleComic -> item.takeIf { it.comic.id in readableIds }
                 is LibraryItem.SeriesStack -> item.issues.filter { it.id in readableIds }.takeIf { it.isNotEmpty() }?.let {
@@ -256,7 +274,37 @@ fun LibraryScreen(
         }
         else -> libraryItems
     }
-    RemoteListActions(remoteListSelection, catalogueState?.library?.id, viewModel) { remoteListSelection = null }
+    val remotePlan = planRemoteCopies(remoteSelected.values, downloadedCopies)
+    val contextSelection = remoteListSelection
+    val contextPlan = planRemoteCopies(listOfNotNull(contextSelection), downloadedCopies)
+    RemoteListActions(contextSelection, catalogueState?.library?.id, viewModel,
+        onDismiss = { remoteListSelection = null },
+        canDownload = !importing && contextPlan.downloads.isNotEmpty(),
+        canRemove = !importing && !removingRemote && contextPlan.removals.isNotEmpty(),
+        onDownload = { contextSelection?.let { viewModel.downloadRemoteSelection(listOf(it), copyFailure) } },
+        onRemove = { contextSelection?.let { removeRemote(listOf(it)) } },
+        onSelect = { contextSelection?.let { remoteSelecting = true; remoteSelected = mapOf(it.identity.itemId to it) } })
+    pendingRemoteRemoval?.let { selected ->
+        val plan = planRemoteCopies(selected, downloadedCopies)
+        androidx.compose.material3.AlertDialog(onDismissRequest = { pendingRemoteRemoval = null },
+            title = { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.compact_remove_title)) },
+            text = { Text(androidx.compose.ui.res.pluralStringResource(net.digitalbc.leafreader.R.plurals.compact_remove_body,
+                plan.removals.size, plan.removals.size, selected.size - plan.removals.size)) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(enabled = plan.removals.isNotEmpty() && !removingRemote && !importing,
+                    onClick = {
+                        viewModel.removeRemoteSelection(selected, copyFailure)
+                        pendingRemoteRemoval = null; remoteSelecting = false; remoteSelected = emptyMap()
+                    }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.compact_remove))
+                }
+            }, dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { pendingRemoteRemoval = null }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.compact_cancel))
+                }
+            })
+    }
+
     LaunchedEffect(catalogue, viewModel.jellyfinBrowsePositionKey(null), currentFilter,
         catalogueState?.library?.id, catalogueState?.launchFailure, catalogueState?.browsingSaved, catalogueState?.collection?.id, searchQuery, downloadedOnly, unreadOnly) {
         if (viewModel.hasJellyfinConfig && catalogue != null) {
@@ -286,7 +334,7 @@ fun LibraryScreen(
         catalogueLifecycle.lifecycle.addObserver(observer)
         onDispose { catalogueLifecycle.lifecycle.removeObserver(observer) }
     }
-    BackHandler(enabled = jellyfinDetail == null && (remoteSeries != null || catalogueState?.collection != null)) {
+    BackHandler(enabled = jellyfinDetail == null && !isSearchOpen && (remoteSeries != null || catalogueState?.collection != null)) {
         if (remoteSeries != null) remoteSeries = null else closeRemoteCollection()
     }
 
@@ -309,7 +357,30 @@ fun LibraryScreen(
     var selectedComicsForList by remember(showAddComicsToListDialog) { mutableStateOf(emptySet<Long>()) }
     var comicOptionsTarget by remember { mutableStateOf<ComicEntity?>(null) }
 
-    var isSearchOpen by rememberSaveable { mutableStateOf(false) }
+    var searchReturnFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    var searchReturnQuery by rememberSaveable { mutableStateOf("") }
+    var gridScrolling by remember { mutableStateOf(false) }
+    fun closeSearch() {
+        isSearchOpen = false
+        searchReturnFilter?.let { viewModel.setLibraryFilter(LibraryFilter.valueOf(it)) }
+        viewModel.setSearchQuery(searchReturnQuery)
+        searchReturnFilter = null
+        catalogue?.endGlobalSearch()
+    }
+    fun openSearch() {
+        searchReturnFilter = currentFilter.name
+        searchReturnQuery = searchQuery
+        catalogue?.beginGlobalSearch()
+        viewModel.setLibraryFilter(LibraryFilter.ALL)
+        viewModel.clearSearch()
+        isSearchOpen = true
+    }
+    LaunchedEffect(isSearchOpen) {
+        if (isSearchOpen) {
+            catalogue?.beginGlobalSearch()
+            viewModel.setLibraryFilter(LibraryFilter.ALL)
+        }
+    }
     val unreadFocus = remember { FocusRequester() }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -324,7 +395,7 @@ fun LibraryScreen(
     val continueScope = rememberCoroutineScope()
     val unreadableContinueMessage = androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_continue_unreadable)
     val emptyLibrary = comics.isEmpty() && !viewModel.hasJellyfinConfig &&
-        searchQuery.isBlank() && !isSearchOpen && currentFilter != LibraryFilter.READING_LISTS && !isEditMode
+        searchQuery.isBlank() && !isSearchOpen && currentFilter !in listOf(LibraryFilter.READING_LISTS, LibraryFilter.OFFLINE) && !isEditMode
     val continueRemoteReachable = currentFilter != LibraryFilter.OFFLINE && catalogueState?.canContinueRemote == true
     val continueEntries = catalogueState?.indexedEntries.orEmpty()
     val projectedContinue by androidx.compose.runtime.key(catalogueState?.accountScope, catalogueState?.library?.id) {
@@ -380,13 +451,13 @@ fun LibraryScreen(
     }
     var isSearchFocused by remember { mutableStateOf(false) }
 
+    BackHandler(enabled = remoteSelecting) { remoteSelecting = false; remoteSelected = emptyMap() }
     BackHandler(enabled = isEditMode) {
         viewModel.setEditMode(false)
     }
 
-    BackHandler(enabled = isSearchOpen && !isEditMode && remoteSeries == null && catalogueState?.collection == null) {
-        isSearchOpen = false
-        viewModel.clearSearch()
+    BackHandler(enabled = isSearchOpen && !isEditMode) {
+        closeSearch()
         focusManager.clearFocus()
     }
 
@@ -456,7 +527,7 @@ fun LibraryScreen(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (!isEditMode) {
+                        if (!isEditMode && !remoteSelecting) {
                             UnreadOnlyControl(unreadOnly, { viewModel.unreadOnly.value = it },
                                 Modifier.focusRequester(unreadFocus), onToolbar = true)
                         }
@@ -466,12 +537,10 @@ fun LibraryScreen(
                                 .clickable(
                                     role = Role.Button,
                                     onClickLabel = if (isSearchOpen) "Close search" else "Open search",
+                                    enabled = !remoteSelecting && !isEditMode,
                                 ) {
-                                    isSearchOpen = !isSearchOpen
-                                    if (!isSearchOpen) {
-                                        viewModel.clearSearch()
-                                        focusManager.clearFocus()
-                                    }
+                                    if (isSearchOpen) { closeSearch(); focusManager.clearFocus() }
+                                    else openSearch()
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
@@ -485,7 +554,7 @@ fun LibraryScreen(
                                 Icon(
                                     Icons.Default.Search,
                                     contentDescription = "Search",
-                                    tint = if (isSearchOpen) Ink else PaperWhite,
+                                    tint = if (isSearchOpen) Ink else PaperWhite.copy(alpha = if (remoteSelecting || isEditMode) 0.38f else 1f),
                                     modifier = Modifier.size(18.dp),
                                 )
                             }
@@ -522,8 +591,16 @@ fun LibraryScreen(
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_select_comics)) },
                                     leadingIcon = { Icon(Icons.Default.CheckCircle, null) },
-                                    enabled = comics.isNotEmpty(),
-                                    onClick = { menuExpanded = false; viewModel.setEditMode(true) })
+                                    enabled = if (remoteMode) catalogueState?.entries?.isNotEmpty() == true else comics.isNotEmpty(),
+                                    onClick = {
+                                        menuExpanded = false
+                                        if (remoteMode) remoteSelecting = true else viewModel.setEditMode(true)
+                                    })
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_add_comics)) },
+                                    leadingIcon = { Icon(Icons.Default.Add, null) },
+                                    enabled = !importing,
+                                    onClick = { menuExpanded = false; showSourceDialog = true })
                                 androidx.compose.material3.HorizontalDivider()
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_settings_more)) },
@@ -619,7 +696,7 @@ fun LibraryScreen(
             }
         }
 
-        if (!isEditMode) {
+        if (!isEditMode && !isSearchOpen && !remoteSelecting) {
             LibraryTabs(currentFilter) { filter ->
                 remoteSeries = null
                 if (filter != LibraryFilter.OFFLINE) catalogue?.browseSavedCatalogue()
@@ -659,7 +736,7 @@ fun LibraryScreen(
                 (catalogueState.library == null || (catalogueState.view == targetView &&
                     catalogueState.search == searchQuery.trim() && catalogueState.unreadOnly == unreadOnly))
             val rowsReady = if (remoteMode) remoteRowsReady &&
-                ((currentFilter != LibraryFilter.READING_LISTS && !downloadedOnly) || localRowsReady)
+                ((currentFilter != LibraryFilter.READING_LISTS && !downloadedOnly && !isSearchOpen) || localRowsReady)
                 else localRowsReady
             if (emptyLibrary) {
                 LibraryEmpty(onAdd = { showSourceDialog = true }, onConnect = onConnectJellyfin, importing = importing)
@@ -673,6 +750,14 @@ fun LibraryScreen(
                     ((gridWidth - 36.dp - horizontalSpacing * (actualColumns - 1)) / actualColumns).roundToPx())
             }
             val gridState = rememberLazyGridState()
+            LaunchedEffect(remoteSelecting) {
+                if (remoteSelecting) gridState.scrollToItem(0)
+            }
+            LaunchedEffect(gridState) {
+                androidx.compose.runtime.snapshotFlow { gridState.isScrollInProgress }
+                    .collect { gridScrolling = it }
+            }
+            DisposableEffect(gridState) { onDispose { gridScrolling = false } }
             LaunchedEffect(gridState, catalogueState?.library?.id, catalogueState?.collection?.id,
                 catalogueState?.search, catalogueState?.entries?.size, catalogueState?.loading, catalogueState?.error) {
                 if (remoteMode && !downloadedOnly && catalogueState?.hasMore == true &&
@@ -687,10 +772,38 @@ fun LibraryScreen(
                 columns = GridCells.Fixed(actualColumns),
                 state = gridState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = if (gridWidth >= 600.dp) 32.dp else 18.dp, end = if (gridWidth >= 600.dp) 32.dp else 18.dp, top = 12.dp, bottom = if (isEditMode || importing) 120.dp else 18.dp),
+                contentPadding = PaddingValues(start = if (gridWidth >= 600.dp) 32.dp else 18.dp, end = if (gridWidth >= 600.dp) 32.dp else 18.dp, top = 12.dp,
+                    bottom = if (isEditMode || importing) 120.dp else 96.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
                 horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
                 verticalArrangement = Arrangement.spacedBy(verticalSpacing),
             ) {
+                if (remoteSelecting) {
+                    item(key = "remote-selection", span = { GridItemSpan(maxLineSpan) }) {
+                        Column {
+                            Text(androidx.compose.ui.res.pluralStringResource(net.digitalbc.leafreader.R.plurals.compact_selected,
+                                remoteSelected.size, remoteSelected.size), style = MaterialTheme.typography.titleMedium)
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                androidx.compose.material3.TextButton(enabled = remotePlan.downloads.isNotEmpty() && !importing && !removingRemote,
+                                    onClick = {
+                                        viewModel.downloadRemoteSelection(remoteSelected.values.toList(), copyFailure)
+                                        remoteSelected = emptyMap(); remoteSelecting = false
+                                    }, modifier = Modifier.heightIn(min = 48.dp)) {
+                                    Text(androidx.compose.ui.res.pluralStringResource(net.digitalbc.leafreader.R.plurals.compact_download_count,
+                                        remotePlan.downloads.size, remotePlan.downloads.size))
+                                }
+                                androidx.compose.material3.TextButton(enabled = remotePlan.removals.isNotEmpty() && !importing && !removingRemote,
+                                    onClick = { removeRemote(remoteSelected.values.toList()) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                                    Text(androidx.compose.ui.res.pluralStringResource(net.digitalbc.leafreader.R.plurals.compact_remove_count,
+                                        remotePlan.removals.size, remotePlan.removals.size))
+                                }
+                                androidx.compose.material3.TextButton(onClick = { remoteSelecting = false; remoteSelected = emptyMap() },
+                                    modifier = Modifier.heightIn(min = 48.dp)) {
+                                    Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.compact_done))
+                                }
+                            }
+                        }
+                    }
+                }
                 if (isEditMode) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
@@ -724,7 +837,7 @@ fun LibraryScreen(
                             onRetry = { catalogue?.retryConnection() }, onSettings = onOpenMenu)
                     }
                 }
-                if (!isEditMode && !isSearchOpen && continueCandidates.isNotEmpty()) {
+                if (!isEditMode && !remoteSelecting && !isSearchOpen && continueCandidates.isNotEmpty()) {
                     item(key = "continue-reading", span = { GridItemSpan(maxLineSpan) }) {
                         LibraryContinue(continueCandidates, continuingRemote?.let { "remote:$it" } ?: checkingContinue?.let { "local:$it" }, importProgress,
                             onContinue = { candidate ->
@@ -755,7 +868,7 @@ fun LibraryScreen(
                             }, loadCover = { item, width -> viewModel.loadJellyfinCover(item, width) })
                     }
                 }
-                val showDownloadedFilter = remoteSeries != null || catalogueState?.collection != null
+                val showDownloadedFilter = !isSearchOpen && (remoteSeries != null || catalogueState?.collection != null)
                 val showSearchContext = remoteMode && searchQuery.isNotBlank()
                 if (showDownloadedFilter || showSearchContext) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
@@ -781,9 +894,10 @@ fun LibraryScreen(
                         columns = actualColumns,
                         accountScope = catalogue?.positionScope.orEmpty(),
                         onLongClick = { entry ->
-                            viewModel.captureRemoteIdentity(entry.item)?.let { remoteListSelection = RemoteListSelection(entry, it) }
+                            if (remoteSelecting) toggleRemote(entry)
+                            else viewModel.captureRemoteIdentity(entry.item)?.let { remoteListSelection = RemoteListSelection(entry, it) }
                         },
-                        selectedSeries = remoteSeries,
+                        selectedSeries = remoteSeries.takeUnless { isSearchOpen },
                         downloadedIds = jellyfinBrowser.downloadedItemIds,
                         onSeries = { remoteSeries = it },
                         onBack = { if (remoteSeries != null) remoteSeries = null else closeRemoteCollection() },
@@ -800,6 +914,9 @@ fun LibraryScreen(
                         coverWidthPx = remoteCoverWidthPx,
                         coverSelections = coverSelections,
                         onCoverSelected = viewModel::rememberCoverSelection,
+                        selecting = remoteSelecting, selectedIds = remoteSelected.keys,
+                        onToggleSelection = ::toggleRemote,
+                        showEmpty = displayedLocalItems.isEmpty(),
                     )
                 }
 
@@ -1058,20 +1175,26 @@ fun LibraryScreen(
                 }
             }
 
+            if (!isEditMode && !remoteSelecting && !emptyLibrary && !gridScrolling && !importing && continuingRemote == null && checkingContinue == null) {
+                androidx.compose.material3.FloatingActionButton(
+                    onClick = {
+                        if (currentFilter == LibraryFilter.READING_LISTS && !isSearchOpen) showCreateListDialog = true
+                        else showSourceDialog = true
+                    }, containerColor = Ochre, contentColor = Ink,
+                    modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(16.dp),
+                ) {
+                    Icon(Icons.Default.Add, androidx.compose.ui.res.stringResource(
+                        if (currentFilter == LibraryFilter.READING_LISTS && !isSearchOpen)
+                            net.digitalbc.leafreader.R.string.library_create_reading_list else net.digitalbc.leafreader.R.string.library_add_comics))
+                }
+            }
+
             SnackbarHost(
                 snackbarHostState,
                 modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
             )
         }
-        if (!isEditMode && !emptyLibrary) LibraryBottomAction(
-            lists = currentFilter == LibraryFilter.READING_LISTS,
-            importing = importing || continuingRemote != null || checkingContinue != null,
-            onClick = {
-                if (!importing && continuingRemote == null) {
-                    if (currentFilter == LibraryFilter.READING_LISTS) showCreateListDialog = true
-                    else showSourceDialog = true
-                }
-            })
+
     }
 
     if (showSourceDialog) {

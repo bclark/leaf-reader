@@ -190,6 +190,7 @@ fun MenuScreen(
     }
 
     var showLicensesDialog by remember { mutableStateOf(false) }
+    var confirmDownloadRemoval by remember { mutableStateOf(settings.confirmDownloadRemoval) }
 
     var isExporting by remember { mutableStateOf(false) }
     var isImporting by remember { mutableStateOf(false) }
@@ -896,7 +897,14 @@ fun MenuScreen(
 
             if (repository != null) {
                 // ---- Backup & Restore ----------------------------------------------------
-                SectionLabel("BACKUP & RESTORE")
+                ToggleRow(
+                title = stringResource(R.string.compact_confirm_removal),
+                subtitle = stringResource(R.string.compact_confirm_removal_body),
+                checked = confirmDownloadRemoval,
+                onCheckedChange = { confirmDownloadRemoval = it; settings.confirmDownloadRemoval = it },
+            )
+            Spacer(Modifier.size(24.dp))
+            SectionLabel("BACKUP & RESTORE")
                 Spacer(Modifier.size(10.dp))
                 Column(
                     Modifier
@@ -1497,6 +1505,7 @@ private fun ToggleRow(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            modifier = Modifier.semantics { contentDescription = title },
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Ink,
                 checkedTrackColor = MaterialTheme.colorScheme.tertiary,

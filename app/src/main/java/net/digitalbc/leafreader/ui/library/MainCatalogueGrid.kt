@@ -49,6 +49,10 @@ internal fun LazyGridScope.mainCatalogueGrid(
     coverWidthPx: Int = 400,
     coverSelections: Map<String, String> = emptyMap(),
     onCoverSelected: (String, String) -> Unit = { _, _ -> },
+    showEmpty: Boolean = true,
+    selecting: Boolean = false,
+    selectedIds: Set<String> = emptySet(),
+    onToggleSelection: (JellyfinCatalogueEntry) -> Unit = {},
 ) {
     if (state.library == null || state.libraries.size > 1) {
         item(span = { GridItemSpan(maxLineSpan) }) {
@@ -125,8 +129,13 @@ internal fun LazyGridScope.mainCatalogueGrid(
             }
             androidx.compose.runtime.CompositionLocalProvider(LocalRemoteCoverOffline provides state.offline) {
                 ComicCard(remote = entry, columns = columns, remoteCoverWidthPx = coverWidthPx,
+                    isEditMode = selecting && !collection,
+                    isSelected = entry.item.id in selectedIds,
                     remoteSubtitle = status + if (entry.item.id in downloadedIds) " · Downloaded" else "",
-                    onClick = { if (collection) onCollection(entry.item) else onItem(entry.item) },
+                    onClick = {
+                        if (collection) onCollection(entry.item)
+                        else if (selecting) onToggleSelection(entry) else onItem(entry.item)
+                    },
                     onLongClick = if (collection) null else ({ onLongClick(entry) }), loadRemoteCover = loadCover)
             }
         }
@@ -146,7 +155,7 @@ internal fun LazyGridScope.mainCatalogueGrid(
             }
         }
     }
-    if (state.loaded && !state.loading && state.entries.isEmpty() && state.library != null && state.error == null) {
+    if (showEmpty && state.loaded && !state.loading && state.entries.isEmpty() && state.library != null && state.error == null) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Text(if (state.creator != null) androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.creator_no_matches)
                 else if (state.view == JellyfinCatalogueView.LISTS && state.collection == null) "No compatible Jellyfin collections."

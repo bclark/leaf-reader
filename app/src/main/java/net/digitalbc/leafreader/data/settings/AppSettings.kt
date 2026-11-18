@@ -1,6 +1,7 @@
 package net.digitalbc.leafreader.data.settings
 
 import android.content.Context
+import androidx.core.content.edit
 
 /**
  * Lightweight app-wide preferences backed by [android.content.SharedPreferences].
@@ -60,6 +61,11 @@ class AppSettings internal constructor(private val prefs: android.content.Shared
     var libraryColumns: Int
         get() = prefs.getInt(KEY_LIBRARY_COLUMNS, 2)
         set(value) { prefs.edit().putInt(KEY_LIBRARY_COLUMNS, value).apply() }
+
+    /** Local preference only; removing offline copies never removes source items or history. */
+    var confirmDownloadRemoval: Boolean
+        get() = prefs.getBoolean("confirm_download_removal", true)
+        set(value) { prefs.edit { putBoolean("confirm_download_removal", value) } }
 
     var smbHost: String
         get() = prefs.getString(KEY_SMB_HOST, "") ?: ""

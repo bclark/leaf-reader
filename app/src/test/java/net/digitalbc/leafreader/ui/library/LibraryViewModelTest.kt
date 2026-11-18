@@ -109,6 +109,47 @@ class LibraryViewModelTest {
         settings.jellyfinUserId = "user"
     }
 
+    @Test fun globalSearchLeavesCollectionAndRestoresItsQueryWithoutRetargetingAnAccount() = runBlocking {
+        configureJellyfin()
+        val vm = JellyfinCatalogueViewModel(repository, settings, defaultDispatcher = testDispatcher, ioDispatcher = testDispatcher,
+            restore = { null }, readIndex = { null }, saveIndex = { _, _, _ -> },
+            views = { Result.success(listOf(JellyfinView("books", "Comics", "books"))) },
+            fetch = { Result.success(net.digitalbc.leafreader.data.jellyfin.JellyfinCataloguePage(emptyList(), 0, 0, false)) })
+        stores += ViewModelStore().apply { put("global-search", vm) }
+        vm.ensure()
+        vm.browse(net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.LISTS, "", true)
+        val collection = JellyfinItem("collection", "A collection", true)
+        vm.openCollection(collection)
+        vm.search("prior")
+        vm.beginGlobalSearch()
+        vm.browse(net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.ALL, "global", true)
+        assertNull(vm.state.value.collection)
+        assertEquals("global", vm.state.value.search)
+        vm.browse(net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueView.ALL, "global", false)
+        vm.endGlobalSearch()
+        assertEquals(collection, vm.state.value.collection)
+        assertEquals("prior", vm.state.value.search)
+        assertFalse(vm.state.value.unreadOnly)
+        vm.beginGlobalSearch()
+        settings.jellyfinUserId = "other"
+        vm.endGlobalSearch()
+        assertNull(vm.state.value.collection)
+    }
+
+    @Test fun staleAccountSelectionCannotDownloadOrRemoveAnyCopy() {
+        val auth = JellyfinAuth(accessToken = "synthetic", userId = "current", serverId = "server", username = "fixture")
+        val vm = LibraryViewModel(repository, settings, jellyfinAuth = { auth }, defaultDispatcher = testDispatcher)
+        stores += ViewModelStore().apply { put("copy-actions", vm) }
+        val selected = RemoteListSelection(
+            net.digitalbc.leafreader.data.jellyfin.JellyfinCatalogueEntry(JellyfinItem("comic", "Comic", false, container = "cbz"), "Book", false),
+            JellyfinItemIdentity("server", "previous", "comic"))
+        vm.downloadRemoteSelection(listOf(selected), "Account changed")
+        vm.removeRemoteSelection(listOf(selected), "Account changed")
+        assertEquals("Account changed", vm.message.value)
+        assertFalse(vm.removingDownload.value)
+        assertFalse(vm.importing.value)
+    }
+
     private fun fileImportViewModel(
         dispatcher: kotlinx.coroutines.CoroutineDispatcher = testDispatcher,
         importer: suspend (android.net.Uri, (Float) -> Unit, () -> Boolean) -> Result<Long>,

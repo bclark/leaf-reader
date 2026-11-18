@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="compact_confirm_removal">Confirm download removal</string>
+    <string name="compact_confirm_removal_body">Ask before removing local Jellyfin copies. Source items and reading progress are kept.</string>
+    <string name="compact_remove_title">Remove downloaded copies?</string>
+    <plurals name="compact_remove_body"><item quantity="one">Remove %1$d downloaded copy from this device. Jellyfin items, reading progress, lists and original files are kept. Other selected items unchanged: %2$d.</item><item quantity="other">Remove %1$d downloaded copies from this device. Jellyfin items, reading progress, lists and original files are kept. Other selected items unchanged: %2$d.</item></plurals>
+    <string name="compact_copy_failed">Could not finish the copy action. Check the connection and selection, then try again.</string>
+    <string name="compact_done">Done selecting</string>
+    <string name="compact_select">Select comics</string>
+    <string name="compact_details">View comic details</string>
+    <string name="compact_cancel">Cancel</string>
+    <string name="compact_remove">Remove copies</string>
+    <plurals name="compact_download_count"><item quantity="one">Download %1$d</item><item quantity="other">Download %1$d</item></plurals>
+    <plurals name="compact_remove_count"><item quantity="one">Remove %1$d download</item><item quantity="other">Remove %1$d downloads</item></plurals>
+    <plurals name="compact_selected"><item quantity="one">%1$d comic selected</item><item quantity="other">%1$d comics selected</item></plurals>
+</resources>

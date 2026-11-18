@@ -7,7 +7,7 @@
     <string name="library_unread_only">Unread only</string>
     <string name="library_clear_unread">Clear Unread only</string>
     <string name="library_no_unread">No unread comics in this view.</string>
-    <string name="library_offline_empty">No readable copies yet. Import a comic from Files or SMB, or download one from Jellyfin.</string>
+    <string name="library_offline_empty">Nothing saved for offline reading yet. Import a comic from Files or SMB, or download one from Jellyfin. Disconnecting a server does not remove saved copies.</string>
     <string name="library_default_rtl">Default right-to-left reading</string>
     <string name="library_select_all">Select all</string>
     <string name="library_deselect_all">Deselect all</string>

@@ -189,6 +189,7 @@ fun JellyfinBrowserScreen(
                 syncing = syncingProgress,
                 syncError = progressSyncError,
                 onRemoveDownload = state.identity?.let { identity -> ({ viewModel.removeJellyfinDownload(identity, removeFailureMessage) }) },
+                confirmRemovalRequired = viewModel.confirmDownloadRemoval,
                 removingDownload = removingDownload,
             )
             SnackbarHost(snackbarHostState, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())

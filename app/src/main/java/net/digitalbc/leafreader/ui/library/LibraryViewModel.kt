@@ -148,6 +148,42 @@ class LibraryViewModel(
     private val _removingDownload = MutableStateFlow(false)
     val removingDownload = _removingDownload.asStateFlow()
 
+    val confirmDownloadRemoval: Boolean get() = settings.confirmDownloadRemoval
+
+    internal fun downloadRemoteSelection(selected: List<RemoteListSelection>, failureMessage: String) {
+        if (_importing.value || _removingDownload.value) return
+        val auth = jellyfinAuth()
+        if (selected.any { it.identity.serverId != auth?.serverId || it.identity.userId != auth.userId }) {
+            _message.value = failureMessage
+            return
+        }
+        val plan = planRemoteCopies(selected, _downloadedCopies.value)
+        importJellyfinItems(plan.downloads.map { it.entry.item })
+    }
+
+    internal fun removeRemoteSelection(selected: List<RemoteListSelection>, failureMessage: String) {
+        if (_importing.value || _removingDownload.value) return
+        val auth = jellyfinAuth()
+        if (selected.any { it.identity.serverId != auth?.serverId || it.identity.userId != auth.userId }) {
+            _message.value = failureMessage
+            return
+        }
+        val removals = planRemoteCopies(selected, _downloadedCopies.value).removals
+        if (removals.isEmpty()) return
+        _removingDownload.value = true
+        viewModelScope.launch {
+            try {
+                for (selection in removals) {
+                    if (jellyfinAuth() != auth) { _message.value = failureMessage; break }
+                    repository.removeJellyfinDownload(selection.identity).onFailure { error ->
+                        if (error is CancellationException) throw error
+                        _message.value = failureMessage
+                    }
+                }
+            } finally { _removingDownload.value = false }
+        }
+    }
+
     fun removeJellyfinDownload(identity: JellyfinItemIdentity, failureMessage: String) {
         if (_removingDownload.value || _jellyfinDetail.value?.identity != identity) return
         _removingDownload.value = true

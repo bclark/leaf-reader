@@ -88,6 +88,7 @@ class JellyfinCatalogueViewModel(
     private var lastCheck = 0L
     private data class PageKey(val view: JellyfinCatalogueView, val collection: String?, val search: String, val unread: Boolean)
     private val pages = mutableMapOf<PageKey, CatalogueState>()
+    private var searchReturn: Pair<List<String>, CatalogueState>? = null
     private var progressDuringIndex = mutableMapOf<String, JellyfinProgressUpdate>()
     private var progressDuringLoad = mutableMapOf<String, JellyfinProgressUpdate>()
 
@@ -148,7 +149,7 @@ class JellyfinCatalogueViewModel(
             (_state.value.loaded || _state.value.loading || _state.value.launchFailure != null)) return
         val sameScope = scope == currentScope()
         launchJob?.cancel(); job?.cancel(); indexJob?.cancel(); ++indexGeneration
-        if (!sameScope) { index = null; pages.clear() }
+        if (!sameScope) { index = null; pages.clear(); searchReturn = null }
         scope = currentScope()
         val captured = scope!!
         ++generation
@@ -340,6 +341,25 @@ class JellyfinCatalogueViewModel(
             libraries = base.libraries, library = base.library)
 
     /** Apply the independent filter and scope together so only the final query is requested. */
+    fun beginGlobalSearch() {
+        if (searchReturn != null) return
+        searchReturn = currentScope() to _state.value
+        select(JellyfinCatalogueView.ALL)
+    }
+
+    fun endGlobalSearch() {
+        val (account, previous) = searchReturn ?: return
+        searchReturn = null
+        if (account != currentScope() || previous.library?.id != _state.value.library?.id) return
+        pages[key(_state.value)] = _state.value.copy(loading = false)
+        job?.cancel(); ++generation
+        val base = _state.value.copy(view = previous.view, collection = previous.collection,
+            search = previous.search, entries = emptyList(),
+            nextIndex = 0, total = 0, hasMore = false, loaded = false, loading = false, error = null)
+        _state.value = project(restorePage(base))
+        if (!_state.value.usesIndex && !_state.value.loaded && previous.view != JellyfinCatalogueView.DOWNLOADED) load()
+    }
+
     fun browse(view: JellyfinCatalogueView, search: String, unreadOnly: Boolean) {
         val before = _state.value
         val query = search.trim()
