@@ -63,6 +63,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -231,8 +234,8 @@ fun LibraryScreen(
         catalogue?.closeCollection()
         viewModel.setSearchQuery(collectionRootQuery)
     }
-    val downloadedOnly = currentFilter == LibraryFilter.OFFLINE ||
-        (requestedDownloads && (remoteSeries != null || catalogueState?.collection != null))
+    val downloadedOnly = !isSearchOpen && (currentFilter == LibraryFilter.OFFLINE ||
+        (requestedDownloads && (remoteSeries != null || catalogueState?.collection != null)))
     LaunchedEffect(launchFallback, catalogueState?.accountScope) {
         if (launchFallback) viewModel.setLibraryFilter(LibraryFilter.OFFLINE)
     }
@@ -534,7 +537,7 @@ fun LibraryScreen(
                                 .clickable(
                                     role = Role.Button,
                                     onClickLabel = if (isSearchOpen) "Close search" else "Open search",
-                                    enabled = !remoteSelecting,
+                                    enabled = !remoteSelecting && !isEditMode,
                                 ) {
                                     if (isSearchOpen) { closeSearch(); focusManager.clearFocus() }
                                     else openSearch()
@@ -551,7 +554,7 @@ fun LibraryScreen(
                                 Icon(
                                     Icons.Default.Search,
                                     contentDescription = "Search",
-                                    tint = if (isSearchOpen) Ink else PaperWhite,
+                                    tint = if (isSearchOpen) Ink else PaperWhite.copy(alpha = if (remoteSelecting || isEditMode) 0.38f else 1f),
                                     modifier = Modifier.size(18.dp),
                                 )
                             }
@@ -766,7 +769,8 @@ fun LibraryScreen(
                 columns = GridCells.Fixed(actualColumns),
                 state = gridState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = if (gridWidth >= 600.dp) 32.dp else 18.dp, end = if (gridWidth >= 600.dp) 32.dp else 18.dp, top = 12.dp, bottom = if (isEditMode || importing) 120.dp else 96.dp),
+                contentPadding = PaddingValues(start = if (gridWidth >= 600.dp) 32.dp else 18.dp, end = if (gridWidth >= 600.dp) 32.dp else 18.dp, top = 12.dp,
+                    bottom = if (isEditMode || importing) 120.dp else 96.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
                 horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
                 verticalArrangement = Arrangement.spacedBy(verticalSpacing),
             ) {
