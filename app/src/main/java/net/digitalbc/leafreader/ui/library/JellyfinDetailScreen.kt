@@ -304,7 +304,7 @@ private fun DetailActions(
                     }
                 }
                 syncError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                onRemoveDownload?.let { remove ->
+                onRemoveDownload?.takeIf { comic.source == "jellyfin" }?.let { remove ->
                     OutlinedButton(onClick = remove, enabled = !removingDownload && !syncing,
                         modifier = Modifier.heightIn(min = 48.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) {

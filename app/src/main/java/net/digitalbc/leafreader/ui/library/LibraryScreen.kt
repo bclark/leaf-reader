@@ -750,6 +750,9 @@ fun LibraryScreen(
                     ((gridWidth - 36.dp - horizontalSpacing * (actualColumns - 1)) / actualColumns).roundToPx())
             }
             val gridState = rememberLazyGridState()
+            LaunchedEffect(remoteSelecting) {
+                if (remoteSelecting) gridState.scrollToItem(0)
+            }
             LaunchedEffect(gridState) {
                 androidx.compose.runtime.snapshotFlow { gridState.isScrollInProgress }
                     .collect { gridScrolling = it }

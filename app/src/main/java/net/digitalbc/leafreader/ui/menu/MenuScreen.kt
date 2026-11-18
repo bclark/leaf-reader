@@ -1505,6 +1505,7 @@ private fun ToggleRow(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            modifier = Modifier.semantics { contentDescription = title },
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Ink,
                 checkedTrackColor = MaterialTheme.colorScheme.tertiary,
