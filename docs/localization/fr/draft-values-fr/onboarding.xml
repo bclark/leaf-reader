@@ -1,0 +1,22 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!-- DRAFT French: fluent review and UI integration/QA pending. Not active app resources. -->
+    <string name="onboarding_welcome_title">OUVREZ VOTRE PREMIÈRE BD</string>
+    <string name="onboarding_welcome_body">Choisissez un fichier CBZ, CBR ou PDF sur votre appareil. Une fois importé, il est prêt à être lu hors connexion.</string>
+    <string name="onboarding_choose_file">Choisir un fichier</string>
+    <string name="onboarding_use_jellyfin">J’utilise Jellyfin</string>
+    <string name="onboarding_later">Peut-être plus tard</string>
+    <string name="onboarding_jellyfin_title">RETROUVEZ VOTRE BIBLIOTHÈQUE JELLYFIN</string>
+    <string name="onboarding_jellyfin_body">Connectez votre serveur pour parcourir votre collection dans Leaf. Téléchargez des BD pour les lire hors connexion.</string>
+    <string name="onboarding_connect">Connecter Jellyfin</string>
+    <string name="onboarding_without_jellyfin">Utiliser sans Jellyfin</string>
+    <string name="onboarding_importing">Importation de vos BD…</string>
+    <string name="onboarding_saving">Préparation de Leaf…</string>
+    <string name="onboarding_save_error">Leaf n’a pas pu enregistrer votre choix. Réessayez pour le conserver après le redémarrage.</string>
+    <string name="onboarding_retry_save">Réessayer l’enregistrement</string>
+    <string name="onboarding_import_error">Aucune BD n’a été importée. Choisissez un autre fichier ou continuez sans BD.</string>
+    <string name="onboarding_interrupted">L’importation a été interrompue. Vos BD conservées sont en sécurité ; choisissez un fichier pour réessayer.</string>
+    <string name="onboarding_back">Retour</string>
+    <string name="onboarding_prepare_error">Leaf n’a pas pu préparer cette action. Veuillez réessayer.</string>
+    <string name="onboarding_connection_error">Échec de la connexion. Vérifiez les informations du serveur et réessayez.</string>
+</resources>
