@@ -170,6 +170,23 @@ class AndroidReleaseTests(unittest.TestCase):
             with self.assertRaises(RuntimeError, msg=key):
                 release.play_state(self.state_path)
 
+    def test_snapshot_includes_required_android_tooling_modules(self):
+        self.repo()
+        self.file('settings.gradle.kts', 'include(":app", ":shared", ":r8smoke", ":macrobenchmark")\n')
+        for module in ('r8smoke', 'macrobenchmark'):
+            self.file(f'{module}/build.gradle.kts', 'plugins {}\n')
+            self.file(f'{module}/src/main/AndroidManifest.xml', '<manifest/>\n')
+        subprocess.run(['git', 'add', 'settings.gradle.kts', 'r8smoke', 'macrobenchmark'], cwd=self.root, check=True)
+        subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+                        'commit', '-qm', 'Android tooling modules'], cwd=self.root, check=True)
+        directory = self.prepared()
+        manifest = release.load_release(directory)[1]
+        for module in ('r8smoke', 'macrobenchmark'):
+            for name in ('build.gradle.kts', 'src/main/AndroidManifest.xml'):
+                relative = f'{module}/{name}'
+                self.assertEqual((directory / 'source' / relative).read_bytes(), (self.root / relative).read_bytes())
+                self.assertIn(relative, manifest['source_hashes'])
+
     def test_snapshot_versions_only_change_in_candidate(self):
         self.repo()
         before = (self.root / 'app/build.gradle.kts').read_bytes()
