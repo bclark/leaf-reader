@@ -1,0 +1,4 @@
+Your next issue is closer at hand.
+• New welcome screens let you start with a file or Jellyfin.
+• Search your library with clearer offline-copy actions.
+• Fixed SMB imports in optimized builds and made transfer cancellation more responsive.
