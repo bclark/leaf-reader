@@ -1,0 +1,20 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!-- DRAFT French: fluent review and UI integration/QA pending. Not active app resources. -->
+    <string name="sync_positions_differ">Les positions de lecture diffèrent</string>
+    <string name="sync_choose_position">Choisissez la position de lecture à conserver pour %1$s.</string>
+    <string name="sync_device">Cet appareil</string>
+    <string name="sync_server">Jellyfin</string>
+    <string name="sync_position_state">Page %1$d sur %2$d · %3$s</string>
+    <string name="sync_read">Lue</string>
+    <string name="sync_not_completed">Non terminée</string>
+    <string name="sync_use_device">Utiliser la position de l’appareil</string>
+    <string name="sync_use_server">Utiliser la position de Jellyfin</string>
+    <string name="sync_keep_both">Conserver les deux pour le moment</string>
+    <string name="sync_review_positions">Vérifier les positions de lecture</string>
+    <string name="sync_choice_retry">Impossible d’enregistrer votre choix. Les positions ont peut-être changé. Vérifiez les choix actuels et réessayez.</string>
+    <string name="sync_reading_position">Synchroniser la position de lecture</string>
+    <string name="remove_download">Retirer le téléchargement</string>
+    <string name="remove_download_explanation">Retirer la copie de cet appareil ? Votre position de lecture, vos listes et les synchronisations en attente seront conservées. Vous pourrez télécharger à nouveau la BD depuis Jellyfin.</string>
+    <string name="remove_download_failed">Impossible de retirer ce téléchargement. Votre historique de lecture et vos listes sont conservés. Réessayez.</string>
+</resources>

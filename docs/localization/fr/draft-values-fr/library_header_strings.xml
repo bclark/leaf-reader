@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!-- DRAFT French: fluent review and UI integration/QA pending. Not active app resources. -->
+    <string name="library_view_all">Toutes</string>
+    <string name="library_view_series">Séries</string>
+    <string name="library_view_lists">Listes</string>
+    <string name="library_view_offline">Hors connexion</string>
+    <string name="library_unread_only">Non lues uniquement</string>
+    <string name="library_clear_unread">Désactiver le filtre Non lues uniquement</string>
+    <string name="library_no_unread">Aucune BD non lue dans cette vue.</string>
+    <string name="library_offline_empty">Aucune BD enregistrée pour la lecture hors connexion. Importez une BD depuis Fichiers ou SMB, ou téléchargez-en une depuis Jellyfin. La déconnexion d’un serveur ne supprime pas les copies enregistrées.</string>
+    <string name="library_default_rtl">Lecture de droite à gauche par défaut</string>
+    <string name="library_select_all">Tout sélectionner</string>
+    <string name="library_deselect_all">Tout désélectionner</string>
+    <string name="library_done">Terminé</string>
+    <string name="jellyfin_last_catalogue_refresh">Dernière actualisation du catalogue · %1$s</string>
+</resources>

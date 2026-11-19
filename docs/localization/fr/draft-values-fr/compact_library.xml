@@ -1,0 +1,29 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!-- DRAFT French: fluent review and UI integration/QA pending. Not active app resources. -->
+    <string name="compact_confirm_removal">Confirmer la suppression des téléchargements</string>
+    <string name="compact_confirm_removal_body">Demander confirmation avant de retirer les copies locales de Jellyfin. Les éléments d’origine et la progression de lecture sont conservés.</string>
+    <string name="compact_remove_title">Retirer les copies téléchargées ?</string>
+    <plurals name="compact_remove_body">
+        <item quantity="one">Retirer %1$d copie téléchargée de cet appareil. Les éléments Jellyfin, la progression de lecture, les listes et les fichiers d’origine sont conservés. Autres éléments sélectionnés inchangés : %2$d.</item>
+        <item quantity="other">Retirer %1$d copies téléchargées de cet appareil. Les éléments Jellyfin, la progression de lecture, les listes et les fichiers d’origine sont conservés. Autres éléments sélectionnés inchangés : %2$d.</item>
+    </plurals>
+    <string name="compact_copy_failed">Impossible de terminer cette action sur les copies. Vérifiez la connexion et la sélection, puis réessayez.</string>
+    <string name="compact_done">Terminer la sélection</string>
+    <string name="compact_select">Sélectionner des BD</string>
+    <string name="compact_details">Afficher les détails de la BD</string>
+    <string name="compact_cancel">Annuler</string>
+    <string name="compact_remove">Retirer les copies</string>
+    <plurals name="compact_download_count">
+        <item quantity="one">Télécharger %1$d</item>
+        <item quantity="other">Télécharger %1$d</item>
+    </plurals>
+    <plurals name="compact_remove_count">
+        <item quantity="one">Retirer %1$d téléchargement</item>
+        <item quantity="other">Retirer %1$d téléchargements</item>
+    </plurals>
+    <plurals name="compact_selected">
+        <item quantity="one">%1$d BD sélectionnée</item>
+        <item quantity="other">%1$d BD sélectionnées</item>
+    </plurals>
+</resources>

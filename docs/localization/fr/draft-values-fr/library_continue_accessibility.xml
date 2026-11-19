@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!-- DRAFT French: fluent review and UI integration/QA pending. Not active app resources. -->
+    <string name="library_continue_reading">Reprendre la lecture</string>
+    <string name="library_continue_accessible">Reprendre la lecture, %1$s, %2$s</string>
+    <string name="library_continue_failed">Impossible de récupérer cette BD. Réessayez lorsque le serveur sera disponible.</string>
+    <string name="library_continue_unreadable">Cette copie ne peut plus être lue. Ajoutez-la à nouveau pour continuer.</string>
+</resources>
