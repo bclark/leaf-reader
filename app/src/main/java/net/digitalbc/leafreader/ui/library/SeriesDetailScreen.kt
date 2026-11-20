@@ -58,6 +58,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
+import net.digitalbc.leafreader.R
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -127,6 +130,17 @@ fun SeriesDetailScreen(
         nextUnread != null && nextUnread.lastPage > 0 -> "CONTINUE: ${nextUnread.title.uppercase()}"
         nextUnread != null -> "START: ${nextUnread.title.uppercase()}"
         else -> null
+    }
+
+    var pendingMarkRead by remember(seriesName, volume) { mutableStateOf<Boolean?>(null) }
+    val affectedCount = allComics.count {
+        it.series.equals(seriesName, ignoreCase = true) &&
+            (volume.isNullOrBlank() || it.volume.equals(volume, ignoreCase = true))
+    }
+    pendingMarkRead?.let { read ->
+        SeriesReadConfirmation(seriesName, affectedCount, read,
+            onConfirm = { viewModel.markSeriesRead(seriesName, volume, read); pendingMarkRead = null },
+            onDismiss = { pendingMarkRead = null })
     }
 
     var showAddComicsDialog by remember { mutableStateOf(false) }
@@ -281,28 +295,6 @@ fun SeriesDetailScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    // Mark Read/Unread Book-Status Icon Button
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                                            .border(
-                                                1.dp,
-                                                if (allCompleted) ComicRose.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-                                                RoundedCornerShape(6.dp),
-                                            )
-                                            .clickable { viewModel.markSeriesRead(seriesName, volume, !allCompleted) },
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        BookStatusBadgeIcon(
-                                            isAllCompleted = allCompleted,
-                                            bookTint = if (allCompleted) ComicRose else MaterialTheme.colorScheme.onSurface,
-                                            badgeColor = if (allCompleted) ComicRose else MaterialTheme.colorScheme.tertiary,
-                                            badgeGlyphTint = Ink,
-                                        )
-                                    }
-
                                     // Compact Start / Continue Action Pill
                                     val targetComic = if (allCompleted) scopedComics.first() else (nextUnread ?: scopedComics.first())
                                     val shortActionLabel = when {
@@ -342,6 +334,15 @@ fun SeriesDetailScreen(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+
+                if (scopedComics.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        TextButton(onClick = { pendingMarkRead = !allCompleted },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                            Text(stringResource(if (allCompleted) R.string.series_mark_all_unread else R.string.series_mark_all_read))
                         }
                     }
                 }
@@ -691,4 +692,20 @@ private fun SeriesComicItem(
             modifier = Modifier.padding(top = 2.dp),
         )
     }
+}
+
+/** The existing bulk page change runs only after an explicit, named confirmation. */
+@Composable
+internal fun SeriesReadConfirmation(seriesName: String, count: Int, read: Boolean,
+    onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss,
+        title = { Text(stringResource(if (read) R.string.series_mark_all_read else R.string.series_mark_all_unread)) },
+        text = { Text(pluralStringResource(if (read) R.plurals.series_mark_read_consequence else R.plurals.series_mark_unread_consequence,
+            count, count, seriesName)) },
+        confirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(if (read) R.string.series_mark_all_read else R.string.series_mark_all_unread))
+        } },
+        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(android.R.string.cancel))
+        } })
 }

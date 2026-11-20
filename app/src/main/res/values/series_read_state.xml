@@ -1,0 +1,12 @@
+<resources>
+    <string name="series_mark_all_read">Mark all read</string>
+    <string name="series_mark_all_unread">Mark all unread</string>
+    <plurals name="series_mark_read_consequence">
+        <item quantity="one">Mark %1$d comic in “%2$s” as read and move its saved position to the last page? This includes comics hidden by filters.</item>
+        <item quantity="other">Mark %1$d comics in “%2$s” as read and move their saved positions to the last page? This includes comics hidden by filters.</item>
+    </plurals>
+    <plurals name="series_mark_unread_consequence">
+        <item quantity="one">Mark %1$d comic in “%2$s” as unread and reset its saved position to the first page? This includes comics hidden by filters.</item>
+        <item quantity="other">Mark %1$d comics in “%2$s” as unread and reset their saved positions to the first page? This includes comics hidden by filters.</item>
+    </plurals>
+</resources>
