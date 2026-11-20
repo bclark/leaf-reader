@@ -1,0 +1,4 @@
+<resources>
+    <string name="library_search_no_matches">No comics match “%1$s”.</string>
+    <string name="library_clear_search">Clear search</string>
+</resources>

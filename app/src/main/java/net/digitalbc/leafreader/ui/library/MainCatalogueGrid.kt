@@ -54,6 +54,7 @@ internal fun LazyGridScope.mainCatalogueGrid(
     selectedIds: Set<String> = emptySet(),
     onToggleSelection: (JellyfinCatalogueEntry) -> Unit = {},
     connectionNoticeShown: Boolean = false,
+    onClearSearch: () -> Unit = {},
 ) {
     if (state.library == null || state.libraries.size > 1) {
         item(span = { GridItemSpan(maxLineSpan) }) {
@@ -156,7 +157,14 @@ internal fun LazyGridScope.mainCatalogueGrid(
     }
     if (showEmpty && state.loaded && !state.loading && state.entries.isEmpty() && state.library != null && state.error == null) {
         item(span = { GridItemSpan(maxLineSpan) }) {
-            Text(if (state.creator != null) androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.creator_no_matches)
+            if (state.search.isNotBlank()) {
+                Column {
+                    Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_search_no_matches, state.search))
+                    TextButton(onClick = onClearSearch, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_clear_search))
+                    }
+                }
+            } else Text(if (state.creator != null) androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.creator_no_matches)
                 else if (state.view == JellyfinCatalogueView.LISTS && state.collection == null) "No compatible Jellyfin collections."
                 else if (state.unreadOnly) androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_no_unread)
                 else if (state.view == JellyfinCatalogueView.LISTS) "No compatible collections or members on this page."
