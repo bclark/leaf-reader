@@ -1,0 +1,7 @@
+<resources>
+    <string name="jellyfin_saved_auth">Vuelve a iniciar sesión en Jellyfin. Se muestran los metadatos guardados; los cómics sin copia local necesitan conexión.</string>
+    <string name="jellyfin_saved_denied">Se denegó el acceso a Jellyfin. Se muestran los metadatos guardados; los cómics sin copia local necesitan conexión.</string>
+    <string name="jellyfin_saved_timeout">Jellyfin no respondió. Se muestran los metadatos guardados; los cómics sin copia local necesitan conexión.</string>
+    <string name="jellyfin_saved_unreachable">Jellyfin no está disponible. Se muestran los metadatos guardados; los cómics sin copia local necesitan conexión.</string>
+    <string name="jellyfin_saved_failed">No se pudo cargar Jellyfin. Se muestran los metadatos guardados; los cómics sin copia local necesitan conexión.</string>
+</resources>
