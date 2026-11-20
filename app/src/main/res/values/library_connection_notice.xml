@@ -1,0 +1,7 @@
+<resources>
+    <string name="jellyfin_saved_auth">Sign in to Jellyfin again. Browsing saved metadata; remote-only comics need a connection.</string>
+    <string name="jellyfin_saved_denied">Jellyfin access was denied. Browsing saved metadata; remote-only comics need a connection.</string>
+    <string name="jellyfin_saved_timeout">Jellyfin did not respond. Browsing saved metadata; remote-only comics need a connection.</string>
+    <string name="jellyfin_saved_unreachable">Jellyfin is unreachable. Browsing saved metadata; remote-only comics need a connection.</string>
+    <string name="jellyfin_saved_failed">Could not load Jellyfin. Browsing saved metadata; remote-only comics need a connection.</string>
+</resources>
