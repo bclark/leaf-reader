@@ -68,7 +68,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.digitalbc.leafreader.data.db.ComicEntity
-import net.digitalbc.leafreader.ui.brand.BookStatusBadgeIcon
 import net.digitalbc.leafreader.ui.brand.comicShadow
 import net.digitalbc.leafreader.ui.brand.halftone
 import net.digitalbc.leafreader.ui.theme.Anton

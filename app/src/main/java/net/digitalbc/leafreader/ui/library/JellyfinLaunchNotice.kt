@@ -33,13 +33,13 @@ internal fun JellyfinLaunchNotice(
             else -> R.string.jellyfin_saved_failed
         }
         else -> when (failure) {
-        JellyfinFailureKind.AUTHENTICATION -> R.string.jellyfin_launch_auth
-        JellyfinFailureKind.ACCESS_DENIED -> R.string.jellyfin_launch_denied
-        JellyfinFailureKind.TIMEOUT -> R.string.jellyfin_launch_timeout
-        JellyfinFailureKind.UNAVAILABLE, JellyfinFailureKind.IO, JellyfinFailureKind.SERVER_ERROR ->
-            R.string.jellyfin_launch_unreachable
-        else -> R.string.jellyfin_launch_failed
-    }
+            JellyfinFailureKind.AUTHENTICATION -> R.string.jellyfin_launch_auth
+            JellyfinFailureKind.ACCESS_DENIED -> R.string.jellyfin_launch_denied
+            JellyfinFailureKind.TIMEOUT -> R.string.jellyfin_launch_timeout
+            JellyfinFailureKind.UNAVAILABLE, JellyfinFailureKind.IO, JellyfinFailureKind.SERVER_ERROR ->
+                R.string.jellyfin_launch_unreachable
+            else -> R.string.jellyfin_launch_failed
+        }
     }
     Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }) {
