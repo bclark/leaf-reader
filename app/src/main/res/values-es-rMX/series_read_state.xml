@@ -1,0 +1,12 @@
+<resources>
+    <string name="series_mark_all_read">Marcar todos como leídos</string>
+    <string name="series_mark_all_unread">Marcar todos como no leídos</string>
+    <plurals name="series_mark_read_consequence">
+        <item quantity="one">¿Marcar %1$d cómic de “%2$s” como leído y mover su posición guardada a la última página? Esto incluye los cómics ocultos por los filtros.</item>
+        <item quantity="other">¿Marcar %1$d cómics de “%2$s” como leídos y mover sus posiciones guardadas a la última página? Esto incluye los cómics ocultos por los filtros.</item>
+    </plurals>
+    <plurals name="series_mark_unread_consequence">
+        <item quantity="one">¿Marcar %1$d cómic de “%2$s” como no leído y restablecer su posición guardada a la primera página? Esto incluye los cómics ocultos por los filtros.</item>
+        <item quantity="other">¿Marcar %1$d cómics de “%2$s” como no leídos y restablecer sus posiciones guardadas a la primera página? Esto incluye los cómics ocultos por los filtros.</item>
+    </plurals>
+</resources>
