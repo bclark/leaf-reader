@@ -918,6 +918,7 @@ fun LibraryScreen(
                         onToggleSelection = ::toggleRemote,
                         showEmpty = displayedLocalItems.isEmpty(),
                         connectionNoticeShown = catalogueState.launchFailure != null,
+                        onClearSearch = viewModel::clearSearch,
                     )
                 }
 
