@@ -340,6 +340,7 @@ fun SeriesDetailScreen(
                 if (scopedComics.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         TextButton(onClick = { pendingMarkRead = !allCompleted },
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                             Text(stringResource(if (allCompleted) R.string.series_mark_all_unread else R.string.series_mark_all_read))
                         }
@@ -701,10 +702,10 @@ internal fun SeriesReadConfirmation(seriesName: String, count: Int, read: Boolea
         title = { Text(stringResource(if (read) R.string.series_mark_all_read else R.string.series_mark_all_unread)) },
         text = { Text(pluralStringResource(if (read) R.plurals.series_mark_read_consequence else R.plurals.series_mark_unread_consequence,
             count, count, seriesName)) },
-        confirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.heightIn(min = 48.dp)) {
+        confirmButton = { TextButton(onClick = onConfirm, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface), modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(if (read) R.string.series_mark_all_read else R.string.series_mark_all_unread))
         } },
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
+        dismissButton = { TextButton(onClick = onDismiss, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface), modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(android.R.string.cancel))
         } })
 }

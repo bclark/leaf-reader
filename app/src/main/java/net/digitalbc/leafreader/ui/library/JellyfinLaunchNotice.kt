@@ -47,12 +47,12 @@ internal fun JellyfinLaunchNotice(
             Text(stringResource(message), color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (retrying) Text(stringResource(R.string.jellyfin_launch_retrying))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onRetry, enabled = !retrying, modifier = Modifier.heightIn(min = 48.dp)) {
+                TextButton(onClick = onRetry, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface), enabled = !retrying, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text(stringResource(R.string.jellyfin_retry))
                 }
                 if (failure in listOf(JellyfinFailureKind.AUTHENTICATION,
                         JellyfinFailureKind.ACCESS_DENIED, JellyfinFailureKind.INVALID_CONFIGURATION)) {
-                    TextButton(onClick = onSettings, modifier = Modifier.heightIn(min = 48.dp)) {
+                    TextButton(onClick = onSettings, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface), modifier = Modifier.heightIn(min = 48.dp)) {
                         Text(stringResource(R.string.jellyfin_settings_action))
                     }
                 }

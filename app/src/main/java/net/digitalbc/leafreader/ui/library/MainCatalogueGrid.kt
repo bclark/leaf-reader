@@ -160,7 +160,7 @@ internal fun LazyGridScope.mainCatalogueGrid(
             if (state.search.isNotBlank()) {
                 Column {
                     Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_search_no_matches, state.search))
-                    TextButton(onClick = onClearSearch, modifier = Modifier.heightIn(min = 48.dp)) {
+                    TextButton(onClick = onClearSearch, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface), modifier = Modifier.heightIn(min = 48.dp)) {
                         Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_clear_search))
                     }
                 }
