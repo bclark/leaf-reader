@@ -46,6 +46,24 @@ class BackupManagerTest {
     }
 
     @Test
+    fun libraryAppearanceBackupRestoresAllChoicesAndOlderBackupsUseQuietDefaults() = runBlocking {
+        for (titles in listOf(false, true)) for (details in listOf(false, true)) for (reading in listOf(false, true)) {
+            val chosen = net.digitalbc.leafreader.data.settings.LibraryAppearance(titles, details, reading)
+            settings.libraryAppearance = chosen
+            val backup = repository.exportBackup()
+            settings.libraryAppearance = net.digitalbc.leafreader.data.settings.LibraryAppearance(!titles, !details, !reading)
+            repository.applyBackup(backup, BackupConflictStrategy.OVERWRITE).getOrThrow()
+            assertEquals(chosen, settings.libraryAppearanceFlow.value)
+        }
+        val old = org.json.JSONObject(repository.exportBackup())
+        val preferences = old.getJSONObject("settings")
+        for (name in listOf("libraryShowTitles", "libraryShowDetails", "libraryShowReadingIndicators")) preferences.remove(name)
+        settings.libraryAppearance = net.digitalbc.leafreader.data.settings.LibraryAppearance(false, true, false)
+        repository.applyBackup(old.toString(), BackupConflictStrategy.OVERWRITE).getOrThrow()
+        assertEquals(net.digitalbc.leafreader.data.settings.LibraryAppearance(), settings.libraryAppearance)
+    }
+
+    @Test
     fun completionRoundTripsSeparatelyFromPositionAndOldBackupsKeepLegacyDefaults() = runBlocking {
         val states = listOf(true, false, null)
         for ((index, completed) in states.withIndex()) {

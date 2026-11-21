@@ -42,6 +42,9 @@ object BackupManager {
         settingsObj.put("portraitSpread", settings.portraitSpread)
         settingsObj.put("landscapeSpread", settings.landscapeSpread)
         settingsObj.put("libraryColumns", settings.libraryColumns)
+        settingsObj.put("libraryShowTitles", settings.libraryAppearance.showTitles)
+        settingsObj.put("libraryShowDetails", settings.libraryAppearance.showDetails)
+        settingsObj.put("libraryShowReadingIndicators", settings.libraryAppearance.showReadingIndicators)
         root.put("settings", settingsObj)
 
         // Comics list
@@ -123,6 +126,9 @@ object BackupManager {
                 portraitSpread = sObj.optBoolean("portraitSpread", false),
                 landscapeSpread = sObj.optBoolean("landscapeSpread", false),
                 libraryColumns = sObj.optInt("libraryColumns", 2),
+                libraryShowTitles = sObj.optBoolean("libraryShowTitles", true),
+                libraryShowDetails = sObj.optBoolean("libraryShowDetails", false),
+                libraryShowReadingIndicators = sObj.optBoolean("libraryShowReadingIndicators", true),
             )
         } else null
 

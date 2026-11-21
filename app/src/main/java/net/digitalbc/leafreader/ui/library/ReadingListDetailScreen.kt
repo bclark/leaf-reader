@@ -457,7 +457,6 @@ fun ReadingListDetailScreen(
                                     onClick = { onOpenComic(comic.id) },
                                     onLongClick = { selectedComicForOptions = comic })
                                 remote != null -> ComicCard(remote = remote, columns = actualColumns,
-                                    remoteSubtitle = "Jellyfin · not downloaded",
                                     onClick = { viewModel.openJellyfinDetail(remote.item) },
                                     onLongClick = { selectedMember = member },
                                     loadRemoteCover = { viewModel.loadJellyfinCover(it) })

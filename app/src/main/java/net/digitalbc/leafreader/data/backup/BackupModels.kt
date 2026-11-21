@@ -14,6 +14,9 @@ data class BackupSettings(
     val portraitSpread: Boolean,
     val landscapeSpread: Boolean,
     val libraryColumns: Int,
+    @androidx.room.ColumnInfo(defaultValue = "1") val libraryShowTitles: Boolean = true,
+    @androidx.room.ColumnInfo(defaultValue = "0") val libraryShowDetails: Boolean = false,
+    @androidx.room.ColumnInfo(defaultValue = "1") val libraryShowReadingIndicators: Boolean = true,
 )
 
 data class BackupComic(

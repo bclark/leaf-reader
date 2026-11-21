@@ -6,6 +6,20 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AppSettingsTest {
+    @Test fun libraryAppearanceDefaultsAndAllCombinationsPersistWithoutChangingOtherPreferences() {
+        val stored = mutableMapOf<String, Any>("landscape_spread" to true)
+        val settings = AppSettings(preferences(stored))
+        assertEquals(LibraryAppearance(), settings.libraryAppearance)
+        assertEquals(mapOf("landscape_spread" to true), stored)
+        for (titles in listOf(false, true)) for (details in listOf(false, true)) for (reading in listOf(false, true)) {
+            val chosen = LibraryAppearance(titles, details, reading)
+            settings.libraryAppearance = chosen
+            assertEquals(chosen, settings.libraryAppearanceFlow.value)
+            assertEquals(chosen, AppSettings(preferences(stored)).libraryAppearance)
+            assertTrue(settings.landscapeSpread)
+        }
+    }
+
     @Test fun downloadRemovalConfirmationDefaultsOnAndOptOutPersists() {
         val stored = mutableMapOf<String, Any>()
         val settings = AppSettings(preferences(stored))

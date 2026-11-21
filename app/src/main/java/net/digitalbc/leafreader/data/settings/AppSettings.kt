@@ -2,6 +2,8 @@ package net.digitalbc.leafreader.data.settings
 
 import android.content.Context
 import androidx.core.content.edit
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Lightweight app-wide preferences backed by [android.content.SharedPreferences].
@@ -12,6 +14,23 @@ import androidx.core.content.edit
  */
 class AppSettings internal constructor(private val prefs: android.content.SharedPreferences) {
     constructor(context: Context) : this(loadPreferences(context))
+
+    private val _libraryAppearance = MutableStateFlow(LibraryAppearance(
+        prefs.getBoolean("library_show_titles", true),
+        prefs.getBoolean("library_show_details", false),
+        prefs.getBoolean("library_show_reading_indicators", true),
+    ))
+    val libraryAppearanceFlow = _libraryAppearance.asStateFlow()
+    var libraryAppearance: LibraryAppearance
+        get() = _libraryAppearance.value
+        set(value) {
+            prefs.edit {
+                putBoolean("library_show_titles", value.showTitles)
+                putBoolean("library_show_details", value.showDetails)
+                putBoolean("library_show_reading_indicators", value.showReadingIndicators)
+            }
+            _libraryAppearance.value = value
+        }
 
     var themeMode: ThemeMode
         get() = runCatching {
@@ -147,10 +166,15 @@ class AppSettings internal constructor(private val prefs: android.content.Shared
             .putBoolean(KEY_PORTRAIT_SPREAD, backup.portraitSpread)
             .putBoolean(KEY_LANDSCAPE_SPREAD, backup.landscapeSpread)
             .putInt(KEY_LIBRARY_COLUMNS, backup.libraryColumns)
+            .putBoolean("library_show_titles", backup.libraryShowTitles)
+            .putBoolean("library_show_details", backup.libraryShowDetails)
+            .putBoolean("library_show_reading_indicators", backup.libraryShowReadingIndicators)
             .commit()
         if (!saved) throw java.io.IOException(
             "Library restored, but preferences could not be saved. Retry the restore."
         )
+        _libraryAppearance.value = LibraryAppearance(backup.libraryShowTitles, backup.libraryShowDetails,
+            backup.libraryShowReadingIndicators)
     }
 
     private companion object {

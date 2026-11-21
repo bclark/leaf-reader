@@ -46,6 +46,8 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.LayoutDirection
@@ -342,6 +344,7 @@ fun LibraryScreen(
     var pendingDelete by remember { mutableStateOf<ComicEntity?>(null) }
     var showBatchDeleteDialog by remember { mutableStateOf(false) }
     var showSourceDialog by remember { mutableStateOf(false) }
+    var showAppearance by remember { mutableStateOf(false) }
     var showGroupDialog by remember { mutableStateOf(false) }
     var seriesInput by remember(showGroupDialog) { mutableStateOf("") }
     var volumeInput by remember(showGroupDialog) { mutableStateOf("") }
@@ -601,6 +604,9 @@ fun LibraryScreen(
                                     leadingIcon = { Icon(Icons.Default.Add, null) },
                                     enabled = !importing,
                                     onClick = { menuExpanded = false; showSourceDialog = true })
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_appearance)) },
+                                    onClick = { menuExpanded = false; showAppearance = true })
                                 androidx.compose.material3.HorizontalDivider()
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_settings_more)) },
@@ -1199,6 +1205,9 @@ fun LibraryScreen(
 
     }
 
+    if (showAppearance) LibraryAppearanceSheet(
+        (androidx.compose.ui.platform.LocalContext.current.applicationContext as net.digitalbc.leafreader.ComicReaderApp).settings,
+        onDismiss = { showAppearance = false; menuFocus.requestFocus() })
     if (showSourceDialog) {
         AlertDialog(
             onDismissRequest = { showSourceDialog = false },
@@ -2037,22 +2046,40 @@ internal fun ComicCard(
     onLongClick: (() -> Unit)? = null,
     remote: JellyfinCatalogueEntry? = null,
     remoteTitle: String? = null,
-    remoteSubtitle: String? = null,
+    remoteDownloaded: Boolean = false,
     loadRemoteCover: (suspend (JellyfinItem) -> Bitmap?)? = null,
     remoteCoverWidthPx: Int = 400,
 ) {
     require((comic == null) != (remote == null))
+    val appearance = LocalLibraryAppearance.current
     val title = comic?.title ?: remoteTitle ?: remote!!.item.name
+    val collection = remote?.type.equals("BoxSet", true)
+    val completed = comic?.isCompleted ?: (remote?.played == true)
+    val remoteStarted = remote?.played == false && remote.item.playbackPositionTicks > 0
+    val remoteFraction = remote?.playedPercentage?.takeIf { it.isFinite() && it in 0.0..100.0 }?.div(100)?.toFloat()
+    val readingLabel = androidx.compose.ui.res.stringResource(when {
+        completed -> net.digitalbc.leafreader.R.string.library_status_read
+        (comic?.lastPage ?: 0) > 0 || remoteStarted -> net.digitalbc.leafreader.R.string.library_status_started
+        remote != null && remote.played == null -> net.digitalbc.leafreader.R.string.library_status_unknown
+        else -> net.digitalbc.leafreader.R.string.library_status_unread
+    })
     val pct = if (comic != null && comic.pageCount > 0) ((comic.lastPage + 1f) / comic.pageCount).coerceIn(0f, 1f) else 0f
     val started = (comic?.lastPage ?: 0) > 0
     val borderWidth = if (columns >= 4) 2.dp else 3.dp
     val shadowOffset = if (columns >= 4) 3.dp else 5.dp
-    val progressHeight = if (columns >= 4) 5.dp else 7.dp
 
     val fileSize by rememberFileSize(comic?.filePath)
-    val sizeText = formatFileSize(fileSize)
+    val sizeText = formatFileSize(if (remote != null) remote.item.sizeBytes else fileSize)
 
-    Column(Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+    val sourceLabel = if (remote != null || comic?.source == "jellyfin") "Jellyfin" else if (comic?.source == "smb") "SMB" else androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_source_device)
+    val details = if (collection) androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_collection_details)
+        else listOfNotNull(sourceLabel, comic?.let { androidx.compose.ui.res.pluralStringResource(net.digitalbc.leafreader.R.plurals.library_page_count, it.pageCount, it.pageCount) }, sizeText.takeIf { it.isNotEmpty() }).joinToString(" · ")
+    val availability = if (remote != null && !collection) androidx.compose.ui.res.stringResource(if (remoteDownloaded) net.digitalbc.leafreader.R.string.library_available_offline else net.digitalbc.leafreader.R.string.library_download_required) else ""
+    Column(Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick, role = Role.Button).semantics {
+        contentDescription = listOf(title, details, availability).filter { it.isNotEmpty() }.joinToString(". ")
+        if (!collection) stateDescription = readingLabel
+        if (isEditMode) selected = isSelected
+    }) {
         Box(
             Modifier
                 .fillMaxWidth()
@@ -2072,9 +2099,9 @@ internal fun ComicCard(
                 if (loaded != null || value == null) value = loaded
             }
             if (remoteBitmap != null) {
-                Image(remoteBitmap!!.asImageBitmap(), title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Image(remoteBitmap!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             } else if (cover != null) {
-                Image(cover, title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Image(cover, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             } else {
                 GeneratedCover(title, columns = columns)
             }
@@ -2101,13 +2128,12 @@ internal fun ComicCard(
                 }
             }
 
-            if (!isEditMode && (comic != null || remote?.played == true)) {
-                Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(progressHeight).background(MaterialTheme.colorScheme.surface)) {
-                    Box(Modifier.fillMaxWidth(if (remote?.played == true) 1f else pct).fillMaxHeight().background(Ochre))
-                }
-            }
+            if (!isEditMode && !collection) CoverReadingIndicator(completed,
+                if (comic != null) started else remoteStarted, if (comic != null) pct else remoteFraction)
+            if (remote != null && !collection) CoverAvailability(remoteDownloaded)
+
         }
-        Text(
+        if (appearance.showTitles) Text(
             title.uppercase(),
             fontFamily = Archivo,
             fontWeight = FontWeight.ExtraBold,
@@ -2115,16 +2141,15 @@ internal fun ComicCard(
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp),
+            modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp).clearAndSetSemantics { },
         )
-        Text(
-            remoteSubtitle ?: if (comic != null && started) "${(pct * 100).toInt()}% · pg ${comic.lastPage + 1}/${comic.pageCount}${if (sizeText.isNotEmpty()) " · $sizeText" else ""}"
-            else if (comic != null) "${comic.pageCount} pages${if (sizeText.isNotEmpty()) " · $sizeText" else ""}" else "Jellyfin",
+        if (appearance.showDetails) Text(
+            details,
             fontFamily = Archivo,
             fontWeight = FontWeight.SemiBold,
             fontSize = if (columns >= 4) 8.5.sp else 9.5.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 2.dp),
+            modifier = Modifier.padding(top = 2.dp).clearAndSetSemantics { },
         )
     }
 }
@@ -2133,7 +2158,7 @@ internal fun ComicCard(
 internal fun GeneratedCover(title: String, columns: Int = 2) {
     val fontSize = if (columns >= 5) 13.sp else if (columns >= 4) 15.sp else if (columns == 3) 18.sp else 22.sp
     val padding = if (columns >= 4) 8.dp else 12.dp
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant).halftone(Crimson, alpha = 0.18f)) {
+    Box(Modifier.fillMaxSize().clearAndSetSemantics { }.background(MaterialTheme.colorScheme.surfaceVariant).halftone(Crimson, alpha = 0.18f)) {
         Text(
             title.uppercase(),
             fontFamily = Anton,
@@ -2719,6 +2744,7 @@ private fun CoverStackCard(
     onCoverSelected: (String) -> Unit = {},
     onClick: () -> Unit,
 ) {
+    val appearance = LocalLibraryAppearance.current
     val pct = stack.progressFraction
     val borderWidth = if (columns >= 4) 2.dp else 3.dp
     val shadowOffset = if (columns >= 4) 3.dp else 5.dp
@@ -2762,7 +2788,7 @@ private fun CoverStackCard(
     )
 
     Column(
-        Modifier.clickable(onClick = onClick)
+        Modifier.clickable(role = Role.Button, onClick = onClick).semantics { contentDescription = stack.seriesName }
     ) {
         Box(
             Modifier
@@ -2853,9 +2879,6 @@ private fun CoverStackCard(
                         )
                     }
 
-                    Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(progressHeight).background(MaterialTheme.colorScheme.surface)) {
-                        Box(Modifier.fillMaxWidth(pct).fillMaxHeight().background(Ochre))
-                    }
                     Box(Modifier.matchParentSize().graphicsLayer { alpha = backCoverDimming.value }.background(Color.Black.copy(alpha = 0.16f)))
                 }
             }
@@ -2880,7 +2903,7 @@ private fun CoverStackCard(
             ) {
                 val cover1 = coverImages[currentTopComic.id]
                 if (cover1 != null) {
-                    Image(cover1, stack.seriesName, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    Image(cover1, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 } else {
                     GeneratedCover(stack.seriesName, columns = columns)
                 }
@@ -2917,12 +2940,10 @@ private fun CoverStackCard(
                     )
                 }
 
-                Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(progressHeight).background(MaterialTheme.colorScheme.surface)) {
-                    Box(Modifier.fillMaxWidth(pct).fillMaxHeight().background(Ochre))
-                }
+                if (!stack.remote) CoverReadingIndicator(pct >= 1f, pct > 0f, pct)
             }
         }
-        Text(
+        if (appearance.showTitles) Text(
             stack.seriesName.uppercase(),
             fontFamily = Archivo,
             fontWeight = FontWeight.ExtraBold,
@@ -2930,7 +2951,7 @@ private fun CoverStackCard(
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp),
+            modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp).clearAndSetSemantics { },
         )
     }
 }
@@ -2941,6 +2962,7 @@ private fun ReadingListCard(
     columns: Int = 2,
     onClick: () -> Unit,
 ) {
+    val appearance = LocalLibraryAppearance.current
     val shadowOffset = if (columns >= 4) 3.dp else 5.dp
 
     var topIndex by rememberSaveable(item.readingList.id) { mutableIntStateOf(0) }
@@ -2969,7 +2991,7 @@ private fun ReadingListCard(
     )
 
     Column(
-        Modifier.clickable(onClick = onClick)
+        Modifier.clickable(role = Role.Button, onClick = onClick).semantics { contentDescription = item.readingList.name }
     ) {
         Box(
             Modifier
@@ -3089,7 +3111,7 @@ private fun ReadingListCard(
                 if (topCover != null) {
                     Image(
                         topCover,
-                        contentDescription = item.readingList.name,
+                        contentDescription = null,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop,
                     )
@@ -3118,7 +3140,7 @@ private fun ReadingListCard(
             }
         }
 
-        Text(
+        if (appearance.showTitles) Text(
             item.readingList.name.uppercase(),
             fontFamily = Archivo,
             fontWeight = FontWeight.ExtraBold,
@@ -3126,9 +3148,9 @@ private fun ReadingListCard(
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp),
+            modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp).clearAndSetSemantics { },
         )
-        Text(
+        if (appearance.showDetails) Text(
             "Leaf list · ${item.itemCount} ${if (item.itemCount == 1) "item" else "items"}",
             fontFamily = Archivo,
             fontWeight = FontWeight.SemiBold,
