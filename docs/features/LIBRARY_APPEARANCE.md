@@ -1,6 +1,6 @@
 # Shared Library appearance contract
 
-Status: Bryan approved this direction on 21 November 2026 and explicitly requested an iOS handoff. Android implementation is in progress from main d4c5a5b. iOS is not implemented or accepted by this document. Keep this separate from the active iOS 1.2 Files candidate and the private Guided View prototype.
+Status: Bryan approved this direction on 21 November 2026 and explicitly requested an iOS handoff. Android implementation is committed and isolated native validation passed from main d4c5a5b; physical acceptance remains open. iOS is not implemented or accepted by this document. Keep this separate from the active iOS 1.2 Files candidate and the private Guided View prototype.
 
 ## Agreed behavior
 
@@ -27,7 +27,7 @@ Apply the defaults to existing and new installations when keys are absent. Choic
 
 Android: native appearance controls in Settings and a discoverable Library overflow entry; one shared control implementation. Persist three non-sensitive preferences; include optional backward-compatible backup fields with the same defaults for older backups. Android’s restore-recovery journal embeds these fields, so database 9→10 adds defaulted columns while retaining any pending restore. Source labels retain Device/SMB/Jellyfin identity. Details, availability and reading state remain separate values rather than parsing a concatenated caption.
 
-iOS: retain existing Files/linked source naming rather than replacing it with Android’s Device label. Use the existing native Library/settings organization (a menu or sheet and native toggles), not Android tab/header geometry. Use the same defaults, scopes and state distinctions. Decide integration against the exact approved iOS baseline; do not fold this into 1.2 or alter linked Files behavior without owner scope. If backed-up settings are supported, map fields explicitly; do not change authentication/provider permissions or claim cross-platform backup parity from matching labels.
+iOS: retain existing Files/linked source naming rather than replacing it with Android’s Device label. Use the existing native Library/settings organization (a menu or sheet and native toggles), not Android tab/header geometry. Use the same defaults, scopes and state distinctions. Linked Files retain their own availability identity and must not be relabeled as downloaded copies. Decide integration against the exact approved iOS baseline; do not fold this into 1.2 or alter linked Files behavior without owner scope. If backed-up settings are supported, map fields explicitly; do not change authentication/provider permissions or claim cross-platform backup parity from matching labels.
 
 ## Acceptance and limits
 
@@ -42,3 +42,11 @@ Branch `codex/android/library-appearance-20261121`, based on `d4c5a5b`: Settings
 Backup exports use optional `libraryShowTitles`, `libraryShowDetails` and `libraryShowReadingIndicators` booleans. Absent fields use true/false/true. The recovery journal migration is database 9→10; an old pending restore receives those defaults and retains all prior settings. Existing database upgrades and non-default restore/recovery require regression coverage. iOS should use equivalent native preferences and explicitly map any backup support; the Android database migration is not an iOS schema instruction.
 
 Implementation validation and any remaining acceptance gates are recorded in the Android engineering notes and the feature PR. Native semantics inspection does not establish spoken screen-reader acceptance. No regular-device install, merge, build version bump or distribution is part of this feature change.
+
+### Android verification — 21 November 2026
+
+Feature code `8dcf77083ca39ce19cd3f59ff250875d3af2fda0`: 144 shared JVM tests passed; Full and F-Droid each passed 323 tests with one expected live-SMB skip. Both debug lints have zero errors and 87 existing warnings. Recovery tests include non-default appearance choices, failed preference commit/restart, and a populated version-9 pending journal upgraded and reopened at version 10.
+
+Minified synthetic QA APK SHA-256 `662f7183b7f7710066e25b60fd38bf9cc4e66cbc1f486501bd62728d19424f3a` passed on a disposable read-only API-37 emulator. Actual controls exercised all eight combinations and force-stop/relaunch persistence. Native checks covered independent download descriptions/badges with captions/reading indicators off, hidden Series identity, compact/expanded Library, English and large-type dark Spanish controls, the scrollable 2x sheet and reachable Done, plus the real Settings entry. UIAutomator exposes Compose's synthetic content-description/role children and omits stateDescription; this is not proof of spoken TalkBack behavior. Detailed logs/captures remain in the local task evidence directory.
+
+Remaining: physical visual/peel acceptance, hidden-caption navigation/removal checks across Series/list/creator routes, and separately authorized spoken screen-reader checks. Fresh real-account writes, regular app install, merge, French activation and release were not performed. This feature is ready for review, not a release-acceptance claim.
