@@ -24,7 +24,15 @@ internal fun JellyfinLaunchNotice(
     onSettings: () -> Unit,
     showingDownloads: Boolean = true,
 ) {
-    val message = when (failure) {
+    val message = when {
+        !showingDownloads -> when (failure) {
+            JellyfinFailureKind.AUTHENTICATION -> R.string.jellyfin_saved_auth
+            JellyfinFailureKind.ACCESS_DENIED -> R.string.jellyfin_saved_denied
+            JellyfinFailureKind.TIMEOUT -> R.string.jellyfin_saved_timeout
+            JellyfinFailureKind.UNAVAILABLE, JellyfinFailureKind.IO, JellyfinFailureKind.SERVER_ERROR -> R.string.jellyfin_saved_unreachable
+            else -> R.string.jellyfin_saved_failed
+        }
+        else -> when (failure) {
         JellyfinFailureKind.AUTHENTICATION -> R.string.jellyfin_launch_auth
         JellyfinFailureKind.ACCESS_DENIED -> R.string.jellyfin_launch_denied
         JellyfinFailureKind.TIMEOUT -> R.string.jellyfin_launch_timeout
@@ -32,10 +40,11 @@ internal fun JellyfinLaunchNotice(
             R.string.jellyfin_launch_unreachable
         else -> R.string.jellyfin_launch_failed
     }
+    }
     Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(if (showingDownloads) stringResource(message) else "Jellyfin is unavailable. Browsing saved catalogue metadata.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(message), color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (retrying) Text(stringResource(R.string.jellyfin_launch_retrying))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onRetry, enabled = !retrying, modifier = Modifier.heightIn(min = 48.dp)) {

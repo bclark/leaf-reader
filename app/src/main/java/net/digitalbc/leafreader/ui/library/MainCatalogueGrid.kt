@@ -53,6 +53,7 @@ internal fun LazyGridScope.mainCatalogueGrid(
     selecting: Boolean = false,
     selectedIds: Set<String> = emptySet(),
     onToggleSelection: (JellyfinCatalogueEntry) -> Unit = {},
+    connectionNoticeShown: Boolean = false,
 ) {
     if (state.library == null || state.libraries.size > 1) {
         item(span = { GridItemSpan(maxLineSpan) }) {
@@ -77,15 +78,16 @@ internal fun LazyGridScope.mainCatalogueGrid(
             }
         }
     }
-    if (state.indexing || (!state.indexComplete && state.loaded) || state.offline ||
-        state.indexError != null || state.collection != null || state.partialSearch) {
+    val sharedConnectionFailure = connectionNoticeShown && state.launchFailure != null
+    if (state.indexing || (!state.indexComplete && state.loaded) || (state.offline && !sharedConnectionFailure) ||
+        (state.indexError != null && !sharedConnectionFailure) || state.collection != null || state.partialSearch) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column {
                 if (state.indexing) Text("Indexing catalogue · ${state.indexedRecords} of ${state.indexTotal} records")
                 else if (!state.indexComplete && state.loaded)
                     Text("Saved catalogue is partial · ${state.indexedRecords} records indexed")
-                else if (state.offline) Text("Searching and browsing saved metadata · connection needed for remote-only comics")
-                state.indexError?.let {
+                else if (state.offline && !sharedConnectionFailure) Text("Searching and browsing saved metadata · connection needed for remote-only comics")
+                state.indexError?.takeUnless { sharedConnectionFailure }?.let {
                     Text(it, color = MaterialTheme.colorScheme.error)
                     TextButton(onClick = onRetry, enabled = !state.indexing,
                         modifier = Modifier.heightIn(min = 48.dp)) { Text("Retry refresh") }
@@ -140,13 +142,10 @@ internal fun LazyGridScope.mainCatalogueGrid(
             }
         }
     }
-    if (state.offline) item(span = { GridItemSpan(maxLineSpan) }) {
-        Text("Saved catalogue · Connect to refresh or read comics without a downloaded copy.")
-    }
     if (state.loading) item(span = { GridItemSpan(maxLineSpan) }) {
         CircularProgressIndicator(Modifier.size(32.dp))
     }
-    state.error?.let { error ->
+    state.error?.takeUnless { sharedConnectionFailure && state.offline && state.collection == null && !state.hasMore }?.let { error ->
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column {
                 Text(error, color = MaterialTheme.colorScheme.error)

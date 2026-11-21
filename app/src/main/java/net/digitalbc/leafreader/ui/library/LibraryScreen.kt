@@ -917,6 +917,7 @@ fun LibraryScreen(
                         selecting = remoteSelecting, selectedIds = remoteSelected.keys,
                         onToggleSelection = ::toggleRemote,
                         showEmpty = displayedLocalItems.isEmpty(),
+                        connectionNoticeShown = catalogueState.launchFailure != null,
                     )
                 }
 
