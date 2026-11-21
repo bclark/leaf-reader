@@ -21,6 +21,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
@@ -2593,7 +2594,11 @@ private fun Modifier.onePointerCoverPeel(
         if (!enabled) return@pointerInput
         var animJob: Job? = null
         awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false)
+            // Normal swipes belong to the grid; a deliberate native long press arms the peel.
+            // Quick taps remain handled by the parent clickable.
+            val firstDown = awaitFirstDown(requireUnconsumed = false)
+            val down = awaitLongPressOrCancellation(firstDown.id) ?: return@awaitEachGesture
+            if (down.id != firstDown.id) return@awaitEachGesture
             val downId = down.id
             val downX = down.position.x
             val downY = down.position.y
