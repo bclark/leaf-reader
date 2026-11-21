@@ -93,6 +93,7 @@ fun SeriesDetailScreen(
     offlineDownloads: Boolean = false,
 ) {
     val allComics by viewModel.comics.collectAsStateWithLifecycle()
+    val seriesReadComics by viewModel.seriesReadComics.collectAsStateWithLifecycle(initialValue = emptyList())
     val readable by viewModel.readableComics.collectAsStateWithLifecycle()
     val requestedDownloads by viewModel.downloadedOnly.collectAsStateWithLifecycle()
     val downloadedOnly = requestedDownloads || offlineDownloads
@@ -133,7 +134,7 @@ fun SeriesDetailScreen(
     }
 
     var pendingMarkRead by remember(seriesName, volume) { mutableStateOf<Boolean?>(null) }
-    val affectedCount = allComics.count {
+    val affectedCount = seriesReadComics.count {
         it.series.equals(seriesName, ignoreCase = true) &&
             (volume.isNullOrBlank() || it.volume.equals(volume, ignoreCase = true))
     }
@@ -340,7 +341,7 @@ fun SeriesDetailScreen(
 
                 if (scopedComics.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
-                        TextButton(onClick = { pendingMarkRead = !allCompleted },
+                        TextButton(onClick = { pendingMarkRead = !allCompleted }, enabled = affectedCount > 0,
                             colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                             Text(stringResource(if (allCompleted) R.string.series_mark_all_unread else R.string.series_mark_all_read))
