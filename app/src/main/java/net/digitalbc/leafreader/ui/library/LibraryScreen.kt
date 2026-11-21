@@ -667,7 +667,7 @@ fun LibraryScreen(
                                             fontFamily = Archivo,
                                             fontWeight = FontWeight.SemiBold,
                                             fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
                                     innerTextField()
