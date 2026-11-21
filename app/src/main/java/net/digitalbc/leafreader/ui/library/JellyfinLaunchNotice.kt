@@ -33,13 +33,13 @@ internal fun JellyfinLaunchNotice(
             else -> R.string.jellyfin_saved_failed
         }
         else -> when (failure) {
-        JellyfinFailureKind.AUTHENTICATION -> R.string.jellyfin_launch_auth
-        JellyfinFailureKind.ACCESS_DENIED -> R.string.jellyfin_launch_denied
-        JellyfinFailureKind.TIMEOUT -> R.string.jellyfin_launch_timeout
-        JellyfinFailureKind.UNAVAILABLE, JellyfinFailureKind.IO, JellyfinFailureKind.SERVER_ERROR ->
-            R.string.jellyfin_launch_unreachable
-        else -> R.string.jellyfin_launch_failed
-    }
+            JellyfinFailureKind.AUTHENTICATION -> R.string.jellyfin_launch_auth
+            JellyfinFailureKind.ACCESS_DENIED -> R.string.jellyfin_launch_denied
+            JellyfinFailureKind.TIMEOUT -> R.string.jellyfin_launch_timeout
+            JellyfinFailureKind.UNAVAILABLE, JellyfinFailureKind.IO, JellyfinFailureKind.SERVER_ERROR ->
+                R.string.jellyfin_launch_unreachable
+            else -> R.string.jellyfin_launch_failed
+        }
     }
     Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }) {
@@ -47,12 +47,12 @@ internal fun JellyfinLaunchNotice(
             Text(stringResource(message), color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (retrying) Text(stringResource(R.string.jellyfin_launch_retrying))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onRetry, enabled = !retrying, modifier = Modifier.heightIn(min = 48.dp)) {
+                TextButton(onClick = onRetry, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface), enabled = !retrying, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text(stringResource(R.string.jellyfin_retry))
                 }
                 if (failure in listOf(JellyfinFailureKind.AUTHENTICATION,
                         JellyfinFailureKind.ACCESS_DENIED, JellyfinFailureKind.INVALID_CONFIGURATION)) {
-                    TextButton(onClick = onSettings, modifier = Modifier.heightIn(min = 48.dp)) {
+                    TextButton(onClick = onSettings, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface), modifier = Modifier.heightIn(min = 48.dp)) {
                         Text(stringResource(R.string.jellyfin_settings_action))
                     }
                 }

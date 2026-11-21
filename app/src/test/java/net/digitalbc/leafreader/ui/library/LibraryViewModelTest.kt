@@ -1565,6 +1565,29 @@ class LibraryViewModelTest {
     }
 
     @Test
+    fun seriesReadScopeIncludesSearchHiddenComicsButRespectsVolume() = runBlocking {
+        fakeComicDao.setComics(listOf(
+            createComic(1, "Only visible title", series = "Invincible", volume = "1", pageCount = 25),
+            createComic(2, "Hidden title", series = "Invincible", volume = "1", pageCount = 25),
+            createComic(3, "Other volume", series = "Invincible", volume = "2", pageCount = 25),
+            createComic(4, "Other series", series = "Saga", volume = "1", pageCount = 25),
+        ))
+        viewModel.setSearchQuery("Only visible")
+        assertEquals(listOf(1L), withTimeout(3000) { viewModel.comics.first { it.isNotEmpty() } }.map { it.id })
+        val affected = viewModel.seriesReadComics.first().filter {
+            it.series.equals("Invincible", ignoreCase = true) && it.volume.equals("1", ignoreCase = true)
+        }
+        assertEquals(listOf(1L, 2L), affected.map { it.id })
+        viewModel.markSeriesRead("Invincible", "1", true)
+        withTimeout(3000) {
+            while (fakeComicDao.getAll().filter { it.id in listOf(1L, 2L) }.any { it.lastPage != 24 }) {
+                kotlinx.coroutines.delay(10)
+            }
+        }
+        assertEquals(listOf(24, 24, 0, 0), fakeComicDao.getAll().sortedBy { it.id }.map { it.lastPage })
+    }
+
+    @Test
     fun markSeriesReadAndUnreadOperations() = runBlocking {
         val c1 = createComic(1, "Invincible 01", series = "Invincible", issueNumber = 1f, pageCount = 25, lastPage = 0)
         val c2 = createComic(2, "Invincible 02", series = "Invincible", issueNumber = 2f, pageCount = 25, lastPage = 0)

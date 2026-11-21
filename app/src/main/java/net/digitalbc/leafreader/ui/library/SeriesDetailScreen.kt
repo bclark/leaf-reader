@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -68,7 +69,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.digitalbc.leafreader.data.db.ComicEntity
-import net.digitalbc.leafreader.ui.brand.BookStatusBadgeIcon
 import net.digitalbc.leafreader.ui.brand.comicShadow
 import net.digitalbc.leafreader.ui.brand.halftone
 import net.digitalbc.leafreader.ui.theme.Anton
@@ -93,6 +93,7 @@ fun SeriesDetailScreen(
     offlineDownloads: Boolean = false,
 ) {
     val allComics by viewModel.comics.collectAsStateWithLifecycle()
+    val seriesReadComics by viewModel.seriesReadComics.collectAsStateWithLifecycle(initialValue = emptyList())
     val readable by viewModel.readableComics.collectAsStateWithLifecycle()
     val requestedDownloads by viewModel.downloadedOnly.collectAsStateWithLifecycle()
     val downloadedOnly = requestedDownloads || offlineDownloads
@@ -133,7 +134,7 @@ fun SeriesDetailScreen(
     }
 
     var pendingMarkRead by remember(seriesName, volume) { mutableStateOf<Boolean?>(null) }
-    val affectedCount = allComics.count {
+    val affectedCount = seriesReadComics.count {
         it.series.equals(seriesName, ignoreCase = true) &&
             (volume.isNullOrBlank() || it.volume.equals(volume, ignoreCase = true))
     }
@@ -340,7 +341,8 @@ fun SeriesDetailScreen(
 
                 if (scopedComics.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
-                        TextButton(onClick = { pendingMarkRead = !allCompleted },
+                        TextButton(onClick = { pendingMarkRead = !allCompleted }, enabled = affectedCount > 0,
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                             Text(stringResource(if (allCompleted) R.string.series_mark_all_unread else R.string.series_mark_all_read))
                         }
@@ -702,10 +704,10 @@ internal fun SeriesReadConfirmation(seriesName: String, count: Int, read: Boolea
         title = { Text(stringResource(if (read) R.string.series_mark_all_read else R.string.series_mark_all_unread)) },
         text = { Text(pluralStringResource(if (read) R.plurals.series_mark_read_consequence else R.plurals.series_mark_unread_consequence,
             count, count, seriesName)) },
-        confirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.heightIn(min = 48.dp)) {
+        confirmButton = { TextButton(onClick = onConfirm, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface), modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(if (read) R.string.series_mark_all_read else R.string.series_mark_all_unread))
         } },
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
+        dismissButton = { TextButton(onClick = onDismiss, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface), modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(android.R.string.cancel))
         } })
 }

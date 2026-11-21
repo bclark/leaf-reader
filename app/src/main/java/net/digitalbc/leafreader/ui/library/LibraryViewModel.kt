@@ -236,6 +236,8 @@ class LibraryViewModel(
         _coverSelections.update { it + (key to comicId) }
     }
     val readableComics = repository.readableComics
+    // Bulk Series actions include comics hidden by the current search query.
+    internal val seriesReadComics = repository.comics
 
     private val _libraryFilter = MutableStateFlow(LibraryFilter.SERIES)
     val libraryFilter: StateFlow<LibraryFilter> = _libraryFilter.asStateFlow()

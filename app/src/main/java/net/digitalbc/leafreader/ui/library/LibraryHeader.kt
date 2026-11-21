@@ -11,8 +11,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import net.digitalbc.leafreader.R
 import net.digitalbc.leafreader.ui.theme.Archivo
@@ -52,17 +50,23 @@ internal fun LibraryTabs(selected: LibraryFilter, onSelect: (LibraryFilter) -> U
 
 @Composable
 internal fun UnreadOnlyControl(checked: Boolean, onCheckedChange: (Boolean) -> Unit, modifier: Modifier = Modifier, onToolbar: Boolean = false) {
-    IconToggleButton(checked = checked, onCheckedChange = onCheckedChange,
-        modifier = modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).semantics { selected = checked },
-        colors = IconButtonDefaults.iconToggleButtonColors(
-            contentColor = if (onToolbar) net.digitalbc.leafreader.ui.theme.PaperWhite else MaterialTheme.colorScheme.onSurface,
-            checkedContentColor = net.digitalbc.leafreader.ui.theme.Ink,
-            checkedContainerColor = Ochre)) {
-        Box {
-            Icon(Icons.AutoMirrored.Filled.MenuBook, stringResource(R.string.library_unread_only))
-            Box(Modifier.size(6.dp).align(Alignment.TopEnd).background(if (checked) net.digitalbc.leafreader.ui.theme.Ink else Ochre, androidx.compose.foundation.shape.CircleShape))
-        }
-    }
+    FilterChip(selected = checked, onClick = { onCheckedChange(!checked) },
+        modifier = modifier.heightIn(min = 48.dp),
+        label = { Text(stringResource(R.string.library_unread_label)) },
+        colors = FilterChipDefaults.filterChipColors(
+            labelColor = if (onToolbar) net.digitalbc.leafreader.ui.theme.PaperWhite else MaterialTheme.colorScheme.onSurface,
+            iconColor = if (onToolbar) net.digitalbc.leafreader.ui.theme.PaperWhite else MaterialTheme.colorScheme.onSurface,
+            selectedLabelColor = net.digitalbc.leafreader.ui.theme.Ink,
+            selectedLeadingIconColor = net.digitalbc.leafreader.ui.theme.Ink,
+            selectedContainerColor = Ochre),
+        leadingIcon = {
+            Box {
+                Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(20.dp))
+                Box(Modifier.size(6.dp).align(Alignment.TopEnd).background(
+                    if (checked) net.digitalbc.leafreader.ui.theme.Ink else Ochre,
+                    androidx.compose.foundation.shape.CircleShape))
+            }
+        })
 }
 
 @Composable
