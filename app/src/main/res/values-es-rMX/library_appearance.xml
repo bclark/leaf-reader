@@ -1,0 +1,21 @@
+<resources>
+    <string name="library_appearance">Apariencia de la biblioteca</string>
+    <string name="library_show_titles">Mostrar títulos</string>
+    <string name="library_show_details">Mostrar origen y detalles del archivo</string>
+    <string name="library_show_reading">Mostrar indicadores de lectura</string>
+    <string name="library_appearance_availability">La disponibilidad de las descargas y las advertencias siguen visibles.</string>
+    <string name="library_appearance_done">Listo</string>
+    <string name="library_status_read">Leído</string>
+    <string name="library_status_started">En curso</string>
+    <string name="library_status_unknown">Estado de lectura no disponible</string>
+    <string name="library_status_unread">Sin leer</string>
+    <string name="library_source_device">Dispositivo</string>
+    <string name="library_collection_details">Colección de Jellyfin · solo lectura</string>
+    <string name="library_available_offline">Disponible sin conexión</string>
+    <string name="library_download_required">Es necesario descargar para leer</string>
+    <plurals name="library_page_count">
+        <item quantity="one">%1$d página</item>
+        <item quantity="many">%1$d páginas</item>
+        <item quantity="other">%1$d páginas</item>
+    </plurals>
+</resources>

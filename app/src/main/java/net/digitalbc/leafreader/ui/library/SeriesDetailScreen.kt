@@ -63,6 +63,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.pluralStringResource
 import net.digitalbc.leafreader.R
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -624,13 +628,15 @@ private fun SeriesComicItem(
     onLongClick: () -> Unit,
     onRemove: () -> Unit,
 ) {
+    val appearance = LocalLibraryAppearance.current
+    val readingLabel = stringResource(if (comic.isCompleted) R.string.library_status_read else if (comic.lastPage > 0) R.string.library_status_started else R.string.library_status_unread)
+    val details = pluralStringResource(R.plurals.library_page_count, comic.pageCount, comic.pageCount)
     val pct = if (comic.pageCount > 0) ((comic.lastPage + 1f) / comic.pageCount).coerceIn(0f, 1f) else 0f
     val started = comic.lastPage > 0
     val borderWidth = if (columns >= 4) 2.dp else 3.dp
     val shadowOffset = if (columns >= 4) 3.dp else 5.dp
-    val progressHeight = if (columns >= 4) 5.dp else 7.dp
 
-    Column(Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+    Column(Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick, role = Role.Button).semantics { contentDescription = "${comic.title}. $details"; stateDescription = readingLabel }) {
         Box(
             Modifier
                 .fillMaxWidth()
@@ -642,7 +648,7 @@ private fun SeriesComicItem(
         ) {
             val cover = rememberCover(comic.coverPath)
             if (cover != null) {
-                Image(cover, comic.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Image(cover, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             } else {
                 GeneratedCover(comic.title, columns = columns)
             }
@@ -670,11 +676,9 @@ private fun SeriesComicItem(
                 }
             }
 
-            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(progressHeight).background(MaterialTheme.colorScheme.surface)) {
-                Box(Modifier.fillMaxWidth(pct).fillMaxHeight().background(Ochre))
-            }
+            CoverReadingIndicator(comic.isCompleted, started, pct)
         }
-        Text(
+        if (appearance.showTitles) Text(
             comic.title.uppercase(),
             fontFamily = Archivo,
             fontWeight = FontWeight.ExtraBold,
@@ -682,16 +686,15 @@ private fun SeriesComicItem(
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp),
+            modifier = Modifier.padding(top = if (columns >= 4) 6.dp else 9.dp).clearAndSetSemantics { },
         )
-        Text(
-            if (started) "${(pct * 100).toInt()}% · pg ${comic.lastPage + 1}/${comic.pageCount}"
-            else "${comic.pageCount} pages",
+        if (appearance.showDetails) Text(
+            details,
             fontFamily = Archivo,
             fontWeight = FontWeight.SemiBold,
             fontSize = if (columns >= 4) 8.5.sp else 9.5.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 2.dp),
+            modifier = Modifier.padding(top = 2.dp).clearAndSetSemantics { },
         )
     }
 }

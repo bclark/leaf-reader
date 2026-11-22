@@ -231,6 +231,11 @@ class AppDatabaseMigrationTest {
         verifyPopulatedUpgrade(version = 8, hasRevision = true, markPlayed = false)
     }
 
+    @Test
+    fun migrationFrom9PreservesPendingRestoreWithQuietAppearanceDefaults() = runBlocking {
+        verifyPopulatedUpgrade(version = 9, hasRevision = true, markPlayed = false)
+    }
+
     private suspend fun verifyPopulatedUpgrade(
         version: Int,
         hasRevision: Boolean = false,
@@ -381,10 +386,14 @@ class AppDatabaseMigrationTest {
             AppDatabase.MIGRATION_7_8.migrate(v4Db)
             v4Db.execSQL("INSERT INTO jellyfin_metadata_cache VALUES('srv-test','usr-test','https://server.test','baseline','saved-state')")
         }
+        if (version >= 9) {
+            AppDatabase.MIGRATION_8_9.migrate(v4Db)
+            v4Db.execSQL("INSERT INTO pending_backup_preferences VALUES(1, 1, 0, 1, 'FIT_WIDTH', 0, 1, 4)")
+        }
         helper.close()
 
         fun openMigratedDatabase() = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
-            .addMigrations(AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9)
+            .addMigrations(AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9, AppDatabase.MIGRATION_9_10)
             .allowMainThreadQueries()
             .build()
 
@@ -392,10 +401,15 @@ class AppDatabaseMigrationTest {
 
         try {
             // Force migration/validation, then reopen the on-disk database to check durability.
-            assertEquals(9, migratedDb.openHelper.writableDatabase.version)
-            assertNull(migratedDb.pendingBackupPreferencesDao().get())
+            assertEquals(10, migratedDb.openHelper.writableDatabase.version)
+            if (version < 9) assertNull(migratedDb.pendingBackupPreferencesDao().get())
             migratedDb.close()
             migratedDb = openMigratedDatabase()
+
+            if (version >= 9) assertEquals(
+                net.digitalbc.leafreader.data.backup.BackupSettings(true, false, true, "FIT_WIDTH", false, true, 4),
+                migratedDb.pendingBackupPreferencesDao().get()!!.settings,
+            )
 
             // Verify existing comic survived migration intact
             val comic = migratedDb.comicDao().getById(42)

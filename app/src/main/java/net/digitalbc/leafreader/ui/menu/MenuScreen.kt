@@ -567,6 +567,12 @@ fun MenuScreen(
 
             Spacer(Modifier.size(32.dp))
 
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Text(stringResource(R.string.library_appearance), style = MaterialTheme.typography.titleMedium)
+                net.digitalbc.leafreader.ui.library.LibraryAppearanceControls(settings)
+            }
+            Spacer(Modifier.size(32.dp))
+
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).heightIn(min = 48.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween) {

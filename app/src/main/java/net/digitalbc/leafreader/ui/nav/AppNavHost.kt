@@ -44,6 +44,7 @@ fun AppNavHost() {
     val navController = rememberNavController()
     val currentEntry by navController.currentBackStackEntryAsState()
     val app = LocalContext.current.applicationContext as ComicReaderApp
+    val appearance by app.settings.libraryAppearanceFlow.collectAsState()
     val libraryVm: LibraryViewModel = viewModel(factory = LibraryViewModel.factory(app))
 
     val catalogueVm: JellyfinCatalogueViewModel = viewModel(factory = JellyfinCatalogueViewModel.factory(app))
@@ -52,6 +53,7 @@ fun AppNavHost() {
         catalogueState.downloadedFallback
 
     androidx.compose.runtime.CompositionLocalProvider(
+        net.digitalbc.leafreader.ui.library.LocalLibraryAppearance provides appearance,
         net.digitalbc.leafreader.ui.library.LocalCreatorNavigation provides { person ->
             navController.navigate("creator/${Uri.encode(person.name)}?id=${Uri.encode(person.id.orEmpty())}&scope=${Uri.encode(catalogueVm.positionScope)}")
         },

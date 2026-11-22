@@ -30,7 +30,8 @@ class BackupRecoveryTest {
     private val backup = """
         {"version":1,"settings":{"libraryColumns":6,"amoledTheme":true,
         "defaultRightToLeft":true,"pageSlideEnabled":false,"pageFitMode":"FIT_WIDTH",
-        "portraitSpread":true,"landscapeSpread":true},
+        "portraitSpread":true,"landscapeSpread":true,
+        "libraryShowTitles":false,"libraryShowDetails":true,"libraryShowReadingIndicators":false},
         "comics":[{"title":"Recovery","pageCount":20,"lastPage":12,"lastSlot":2,"lastOpened":9000}],
         "readingLists":[{"name":"Recovered","createdAt":100,"items":[
         {"comicTitle":"Recovery","sortOrder":0}]}]}
@@ -81,11 +82,13 @@ class BackupRecoveryTest {
 
     @Test
     fun recoveryAfterDatabaseCommitNeedsNoOriginalBackupAndDoesNotReplayProgress() = runBlocking {
-        val failed = repository(failingSettings())
+        val failedPreferences = failingSettings()
+        val failed = repository(failedPreferences)
         assertTrue(failed.applyBackup(backup, BackupConflictStrategy.OVERWRITE).isFailure)
         assertEquals(12, db.comicDao().getById(1)!!.lastPage)
         assertEquals(1, db.readingListDao().getAllItems().size)
         assertEquals(2, settings.libraryColumns)
+        assertEquals(net.digitalbc.leafreader.data.settings.LibraryAppearance(), failedPreferences.libraryAppearanceFlow.value)
         val expected = BackupManager.parseAndValidate(backup).getOrThrow().settings
         assertEquals(expected, db.pendingBackupPreferencesDao().get()!!.settings)
         assertTrue(failed.recoverPendingBackupPreferences().isFailure)
@@ -98,6 +101,7 @@ class BackupRecoveryTest {
         restarted.recoverPendingBackupPreferences().getOrThrow()
         assertNull(db.pendingBackupPreferencesDao().get())
         assertEquals(expected, BackupManager.parseAndValidate(restarted.exportBackup()).getOrThrow().settings)
+        assertEquals(net.digitalbc.leafreader.data.settings.LibraryAppearance(false, true, false), settings.libraryAppearanceFlow.value)
         assertEquals(14, db.comicDao().getById(1)!!.lastPage)
         assertEquals(3, db.comicDao().getById(1)!!.lastSlot)
         settings.libraryColumns = 4

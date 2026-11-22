@@ -1,0 +1,20 @@
+<resources>
+    <string name="library_appearance">Library appearance</string>
+    <string name="library_show_titles">Show titles</string>
+    <string name="library_show_details">Show source and file details</string>
+    <string name="library_show_reading">Show reading indicators</string>
+    <string name="library_appearance_availability">Download availability and warnings stay visible.</string>
+    <string name="library_appearance_done">Done</string>
+    <string name="library_status_read">Read</string>
+    <string name="library_status_started">In progress</string>
+    <string name="library_status_unknown">Reading status unavailable</string>
+    <string name="library_status_unread">Unread</string>
+    <string name="library_source_device">Device</string>
+    <string name="library_collection_details">Jellyfin collection · read-only</string>
+    <string name="library_available_offline">Available offline</string>
+    <string name="library_download_required">Download required to read</string>
+    <plurals name="library_page_count">
+        <item quantity="one">%1$d page</item>
+        <item quantity="other">%1$d pages</item>
+    </plurals>
+</resources>

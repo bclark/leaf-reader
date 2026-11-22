@@ -125,16 +125,11 @@ internal fun LazyGridScope.mainCatalogueGrid(
         items(entries, key = { "remote:${state.library?.id}:${it.item.id}" },
             contentType = { if (it.type.equals("BoxSet", true)) "remote-collection" else "remote-comic" }) { entry ->
             val collection = entry.type.equals("BoxSet", true)
-            val status = if (collection) "Jellyfin collection · read-only" else when (entry.played) {
-                null -> "Jellyfin · reading status unavailable"
-                true -> "Jellyfin · read"
-                false -> if (entry.item.playbackPositionTicks > 0) "Jellyfin · in progress" else "Jellyfin · unread"
-            }
             androidx.compose.runtime.CompositionLocalProvider(LocalRemoteCoverOffline provides state.offline) {
                 ComicCard(remote = entry, columns = columns, remoteCoverWidthPx = coverWidthPx,
                     isEditMode = selecting && !collection,
                     isSelected = entry.item.id in selectedIds,
-                    remoteSubtitle = status + if (entry.item.id in downloadedIds) " · Downloaded" else "",
+                    remoteDownloaded = entry.item.id in downloadedIds,
                     onClick = {
                         if (collection) onCollection(entry.item)
                         else if (selecting) onToggleSelection(entry) else onItem(entry.item)

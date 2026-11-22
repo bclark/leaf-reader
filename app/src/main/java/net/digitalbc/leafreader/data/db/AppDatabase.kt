@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PendingBackupPreferences::class,
         JellyfinMetadataCache::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -170,6 +170,15 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Preserve a pending restore and supply the same defaults as older backup files.
+                db.execSQL("ALTER TABLE pending_backup_preferences ADD COLUMN libraryShowTitles INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE pending_backup_preferences ADD COLUMN libraryShowDetails INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE pending_backup_preferences ADD COLUMN libraryShowReadingIndicators INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -177,7 +186,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "comics.db",
                 )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                 .build().also { instance = it }
             }
     }
