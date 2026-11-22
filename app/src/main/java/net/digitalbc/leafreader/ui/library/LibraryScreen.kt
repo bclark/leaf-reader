@@ -117,6 +117,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -2095,12 +2096,9 @@ internal fun ComicCard(
                 ),
         ) {
             val cover = rememberCover(comic?.coverPath)
-            val remoteBitmap by produceState<Bitmap?>(null, remote?.item?.id, remote?.item?.imageTag, LocalRemoteCoverOffline.current, remoteCoverWidthPx) {
-                val loaded = remote?.item?.let { loadRemoteCover?.invoke(it) }
-                if (loaded != null || value == null) value = loaded
-            }
+            val remoteBitmap = rememberRemoteCover(remote?.item, remoteCoverWidthPx, loadRemoteCover)
             if (remoteBitmap != null) {
-                Image(remoteBitmap!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Image(remoteBitmap.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             } else if (cover != null) {
                 Image(cover, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             } else {
@@ -2698,13 +2696,31 @@ private data class StackPresentation(
     val totalIssues get() = issues.size
 }
 
+/** AppNavHost supplies a memory-only lookup for every catalogue/creator/list destination. */
+internal val LocalRemoteCoverLookup = staticCompositionLocalOf<(JellyfinItem, Int) -> Bitmap?> { { _, _ -> null } }
+internal val LocalRemoteCoverScope = staticCompositionLocalOf { "" }
+
+@Composable
+internal fun rememberRemoteCover(item: JellyfinItem?, widthPx: Int,
+    load: (suspend (JellyfinItem) -> Bitmap?)?): Bitmap? {
+    val lookup = LocalRemoteCoverLookup.current
+    val scope = LocalRemoteCoverScope.current
+    val offline = LocalRemoteCoverOffline.current
+    var bitmap by remember(scope, item?.id, item?.imageTag, widthPx) {
+        mutableStateOf(item?.let { lookup(it, widthPx) })
+    }
+    if (bitmap == null && item != null) {
+        LaunchedEffect(scope, item.id, item.imageTag, widthPx, offline) {
+            bitmap = load?.invoke(item)
+        }
+    }
+    return bitmap
+}
+
 @Composable
 private fun stackCover(cover: StackCover?, load: (suspend (JellyfinItem) -> Bitmap?)?, widthPx: Int): ImageBitmap? {
     val local = rememberCover(cover?.coverPath)
-    val remote by produceState<Bitmap?>(null, cover?.id, cover?.remote?.imageTag, LocalRemoteCoverOffline.current, widthPx) {
-        val loaded = cover?.remote?.let { load?.invoke(it) }
-        if (loaded != null || value == null) value = loaded
-    }
+    val remote = rememberRemoteCover(cover?.remote, widthPx, load)
     return local ?: remote?.asImageBitmap()
 }
 

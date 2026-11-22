@@ -503,6 +503,10 @@ class LibraryViewModel(
         return id
     }
 
+    val jellyfinCoverScope: String get() = repository.jellyfinCoverScope
+    fun peekJellyfinCover(item: JellyfinItem, maxWidth: Int): Bitmap? =
+        repository.peekJellyfinCoverBitmap(item.id, item.imageTag, maxWidth)
+
     suspend fun loadJellyfinCover(item: JellyfinItem): Bitmap? = loadJellyfinCover(item, 400)
 
     suspend fun loadJellyfinCover(item: JellyfinItem, maxWidth: Int): Bitmap? = withContext(Dispatchers.IO) {

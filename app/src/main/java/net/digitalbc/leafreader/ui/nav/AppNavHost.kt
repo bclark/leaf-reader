@@ -54,6 +54,8 @@ fun AppNavHost() {
 
     androidx.compose.runtime.CompositionLocalProvider(
         net.digitalbc.leafreader.ui.library.LocalLibraryAppearance provides appearance,
+        net.digitalbc.leafreader.ui.library.LocalRemoteCoverLookup provides libraryVm::peekJellyfinCover,
+        net.digitalbc.leafreader.ui.library.LocalRemoteCoverScope provides libraryVm.jellyfinCoverScope,
         net.digitalbc.leafreader.ui.library.LocalCreatorNavigation provides { person ->
             navController.navigate("creator/${Uri.encode(person.name)}?id=${Uri.encode(person.id.orEmpty())}&scope=${Uri.encode(catalogueVm.positionScope)}")
         },

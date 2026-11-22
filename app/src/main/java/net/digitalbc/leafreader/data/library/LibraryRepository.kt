@@ -102,7 +102,8 @@ class LibraryRepository(
     private val backupRestoreMutex = db?.backupRestoreMutex ?: Mutex()
     private val metadataMutex = Mutex()
     private val fileAvailability = ComicFileAvailability()
-    private val jellyfinCoverCache = CoverBitmapCache(jellyfinSyncScope)
+    private val jellyfinCoverCache = CoverBitmapCache(jellyfinSyncScope,
+        thumbnails = CoverThumbnailStore(File(context.cacheDir, "jellyfin-thumbnails")))
     private val _progressConflicts = MutableStateFlow<List<JellyfinProgressConflict>>(emptyList())
     val progressConflicts = _progressConflicts.asStateFlow()
     private val _progressUpdates = kotlinx.coroutines.flow.MutableSharedFlow<JellyfinProgressUpdate>()
@@ -1172,6 +1173,14 @@ class LibraryRepository(
 
     fun observeDownloadedJellyfinItemIds(): Flow<Set<String>> =
         observeDownloadedJellyfinCopies().map { it.keys }
+
+    /** Memory only: safe during composition; never opens credentials, disk or network. */
+    fun peekJellyfinCoverBitmap(itemId: String, imageTag: String?, maxWidth: Int): Bitmap? =
+        jellyfinCoverCache.peek(CoverBitmapCache.Key(settings.jellyfinServerUrl,
+            settings.jellyfinServerId, settings.jellyfinUserId, sessionGeneration.get(), itemId, imageTag, maxWidth))
+
+    val jellyfinCoverScope: String get() = listOf(settings.jellyfinServerUrl, settings.jellyfinServerId,
+        settings.jellyfinUserId, sessionGeneration.get().toString()).joinToString("") { "${it.length}:$it" }
 
     suspend fun loadJellyfinCoverBitmap(itemId: String, imageTag: String?, maxWidth: Int = 400): Bitmap? =
         withContext(Dispatchers.IO) {

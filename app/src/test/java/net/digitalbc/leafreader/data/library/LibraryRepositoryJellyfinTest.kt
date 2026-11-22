@@ -125,6 +125,39 @@ class LibraryRepositoryJellyfinTest {
     }
 
     @Test
+    fun cachedThumbnailSurvivesRepositoryRestartButDisconnectRemovesItWithoutCreatingReadableCopy() = runBlocking {
+        val auth = JellyfinAuth("private-token-never-cache", "thumbnail-user", "thumbnail-server", "Reader")
+        credStore.saveAuth(auth)
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinServerId = auth.serverId
+        settings.jellyfinUserId = auth.userId
+        val png = ByteArrayOutputStream().also { stream ->
+            android.graphics.Bitmap.createBitmap(16, 24, android.graphics.Bitmap.Config.ARGB_8888)
+                .compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream)
+        }.toByteArray()
+        server.enqueue(MockResponse().setBody(okio.Buffer().write(png)).setHeader("Content-Type", "image/png"))
+        assertNotNull(repository.loadJellyfinCoverBitmap("remote-art", "tag", 64))
+        assertNotNull(repository.peekJellyfinCoverBitmap("remote-art", "tag", 64))
+        assertEquals(1, server.requestCount)
+        assertTrue(comicDao.getAll().isEmpty())
+        assertTrue(repository.observeDownloadedJellyfinCopies().first().isEmpty())
+        val directory = File(RuntimeEnvironment.getApplication().cacheDir, "jellyfin-thumbnails")
+        assertTrue(directory.listFiles()!!.isNotEmpty())
+        assertTrue(directory.listFiles()!!.none { it.readBytes().toString(Charsets.ISO_8859_1).contains(auth.accessToken) })
+        stopRepository()
+        repository = LibraryRepository(RuntimeEnvironment.getApplication(), comicDao, settings,
+            db.readingListDao(), db, jellyfinCredentialStore = credStore)
+        assertNotNull(repository.loadJellyfinCoverBitmap("remote-art", "tag", 64))
+        assertEquals("Restart must use disk, not another HTTP request", 1, server.requestCount)
+        repository.disconnectJellyfin()
+        assertTrue(directory.listFiles()!!.isEmpty())
+        assertNull(repository.peekJellyfinCoverBitmap("remote-art", "tag", 64))
+        assertNull(repository.loadJellyfinCoverBitmap("remote-art", "tag", 64))
+        assertTrue(comicDao.getAll().isEmpty())
+    }
+
+    @Test
     fun remoteListMembershipNeedsNoDownloadAndKeepsOrderAcrossRemovalAndAccountSwitch() = runBlocking {
         val identity = JellyfinItemIdentity("srv", "u", "remote")
         val item = JellyfinItem("remote", "Private comic", false, container = "cbz")

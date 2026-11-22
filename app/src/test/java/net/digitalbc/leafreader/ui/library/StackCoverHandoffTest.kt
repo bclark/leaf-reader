@@ -21,6 +21,48 @@ import org.robolectric.annotation.Config
 @Config(manifest = Config.NONE, sdk = [35])
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class StackCoverHandoffTest {
+    @Test fun memoryHitIsVisibleOnFirstCompositionAndAccountChangeDropsOldArtwork() = runTest {
+        val clock = BroadcastFrameClock()
+        val recomposer = Recomposer(coroutineContext + clock)
+        val composition = Composition(object : AbstractApplier<Unit>(Unit) {
+            override fun insertTopDown(index: Int, instance: Unit) = Unit
+            override fun insertBottomUp(index: Int, instance: Unit) = Unit
+            override fun remove(index: Int, count: Int) = Unit
+            override fun move(from: Int, to: Int, count: Int) = Unit
+            override fun onClear() = Unit
+        }, recomposer)
+        val job = launch(clock) { recomposer.runRecomposeAndApplyChanges() }
+        val image = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+        var scope by mutableStateOf("account-one")
+        var width by mutableIntStateOf(384)
+        var tag by mutableStateOf("first")
+        val seen = mutableListOf<Bitmap?>()
+        var loads = 0
+        var frameTime = 0L
+        fun frame() {
+            Snapshot.sendApplyNotifications(); runCurrent()
+            clock.sendFrame(++frameTime * 16_000_000L); runCurrent()
+        }
+        try {
+            composition.setContent {
+                CompositionLocalProvider(LocalRemoteCoverScope provides scope,
+                    LocalRemoteCoverLookup provides { item, size ->
+                        image.takeIf { scope == "account-one" && size == 384 && item.imageTag == "first" }
+                    }) {
+                    seen += rememberRemoteCover(JellyfinItem("book", "Book", false, imageTag = tag), width) {
+                        loads++; kotlinx.coroutines.awaitCancellation()
+                    }
+                }
+            }
+            assertSame("A cached cover must not emit an initial placeholder", image, seen.first())
+            frame(); assertEquals(0, loads)
+            scope = "account-two"; frame(); assertNull(seen.last())
+            scope = "account-one"; frame(); assertSame(image, seen.last())
+            width = 768; frame(); assertNull(seen.last())
+            width = 384; tag = "changed"; frame(); assertNull(seen.last())
+        } finally { composition.dispose(); recomposer.close(); job.cancel() }
+    }
+
     @Test fun loadedRearArtworkMovesToFrontWithoutShowingOutgoingCoverOrReloading() = runTest {
         val clock = BroadcastFrameClock()
         val recomposer = Recomposer(coroutineContext + clock)
