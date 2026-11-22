@@ -4,10 +4,11 @@ import android.graphics.Bitmap
 import android.util.LruCache
 import kotlinx.coroutines.*
 
-/** Process-local, private artwork only. Never owns/recycles bitmaps still displayed by Compose. */
+/** Byte-bounded memory with optional private disk thumbnails. Never recycles displayed bitmaps. */
 internal class CoverBitmapCache(
     private val scope: CoroutineScope,
     maxBytes: Int = minOf(32 * 1024 * 1024, minOf(Int.MAX_VALUE.toLong(), Runtime.getRuntime().maxMemory() / 16).toInt()),
+    private val thumbnails: CoverThumbnailStore? = null,
 ) {
     data class Key(val url: String, val server: String, val user: String, val session: Long,
                    val item: String, val tag: String?, val width: Int)
@@ -23,6 +24,8 @@ internal class CoverBitmapCache(
         }
     }
 
+    fun peek(key: Key): Bitmap? = synchronized(lock) { cache.get(key) }
+
     suspend fun get(key: Key, load: suspend () -> Bitmap?): Bitmap? {
         val flight = synchronized(lock) {
             cache.get(key)?.let { CoverPerformanceTrace.event("hit"); return it }
@@ -31,7 +34,11 @@ internal class CoverBitmapCache(
             pending.getOrPut(key) {
                 Flight(scope.async(start = CoroutineStart.LAZY) {
                     try {
-                        val bitmap = load()
+                        val diskGeneration = thumbnails?.generation() ?: 0L
+                        val stored = thumbnails?.read(key, diskGeneration)
+                        val bitmap = stored ?: load()
+                        currentCoroutineContext().ensureActive()
+                        if (stored == null && bitmap != null) thumbnails?.write(key, bitmap, diskGeneration)
                         currentCoroutineContext().ensureActive()
                         synchronized(lock) {
                             if (captured == epoch && bitmap != null) {
@@ -70,5 +77,6 @@ internal class CoverBitmapCache(
             pending.values.map { it.result }.also { pending.clear() }
         }
         work.forEach { it.cancel() }
+        thumbnails?.clear()
     }
 }
