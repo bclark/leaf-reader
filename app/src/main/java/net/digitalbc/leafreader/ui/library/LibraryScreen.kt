@@ -2096,7 +2096,7 @@ internal fun ComicCard(
                 ),
         ) {
             val cover = rememberCover(comic?.coverPath)
-            val remoteBitmap = rememberRemoteCover(remote?.item, remoteCoverWidthPx, loadRemoteCover)
+            val remoteBitmap = rememberRemoteCover(remote?.item, remoteCoverWidthPx, load = loadRemoteCover)
             if (remoteBitmap != null) {
                 Image(remoteBitmap.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             } else if (cover != null) {
@@ -2547,8 +2547,11 @@ internal val coverBitmapCache = object : LruCache<String, ImageBitmap>(
 }
 
 @Composable
-internal fun rememberCover(path: String?): ImageBitmap? {
+internal fun rememberCover(path: String?, foreground: Boolean = true): ImageBitmap? {
     if (path == null) return null
+    val queue = LocalCoverLoadQueue.current
+    val request = remember(path, queue) { queue.request(foreground) }
+    androidx.compose.runtime.SideEffect { if (foreground) request.promote() }
     var bitmap by remember(path) { mutableStateOf(coverBitmapCache[path]) }
     if (bitmap == null) {
         LaunchedEffect(path) {
@@ -2557,11 +2560,13 @@ internal fun rememberCover(path: String?): ImageBitmap? {
                 bitmap = fromCache
                 return@LaunchedEffect
             }
-            val loaded = withContext(Dispatchers.IO) {
-                runCatching {
-                    val file = File(path)
-                    if (file.exists()) BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap() else null
-                }.getOrNull()
+            val loaded = request.load {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        val file = File(path)
+                        if (file.exists()) BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap() else null
+                    }.getOrNull()
+                }
             }
             if (loaded != null) {
                 coverBitmapCache.put(path, loaded)
@@ -2584,9 +2589,11 @@ private fun Modifier.onePointerCoverPeel(
     offsetY: Animatable<Float, AnimationVector1D>,
     coroutineScope: CoroutineScope,
     onThresholdMet: () -> Unit,
+    onHold: () -> Unit = {},
     onClick: () -> Unit,
 ): Modifier {
     val currentOnThresholdMet by rememberUpdatedState(onThresholdMet)
+    val currentOnHold by rememberUpdatedState(onHold)
     val currentOnClick by rememberUpdatedState(onClick)
     return pointerInput(enabled, cardHeightPx) {
         if (!enabled) return@pointerInput
@@ -2597,6 +2604,7 @@ private fun Modifier.onePointerCoverPeel(
             val firstDown = awaitFirstDown(requireUnconsumed = false)
             val down = awaitLongPressOrCancellation(firstDown.id) ?: return@awaitEachGesture
             if (down.id != firstDown.id) return@awaitEachGesture
+            currentOnHold()
             val downId = down.id
             val downX = down.position.x
             val downY = down.position.y
@@ -2699,37 +2707,46 @@ private data class StackPresentation(
 /** AppNavHost supplies a memory-only lookup for every catalogue/creator/list destination. */
 internal val LocalRemoteCoverLookup = staticCompositionLocalOf<(JellyfinItem, Int) -> Bitmap?> { { _, _ -> null } }
 internal val LocalRemoteCoverScope = staticCompositionLocalOf { "" }
+private val defaultCoverLoadQueue = CoverLoadQueue()
+internal val LocalCoverLoadQueue = staticCompositionLocalOf { defaultCoverLoadQueue }
 
 @Composable
-internal fun rememberRemoteCover(item: JellyfinItem?, widthPx: Int,
+internal fun rememberRemoteCover(item: JellyfinItem?, widthPx: Int, foreground: Boolean = true,
     load: (suspend (JellyfinItem) -> Bitmap?)?): Bitmap? {
     val lookup = LocalRemoteCoverLookup.current
     val scope = LocalRemoteCoverScope.current
     val offline = LocalRemoteCoverOffline.current
+    val queue = LocalCoverLoadQueue.current
+    val request = remember(scope, item?.id, item?.imageTag, widthPx, offline, queue) { queue.request(foreground) }
+    androidx.compose.runtime.SideEffect { if (foreground) request.promote() }
     var bitmap by remember(scope, item?.id, item?.imageTag, widthPx) {
         mutableStateOf(item?.let { lookup(it, widthPx) })
     }
     if (bitmap == null && item != null) {
-        LaunchedEffect(scope, item.id, item.imageTag, widthPx, offline) {
-            bitmap = load?.invoke(item)
+        LaunchedEffect(scope, item.id, item.imageTag, widthPx, offline, queue) {
+            bitmap = request.load { load?.invoke(item) }
         }
     }
     return bitmap
 }
 
 @Composable
-private fun stackCover(cover: StackCover?, load: (suspend (JellyfinItem) -> Bitmap?)?, widthPx: Int): ImageBitmap? {
-    val local = rememberCover(cover?.coverPath)
-    val remote = rememberRemoteCover(cover?.remote, widthPx, load)
+private fun stackCover(cover: StackCover?, load: (suspend (JellyfinItem) -> Bitmap?)?, widthPx: Int,
+    foreground: Boolean): ImageBitmap? {
+    val local = rememberCover(cover?.coverPath, foreground)
+    val remote = rememberRemoteCover(cover?.remote, widthPx, foreground, load)
     return local ?: remote?.asImageBitmap()
 }
 
 /** Keep artwork state with its comic while that comic changes stack roles. */
 @Composable
-internal fun stackCoverImages(covers: List<StackCover>, load: (suspend (JellyfinItem) -> Bitmap?)?, widthPx: Int): Map<String, ImageBitmap?> =
-    covers.distinctBy { it.id }.associate { cover ->
-        cover.id to androidx.compose.runtime.key(cover.id) { stackCover(cover, load, widthPx) }
-    }
+internal fun stackCoverImages(covers: List<StackCover>, load: (suspend (JellyfinItem) -> Bitmap?)?, widthPx: Int,
+    revealNext: Boolean = false): Map<String, ImageBitmap?> =
+    covers.distinctBy { it.id }.mapIndexed { index, cover ->
+        cover.id to androidx.compose.runtime.key(cover.id) {
+            stackCover(cover, load, widthPx, foreground = index == 0 || (index == 1 && revealNext))
+        }
+    }.toMap()
 
 @Composable
 private fun ComicStackCard(stack: LibraryItem.SeriesStack, columns: Int = 2,
@@ -2794,7 +2811,9 @@ private fun CoverStackCard(
         else null
     }
 
-    val coverImages = stackCoverImages(listOfNotNull(currentTopComic, layer2Comic, layer3Comic), loadRemoteCover, remoteCoverWidthPx)
+    var revealNext by remember(currentTopComic.id) { mutableStateOf(false) }
+    val coverImages = stackCoverImages(listOfNotNull(currentTopComic, layer2Comic, layer3Comic),
+        loadRemoteCover, remoteCoverWidthPx, revealNext)
     val coroutineScope = rememberCoroutineScope()
     val offsetY = remember { Animatable(0f) }
     var cardHeightPx by remember { mutableFloatStateOf(0f) }
@@ -2822,6 +2841,7 @@ private fun CoverStackCard(
                     cardHeightPx = cardHeightPx,
                     offsetY = offsetY,
                     coroutineScope = coroutineScope,
+                    onHold = { revealNext = true },
                     onThresholdMet = {
                         savedTopIndex = if (issueCount > 0) (topIndex + 1) % issueCount else topIndex + 1
                         stack.issues.getOrNull(savedTopIndex)?.let { onCoverSelected(it.id) }
@@ -3001,6 +3021,11 @@ private fun ReadingListCard(
         else null
     }
 
+    var revealNext by remember(currentTopComic?.id) { mutableStateOf(false) }
+    val coverImages = stackCoverImages(listOfNotNull(currentTopComic, layer2Comic, layer3Comic).map {
+        StackCover(it.id.toString(), it.coverPath, it.issueNumber)
+    }, null, 0, revealNext)
+
     val coroutineScope = rememberCoroutineScope()
     val offsetY = remember { Animatable(0f) }
     var cardHeightPx by remember { mutableFloatStateOf(0f) }
@@ -3028,6 +3053,7 @@ private fun ReadingListCard(
                     cardHeightPx = cardHeightPx,
                     offsetY = offsetY,
                     coroutineScope = coroutineScope,
+                    onHold = { revealNext = true },
                     onThresholdMet = {
                         topIndex = if (totalCount > 0) (topIndex + 1) % totalCount else topIndex + 1
                     },
@@ -3036,7 +3062,7 @@ private fun ReadingListCard(
         ) {
             // Messy Layer 3 (Rotated Left) - for 3+ items
             if (item.itemCount >= 3) {
-                val backCover = rememberCover(layer3Comic?.coverPath)
+                val backCover = coverImages[layer3Comic?.id?.toString()]
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -3064,7 +3090,7 @@ private fun ReadingListCard(
 
             // Messy Layer 2 (Rotated Right) - for 2+ items
             if (item.itemCount >= 2) {
-                val midCover = rememberCover(layer2Comic?.coverPath)
+                val midCover = coverImages[layer2Comic?.id?.toString()]
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -3113,7 +3139,7 @@ private fun ReadingListCard(
             }
 
             // Front Main List Card
-            val topCover = rememberCover(currentTopComic?.coverPath)
+            val topCover = coverImages[currentTopComic?.id?.toString()]
             Box(
                 Modifier
                     .fillMaxSize()

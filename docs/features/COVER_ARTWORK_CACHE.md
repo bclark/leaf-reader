@@ -15,6 +15,13 @@ Recently viewed covers should reappear quickly when returning through the shelf.
 - Existing cache invalidations (disconnect, successful reconnect/account change, observed authentication/access denial, restore/import/removal) clear thumbnails too. Cancellation/epoch guards prevent old in-flight work republishing after clear. Do not recycle bitmaps that Compose may still display.
 - App cache is excluded from library backups. Clearing cached artwork must never remove explicit downloads, Files/SMB originals, library records, progress, lists or queued sync.
 
+## Front-first stack loading
+
+- Front artwork for visible Series/list stacks and ordinary comic cards takes priority over queued secondary artwork. Keep full rear covers; populate them opportunistically after pending fronts finish, including when a front fails.
+- Share a two-load bound across local cover decoding and remote artwork requests. Cache hits remain immediately usable; retain the existing memory and disk budgets, freshness and invalidation rules. Running loads finish normally rather than being interrupted for a new front.
+- Starting the existing deliberate native hold promotes the next cover's same queued request. Moving artwork between rear/front roles retains comic-keyed image state and must not reload it or flash the outgoing cover. Reset the reveal intent when the selected front changes; gesture duration, threshold and animations stay unchanged.
+- No new setting, lower-resolution rear artwork, disk-cache exclusion, readable-download state or reading-progress operation. Test load precedence, cancellation, promotion without restarting, failed-front fallback and retained peel/tap/scroll behavior. These are behavioral goals for iOS coordination, not a prescribed iOS queue implementation or active release assignment.
+
 ## Cross-platform meaning and limits
 
 This is an Android implementation, not an iOS integration assignment or a change to iOS release scope. An iOS implementation should retain its Files/linked-source identity, native artwork loaders and existing privacy/invalidation behavior. Share the user-facing expectation and distinction between artwork and readable copies; Android's file format, budgets and synchronization are not prescribed iOS architecture.
