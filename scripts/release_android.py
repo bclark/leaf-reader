@@ -18,7 +18,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / 'app/build/play-releases'
 PACKAGE = 'net.digitalbc.leafreader'
-INPUTS = ('app', 'shared', 'gradle', 'buildSrc', 'build.gradle.kts', 'settings.gradle.kts',
+INPUTS = ('app', 'shared', 'r8smoke', 'macrobenchmark', 'gradle', 'buildSrc', 'build.gradle.kts', 'settings.gradle.kts',
           'gradle.properties', 'gradlew', 'gradlew.bat')
 SIGNING = ('KEYSTORE_FILE', 'KEYSTORE_PASSWORD', 'KEY_ALIAS', 'KEY_PASSWORD')
 GATES = ('upgrade_shipped_v4', 'upgrade_pre_revision_v5', 'backup_export_restore',
