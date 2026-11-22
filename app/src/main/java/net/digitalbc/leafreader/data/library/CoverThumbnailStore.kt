@@ -8,16 +8,23 @@ import java.io.File
 import java.io.FilterOutputStream
 import java.io.IOException
 import java.security.MessageDigest
+import java.util.concurrent.locks.ReentrantReadWriteLock
+import kotlin.concurrent.read
+import kotlin.concurrent.write
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
-/** Disposable app-private thumbnails only. All file access is serialized on IO, never under the memory-cache lock. */
+/** Private thumbnails: two concurrent IO reads; writes and invalidation remain exclusive. */
 internal class CoverThumbnailStore(
     private val directory: File,
     private val maxBytes: Long = 128L * 1024 * 1024,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
-    // ponytail: serialize thumbnail IO per process; use a journal only if measured contention warrants it.
+    private val lifecycle = ReentrantReadWriteLock(true)
+    // Bound temporary decode memory and cancel queued work when its card disappears.
+    private val readers = Semaphore(2)
     private var epoch = 0L
-    @Synchronized fun generation(): Long = epoch
+    fun generation(): Long = lifecycle.read { epoch }
 
     private fun file(key: CoverBitmapCache.Key): File {
         // No token, URL, username or item name is persisted, including in filenames.
@@ -27,30 +34,36 @@ internal class CoverThumbnailStore(
         return File(directory, digest.joinToString("") { "%02x".format(it) } + ".thumb")
     }
 
-    @Synchronized fun read(key: CoverBitmapCache.Key, generation: Long): Bitmap? {
-        if (generation != epoch) return null
-        val file = file(key)
-        return try {
-            if (!file.isFile || file.length() !in 9..MAX_ENTRY_BYTES) return null
-            val bitmap = DataInputStream(AtomicFile(file).openRead()).use { input ->
-                val age = now() - input.readLong()
-                val lifetime = if (key.tag.isNullOrBlank()) 60 * 60_000L else 24 * 60 * 60_000L
-                if (age !in 0..lifetime) null else CoverImageDecoder.decode(input.readBytes(), key.width)
-            }
-            if (bitmap == null) file.delete() else {
-                file.setLastModified(now())
-                CoverPerformanceTrace.event("diskHit")
-            }
-            bitmap
-        } catch (_: Exception) { file.delete(); null }
+    suspend fun read(key: CoverBitmapCache.Key, generation: Long): Bitmap? = readers.withPermit {
+        lifecycle.read {
+            if (generation != epoch) return@read null
+            val file = file(key)
+            try {
+                if (!file.isFile || file.length() !in 9..MAX_ENTRY_BYTES) return@read null
+                val bitmap = DataInputStream(AtomicFile(file).openRead()).use { input ->
+                    val age = now() - input.readLong()
+                    val lifetime = if (key.tag.isNullOrBlank()) 60 * 60_000L else 24 * 60 * 60_000L
+                    if (age !in 0..lifetime) null else {
+                        val bytes = input.readBytes()
+                        CoverPerformanceTrace.diskDecode { CoverImageDecoder.decode(bytes, key.width) }
+                            .also { CoverPerformanceTrace.decoded(key.width, it) }
+                    }
+                }
+                if (bitmap == null) file.delete() else {
+                    file.setLastModified(now())
+                    CoverPerformanceTrace.event("diskHit")
+                }
+                bitmap
+            } catch (_: Exception) { file.delete(); null }
+        }
     }
 
-    @Synchronized fun write(key: CoverBitmapCache.Key, bitmap: Bitmap, generation: Long) {
-        if (generation != epoch) return
+    fun write(key: CoverBitmapCache.Key, bitmap: Bitmap, generation: Long): Unit = lifecycle.write {
+        if (generation != epoch) return@write
         val file = AtomicFile(file(key))
         var output: java.io.FileOutputStream? = null
         try {
-            if (!directory.isDirectory && !directory.mkdirs()) return
+            if (!directory.isDirectory && !directory.mkdirs()) return@write
             // An interrupted process may leave a staging file; artwork is disposable.
             directory.listFiles()?.filter { it.name.endsWith(".thumb.new") || it.name.endsWith(".thumb.bak") }
                 ?.forEach { it.delete() }
@@ -86,7 +99,10 @@ internal class CoverThumbnailStore(
         }
     }
 
-    @Synchronized fun clear() { epoch++; directory.listFiles()?.forEach { it.delete() } }
+    fun clear(): Unit = lifecycle.write {
+        epoch++
+        directory.listFiles()?.forEach { it.delete() }
+    }
 
     private companion object { const val MAX_ENTRY_BYTES = 4L * 1024 * 1024 }
 }

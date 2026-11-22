@@ -33,6 +33,11 @@ internal object CoverPerformanceTrace {
         return try { block() } finally { Trace.endSection() }
     }
 
+    inline fun <T> diskDecode(block: () -> T): T {
+        Trace.beginSection("LeafCover.diskDecode")
+        return try { block() } finally { Trace.endSection() }
+    }
+
     inline fun <T> decode(block: () -> T): T {
         Trace.beginSection("LeafCover.decode")
         return try { block() } finally { Trace.endSection() }

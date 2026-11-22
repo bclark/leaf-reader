@@ -2,6 +2,7 @@ package net.digitalbc.leafreader.data.library
 
 import android.graphics.Bitmap
 import android.graphics.Color
+import kotlinx.coroutines.*
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -17,7 +18,7 @@ class CoverThumbnailStoreTest {
     private val key = CoverBitmapCache.Key("https://private.test", "server", "user", 1, "comic", "v1", 64)
     private fun bitmap() = Bitmap.createBitmap(16, 24, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.MAGENTA) }
 
-    @Test fun thumbnailsSurviveRecreationButNeverCrossIdentityTagOrSize() {
+    @Test fun thumbnailsSurviveRecreationButNeverCrossIdentityTagOrSize() = runBlocking<Unit> {
         val directory = files.newFolder()
         val store = CoverThumbnailStore(directory)
         store.write(key, bitmap(), store.generation())
@@ -32,7 +33,7 @@ class CoverThumbnailStoreTest {
         assertFalse(contents.contains("comic"))
     }
 
-    @Test fun diskBytesStayBoundedAndLeastRecentlyUsedEntryIsEvicted() {
+    @Test fun diskBytesStayBoundedAndLeastRecentlyUsedEntryIsEvicted() = runBlocking<Unit> {
         val directory = files.newFolder()
         var clock = 1000L
         val measure = CoverThumbnailStore(directory, now = { clock })
@@ -49,7 +50,7 @@ class CoverThumbnailStoreTest {
         assertNotNull(store.read(key, 0))
     }
 
-    @Test fun tinyFilesAndInterruptedWritesCannotAccumulateUnboundedMetadata() {
+    @Test fun tinyFilesAndInterruptedWritesCannotAccumulateUnboundedMetadata() = runBlocking<Unit> {
         val directory = files.newFolder()
         repeat(1030) { java.io.File(directory, it.toString().padStart(64, '0') + ".thumb").writeBytes(byteArrayOf(1)) }
         val abandoned = java.io.File(directory, "orphan.thumb.new").apply { writeBytes(ByteArray(100)) }
@@ -60,7 +61,42 @@ class CoverThumbnailStoreTest {
         assertNotNull(store.read(key, 0))
     }
 
-    @Test fun staleCorruptOrUnavailableStorageFallsThroughAndClearRejectsOldWrites() {
+    @Test fun cachedReadConcurrencyIsBoundedAndQueuedCancellationDoesNotConsumeAPermit() = runBlocking<Unit> {
+        val block = java.util.concurrent.atomic.AtomicBoolean(false)
+        val entered = java.util.concurrent.CountDownLatch(2)
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        val release = java.util.concurrent.CountDownLatch(1)
+        val store = CoverThumbnailStore(files.newFolder(), now = {
+            if (block.get()) {
+                calls.incrementAndGet()
+                entered.countDown()
+                check(release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+            }
+            1000L
+        })
+        val keys = (0..2).map { key.copy(item = "cached-$it") }
+        keys.forEach { store.write(it, bitmap(), 0) }
+        val worker = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            block.set(true)
+            val first = worker.async { store.read(keys[0], 0) }
+            val second = worker.async { store.read(keys[1], 0) }
+            assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            val queued = async(start = CoroutineStart.UNDISPATCHED) { store.read(keys[2], 0) }
+            assertTrue("Third read must queue rather than allocate another decode", queued.isActive)
+            queued.cancelAndJoin()
+            assertEquals(2, calls.get())
+            block.set(false)
+            release.countDown()
+            assertNotNull(first.await()); assertNotNull(second.await())
+            assertNotNull(store.read(keys[2], 0))
+        } finally {
+            block.set(false); release.countDown()
+            worker.coroutineContext[Job]!!.cancelAndJoin()
+        }
+    }
+
+    @Test fun staleCorruptOrUnavailableStorageFallsThroughAndClearRejectsOldWrites() = runBlocking<Unit> {
         val directory = files.newFolder()
         var clock = 1000L
         val store = CoverThumbnailStore(directory, now = { clock })

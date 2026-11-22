@@ -36,6 +36,39 @@ class CoverBitmapCacheTest {
         assertEquals("Disconnect/cache invalidation must remove disk copies", 13, fetches)
     }
 
+    @Test fun independentCachedReadsDoNotQueueBehindASlowRead() = runBlocking<Unit> {
+        val block = java.util.concurrent.atomic.AtomicBoolean(false)
+        val once = java.util.concurrent.atomic.AtomicBoolean(false)
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val store = CoverThumbnailStore(files.newFolder(), now = {
+            if (block.get() && once.compareAndSet(false, true)) {
+                entered.countDown()
+                check(release.await(15, java.util.concurrent.TimeUnit.SECONDS))
+            }
+            1000L
+        })
+        val worker = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            val warmer = CoverBitmapCache(worker, thumbnails = store)
+            warmer.get(key) { bitmap() }
+            val other = key.copy(item = "independent-cached-cover")
+            warmer.get(other) { bitmap() }
+            val cache = CoverBitmapCache(worker, thumbnails = store)
+            block.set(true)
+            val first = async(Dispatchers.IO) { cache.get(key) { fail("Cached cover fetched again"); null } }
+            assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            val second = async(Dispatchers.IO) { cache.get(other) { fail("Cached cover fetched again"); null } }
+            assertNotNull("Another cached read must finish while the first read remains held",
+                withTimeout(5_000) { second.await() })
+            release.countDown()
+            assertNotNull(first.await())
+        } finally {
+            release.countDown()
+            worker.coroutineContext[Job]!!.cancelAndJoin()
+        }
+    }
+
     @Test fun concurrentReadersShareFetchAndOneCancellationKeepsOtherReaderAlive() = runTest {
         val cache = CoverBitmapCache(backgroundScope)
         val gate = CompletableDeferred<Unit>()
