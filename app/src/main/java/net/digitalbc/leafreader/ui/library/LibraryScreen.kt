@@ -2551,7 +2551,7 @@ internal fun rememberCover(path: String?, foreground: Boolean = true): ImageBitm
     if (path == null) return null
     val queue = LocalCoverLoadQueue.current
     val request = remember(path, queue) { queue.request(foreground) }
-    androidx.compose.runtime.SideEffect { if (foreground) request.promote() }
+    androidx.compose.runtime.SideEffect { request.setForeground(foreground) }
     var bitmap by remember(path) { mutableStateOf(coverBitmapCache[path]) }
     if (bitmap == null) {
         LaunchedEffect(path) {
@@ -2718,7 +2718,7 @@ internal fun rememberRemoteCover(item: JellyfinItem?, widthPx: Int, foreground: 
     val offline = LocalRemoteCoverOffline.current
     val queue = LocalCoverLoadQueue.current
     val request = remember(scope, item?.id, item?.imageTag, widthPx, offline, queue) { queue.request(foreground) }
-    androidx.compose.runtime.SideEffect { if (foreground) request.promote() }
+    androidx.compose.runtime.SideEffect { request.setForeground(foreground) }
     var bitmap by remember(scope, item?.id, item?.imageTag, widthPx) {
         mutableStateOf(item?.let { lookup(it, widthPx) })
     }

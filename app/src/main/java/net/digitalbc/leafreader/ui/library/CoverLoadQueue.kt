@@ -17,10 +17,10 @@ internal class CoverLoadQueue(concurrency: Int = 2) {
         private var started = false
         private var finished = false
 
-        fun promote() = synchronized(lock) {
-            if (!foreground && !finished) {
-                foreground = true
-                if (started) fronts++
+        fun setForeground(value: Boolean) = synchronized(lock) {
+            if (foreground != value && !finished) {
+                foreground = value
+                if (started) fronts += if (value) 1 else -1
                 changes.value++
             }
         }

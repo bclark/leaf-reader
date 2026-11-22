@@ -19,7 +19,7 @@ Recently viewed covers should reappear quickly when returning through the shelf.
 
 - Front artwork for visible Series/list stacks and ordinary comic cards takes priority over queued secondary artwork. Keep full rear covers; populate them opportunistically after pending fronts finish, including when a front fails.
 - Share a two-load bound across local cover decoding and remote artwork requests. Cache hits remain immediately usable; retain the existing memory and disk budgets, freshness and invalidation rules. Running loads finish normally rather than being interrupted for a new front.
-- Starting the existing deliberate native hold promotes the next cover's same queued request. Moving artwork between rear/front roles retains comic-keyed image state and must not reload it or flash the outgoing cover. Reset the reveal intent when the selected front changes; gesture duration, threshold and animations stay unchanged.
+- Starting the existing deliberate native hold promotes the next cover's same queued request. Moving artwork between rear/front roles retains comic-keyed image state and must not reload it or flash the outgoing cover. Reset the reveal intent when the selected front changes and demote a former front that is still queued behind current front work; gesture duration, threshold and animations stay unchanged.
 - No new setting, lower-resolution rear artwork, disk-cache exclusion, readable-download state or reading-progress operation. Test load precedence, cancellation, promotion without restarting, failed-front fallback and retained peel/tap/scroll behavior. These are behavioral goals for iOS coordination, not a prescribed iOS queue implementation or active release assignment.
 
 ## Cross-platform meaning and limits

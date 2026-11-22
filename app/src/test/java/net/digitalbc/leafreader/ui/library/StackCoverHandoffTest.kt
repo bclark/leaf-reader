@@ -264,4 +264,60 @@ class StackCoverHandoffTest {
         }
     }
 
+    @Test fun newFrontOvertakesFormerFrontStillWaitingForCapacity() = runTest {
+        val clock = BroadcastFrameClock()
+        val recomposer = Recomposer(coroutineContext + clock)
+        val composition = Composition(object : AbstractApplier<Unit>(Unit) {
+            override fun insertTopDown(index: Int, instance: Unit) = Unit
+            override fun insertBottomUp(index: Int, instance: Unit) = Unit
+            override fun remove(index: Int, count: Int) = Unit
+            override fun move(from: Int, to: Int, count: Int) = Unit
+            override fun onClear() = Unit
+        }, recomposer)
+        val job = launch(clock) { recomposer.runRecomposeAndApplyChanges() }
+        val colors = mapOf("a" to Color.RED, "b" to Color.BLUE, "c" to Color.GREEN)
+        val original = colors.keys.map { StackCover(it, null, null, JellyfinItem(it, it, false)) }
+        var covers by mutableStateOf(original)
+        var images = emptyMap<String, ImageBitmap?>()
+        var requests = 0
+        val frontReady = CompletableDeferred<Unit>()
+        val queue = CoverLoadQueue(2)
+        val started = mutableListOf<String>()
+        var frameTime = 0L
+        fun frame() {
+            Snapshot.sendApplyNotifications()
+            runCurrent()
+            clock.sendFrame(++frameTime * 16_000_000L)
+            runCurrent()
+        }
+        try {
+            composition.setContent {
+                CompositionLocalProvider(LocalCoverLoadQueue provides queue) {
+                    repeat(2) { index ->
+                        rememberRemoteCover(JellyfinItem("other-$index", "Other front", false), 384) {
+                            frontReady.await()
+                            Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+                        }
+                    }
+                    images = stackCoverImages(covers, { item ->
+                        requests++
+                        started += item.id
+                        Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+                    }, 384)
+                }
+            }
+            repeat(3) { frame() }
+            assertEquals(0, requests)
+            covers = covers.drop(1) + covers.first()
+            repeat(3) { frame() }
+            frontReady.complete(Unit)
+            repeat(3) { frame() }
+            assertEquals("The current front must overtake a former front still queued as rear artwork", "b", started.first())
+        } finally {
+            composition.dispose()
+            recomposer.close()
+            job.cancel()
+        }
+    }
+
 }

@@ -34,7 +34,7 @@ class CoverLoadQueueTest {
         val next = queue.request(false)
         launch { next.load { order += "revealed-next" } }
         runCurrent()
-        next.promote()
+        next.setForeground(true)
         release.complete(Unit)
         runCurrent()
         assertEquals(listOf("revealed-next", "ordinary-rear"), order)
@@ -63,12 +63,12 @@ class CoverLoadQueueTest {
         var starts = 0
         val job = launch { request.load { starts++; release.await() } }
         runCurrent()
-        request.promote(); request.promote()
+        request.setForeground(true); request.setForeground(true)
         release.complete(Unit)
         runCurrent()
         assertTrue(job.isCompleted)
         assertEquals(1, starts)
-        request.promote()
+        request.setForeground(true)
         var laterRearRan = false
         launch { queue.request(false).load { laterRearRan = true } }
         runCurrent()
