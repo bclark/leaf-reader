@@ -9,7 +9,7 @@ These synthetic cases characterize existing behavior. No model or comic artwork 
 
 The inset is ordering input, not a claim that current model decoding retains all nested boxes.
 
-- The raw reliability gate rejects empty input, a single inset, and a full-page box plus an inset. It accepts the non-overlapping grid.
+- The raw reliability gate rejects empty input, a single inset, and a full-page box plus an inset. It also rejects the ambiguous overlap pair `[.10,.10,.65,.65]` and `[.35,.25,.90,.80]`, even though neither box dominates the page. It accepts the non-overlapping grid. These are raw guard outcomes, not assertions about the reader’s fallback screen or preview.
 - A synthetic decoder row `[.75,.15,.30,.50,.95,0]` has reversed x edges and yields no detected panel.
 - The existing legacy zoom pipeline can synthesize geometry from no detections. That is not detection evidence or proof of the reader’s whole-page fallback.
 

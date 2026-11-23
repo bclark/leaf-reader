@@ -28,11 +28,18 @@ class GuidedViewParityBaselineTest {
     }
 
     @Test
-    fun rawReliabilityRejectsMissingSingleAndAmbiguousGeometry() {
+    fun rawReliabilityRejectsMissingSingleAndDominatingGeometry() {
         assertFalse(PanelReliability.isReliable(emptyList()))
         assertFalse(PanelReliability.isReliable(listOf(i)))
         assertFalse(PanelReliability.isReliable(listOf(Panel.FULL_PAGE, i)))
         assertTrue(PanelReliability.isReliable(listOf(a, b, c, d)))
+    }
+
+    @Test
+    fun rawReliabilityRejectsAmbiguousOverlapWithoutDominantBox() {
+        val first = Panel(0.10f, 0.10f, 0.65f, 0.65f)
+        val second = Panel(0.35f, 0.25f, 0.90f, 0.80f)
+        assertFalse(PanelReliability.isReliable(listOf(first, second)))
     }
 
     @Test
