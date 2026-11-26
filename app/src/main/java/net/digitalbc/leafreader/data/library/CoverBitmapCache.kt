@@ -9,6 +9,7 @@ internal class CoverBitmapCache(
     private val scope: CoroutineScope,
     maxBytes: Int = minOf(32 * 1024 * 1024, minOf(Int.MAX_VALUE.toLong(), Runtime.getRuntime().maxMemory() / 16).toInt()),
     private val thumbnails: CoverThumbnailStore? = null,
+    private val prepareForDisplay: (Bitmap) -> Bitmap = { it },
 ) {
     data class Key(val url: String, val server: String, val user: String, val session: Long,
                    val item: String, val tag: String?, val width: Int)
@@ -36,9 +37,13 @@ internal class CoverBitmapCache(
                     try {
                         val diskGeneration = thumbnails?.generation() ?: 0L
                         val stored = thumbnails?.read(key, diskGeneration)
-                        val bitmap = stored ?: load()
+                        val raw = stored ?: load()
                         currentCoroutineContext().ensureActive()
-                        if (stored == null && bitmap != null) thumbnails?.write(key, bitmap, diskGeneration)
+                        if (stored == null && raw != null) thumbnails?.write(key, raw, diskGeneration)
+                        currentCoroutineContext().ensureActive()
+                        // Existing offline thumbnails are raw. Transform after disk IO but before
+                        // any view can retain the bitmap, including on a cold cache restart.
+                        val bitmap = raw?.let(prepareForDisplay)
                         currentCoroutineContext().ensureActive()
                         synchronized(lock) {
                             if (captured == epoch && bitmap != null) {
