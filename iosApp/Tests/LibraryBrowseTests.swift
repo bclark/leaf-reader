@@ -16,6 +16,64 @@ struct LibraryBrowseTests {
         #expect(LibraryBrowseState().view == .series)
     }
 
+    @Test func recentlyAddedUsesLocalAllWithoutAddingATabOrChangingUnread() {
+        var session = LibraryBrowseState()
+        session.unreadOnly = true
+        session.toggleRecentlyAdded()
+        #expect(session.recentlyAdded)
+        #expect(session.view == .all)
+        #expect(session.unreadOnly)
+        session.handleUnreachableLaunch()
+        #expect(session.recentlyAdded)
+        session.select(.series)
+        #expect(!session.recentlyAdded)
+        session.toggleRecentlyAdded()
+        session.toggleRecentlyAdded()
+        #expect(!session.recentlyAdded)
+        #expect(session.view == .series)
+    }
+
+    @Test func newestFirstSortsKnownDatesBeforeUnknownAndBreaksTiesByFilename() {
+        let urls = ["D", "C", "B", "A", "E"].map { URL(fileURLWithPath: "/\($0).pdf") }
+        let old = Date(timeIntervalSince1970: 1)
+        let recent = Date(timeIntervalSince1970: 2)
+        let dates = ["C.pdf": old, "B.pdf": recent, "A.pdf": recent]
+        let sorted = LibraryStore.newestFirst(urls) { dates[$0.lastPathComponent] }
+        #expect(sorted.map(\.lastPathComponent) == ["A.pdf", "B.pdf", "C.pdf", "D.pdf", "E.pdf"])
+    }
+
+    @Test func recentlyAddedUsesManagedCopiesButNotJellyfinDownloadDates() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let original = root.appendingPathComponent(UUID().uuidString + ".pdf")
+        let recent = root.appendingPathComponent(UUID().uuidString + ".pdf")
+        let download = root.appendingPathComponent(UUID().uuidString + ".pdf")
+        defer {
+            ReadingListStore.unlinkLocalCopy(filename: download.lastPathComponent)
+            for url in [original, recent, download] {
+                ReadingProgress.clear(url)
+                ComicMetadataStore.clear(url)
+            }
+            try? FileManager.default.removeItem(at: root)
+        }
+        for (i, url) in [original, recent, download].enumerated() {
+            try makePDF(url)
+            try FileManager.default.setAttributes(
+                [.creationDate: Date(timeIntervalSince1970: 946_684_800 + Double(i))], ofItemAtPath: url.path)
+        }
+        ReadingProgress.set(original, page: 0, step: -1, total: 2, rtl: false, completed: true)
+        let ref = try #require(JellyfinListReference(serverID: "server", userID: "user", itemID: UUID().uuidString))
+        ReadingListStore.linkRemote(ref, filename: download.lastPathComponent)
+        let library = LibraryStore(directory: root)
+        let items = library.libraryItems(filter: .all, searchQuery: "", recentlyAdded: true)
+        #expect(items.compactMap { item -> String? in
+            if case .singleComic(let url, _) = item { return url.lastPathComponent }
+            return nil
+        } == [recent.lastPathComponent, original.lastPathComponent])
+        let unread = library.libraryItems(filter: .all, searchQuery: "", unreadOnly: true, recentlyAdded: true)
+        #expect(unread.count == 1)
+    }
+
     @Test func unreadStateSurvivesEveryViewAndExplicitOfflineSurvivesFailure() {
         var state = LibraryBrowseState()
         state.unreadOnly = true

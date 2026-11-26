@@ -83,4 +83,7 @@
     <string name="jellyfin_launch_retrying">Conectando a Jellyfin…</string>
     <string name="privacy_policy">Política de privacidad</string>
     <string name="notices_load_failed">No se pudieron cargar los avisos de terceros.</string>
+    <string name="library_recently_added">Agregados recientemente (cómics locales)</string>
+    <string name="library_default_order">Mostrar el orden predeterminado</string>
+    <string name="library_no_local_additions">No hay cómics locales para ordenar por fecha de adición.</string>
 </resources>

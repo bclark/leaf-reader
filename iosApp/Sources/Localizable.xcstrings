@@ -9044,6 +9044,36 @@
           }
         }
       }
+    },
+    "No local comics to sort by date added.": {
+      "localizations": {
+        "es-MX": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No hay cómics locales para ordenar por fecha de adición."
+          }
+        }
+      }
+    },
+    "Recently Added (local comics)": {
+      "localizations": {
+        "es-MX": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agregados recientemente (cómics locales)"
+          }
+        }
+      }
+    },
+    "Show default order": {
+      "localizations": {
+        "es-MX": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar el orden predeterminado"
+          }
+        }
+      }
     }
   },
   "version": "1.3"
