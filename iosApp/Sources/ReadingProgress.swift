@@ -29,6 +29,9 @@ struct Progress: Codable, Equatable, Sendable {
     }
 
     var percent: Int { Int((fraction * 100).rounded()) }
+
+    /// Opened but never moved past page 1 or marked read: a local resume point, not a sync edit.
+    var isUntouchedFirstRead: Bool { localRevision == nil && page == 0 && !isCompleted }
 }
 
 /// App-wide reading preferences. The default reading direction is applied to any comic the user
@@ -178,7 +181,8 @@ enum ReadingProgress {
     }
 
     /// Sets and prompts durable persistence for this comic's progress.
-    static func set(_ url: URL, page: Int, step: Int, total: Int, rtl: Bool, completed: Bool? = nil) {
+    /// `isEdit: false` keeps an untouched first read unversioned so Jellyfin sync can adopt the server position.
+    static func set(_ url: URL, page: Int, step: Int, total: Int, rtl: Bool, completed: Bool? = nil, isEdit: Bool = true) {
         initializeLifecycleObservers()
         lock.lock()
         if inMemoryProgress == nil {
@@ -189,8 +193,12 @@ enum ReadingProgress {
         let samePage = previous?.page == page && previous?.total == total
         updated.completionOverride = completed ?? (samePage ? previous?.completionOverride : nil)
         // Direction/panel changes do not create a new remote page intent.
-        updated.localRevision = samePage && previous?.isCompleted == updated.isCompleted
-            ? previous?.localRevision : UUID()
+        if !isEdit && previous?.localRevision == nil {
+            updated.localRevision = nil
+        } else {
+            updated.localRevision = samePage && previous?.isCompleted == updated.isCompleted
+                ? previous?.localRevision : UUID()
+        }
         inMemoryProgress?[url.lastPathComponent] = updated
         lock.unlock()
         scheduleSave()
