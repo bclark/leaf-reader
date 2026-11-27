@@ -163,6 +163,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.digitalbc.leafreader.data.db.ComicEntity
 import net.digitalbc.leafreader.data.db.ReadingListEntity
+import net.digitalbc.leafreader.data.library.CoverImageDecoder
 import net.digitalbc.leafreader.data.smb.SmbEntry
 import net.digitalbc.leafreader.ui.brand.LeafWordmark
 import net.digitalbc.leafreader.ui.brand.LeafShape
@@ -2098,9 +2099,10 @@ internal fun ComicCard(
             val cover = rememberCover(comic?.coverPath)
             val remoteBitmap = rememberRemoteCover(remote?.item, remoteCoverWidthPx, load = loadRemoteCover)
             if (remoteBitmap != null) {
-                Image(remoteBitmap.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                val image = remoteBitmap.asImageBitmap()
+                Image(image, null, Modifier.fillMaxSize(), contentScale = libraryCoverScale(image))
             } else if (cover != null) {
-                Image(cover, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Image(cover, null, Modifier.fillMaxSize(), contentScale = libraryCoverScale(cover))
             } else {
                 GeneratedCover(title, columns = columns)
             }
@@ -2564,7 +2566,8 @@ internal fun rememberCover(path: String?, foreground: Boolean = true): ImageBitm
                 withContext(Dispatchers.IO) {
                     runCatching {
                         val file = File(path)
-                        if (file.exists()) BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap() else null
+                        if (file.exists()) BitmapFactory.decodeFile(file.absolutePath)
+                            ?.let(CoverImageDecoder::frontCoverOrOriginal)?.asImageBitmap() else null
                     }.getOrNull()
                 }
             }
@@ -2865,7 +2868,7 @@ private fun CoverStackCard(
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                 ) {
                     if (cover3 != null) {
-                        Image(cover3, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        Image(cover3, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = libraryCoverScale(cover3))
                     }
                     Box(Modifier.matchParentSize().graphicsLayer { alpha = backCoverDimming.value }.background(Color.Black.copy(alpha = 0.28f)))
                 }
@@ -2891,7 +2894,7 @@ private fun CoverStackCard(
 
                 ) {
                     if (cover2 != null) {
-                        Image(cover2, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        Image(cover2, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = libraryCoverScale(cover2))
                     }
 
                     val layer2IssueNum = if (issueCount > 0) ((topIndex + 1) % issueCount + issueCount) % issueCount + 1 else 2
@@ -3457,3 +3460,6 @@ private fun ColumnDensityIcon(columns: Int, modifier: Modifier = Modifier) {
         }
     }
 }
+
+private fun libraryCoverScale(cover: ImageBitmap): ContentScale =
+    if (cover.width > cover.height) ContentScale.Fit else ContentScale.Crop

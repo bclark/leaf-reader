@@ -2103,7 +2103,7 @@ struct LibraryCoverArtwork: View {
             .overlay {
                 Image(uiImage: image)
                     .resizable()
-                    .aspectRatio(contentMode: contentMode)
+                    .aspectRatio(contentMode: image.size.width > image.size.height ? .fit : contentMode)
             }
             .clipped()
             .contentShape(Rectangle())

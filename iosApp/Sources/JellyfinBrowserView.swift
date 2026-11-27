@@ -230,6 +230,6 @@ struct JellyfinBookRow: View {
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceThumbnailMaxPixelSize: min(CoverResolution.maximum, max(160, maxPixel))
               ] as CFDictionary) else { return nil }
-        return UIImage(cgImage: image)
+        return UIImage(cgImage: frontCoverImage(image))
     }
 }
