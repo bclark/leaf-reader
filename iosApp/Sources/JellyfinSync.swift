@@ -90,7 +90,8 @@ enum JellyfinSync {
             remoteTicks: KotlinLong(longLong: ticks), remotePlayed: KotlinBoolean(bool: played),
             baselineTicks: record?.baseline?.positionTicks.map { KotlinLong(longLong: $0) },
             baselinePlayed: record?.baseline?.played.map { KotlinBoolean(bool: $0) },
-            pending: record?.pendingRevision != nil, untrackedLocal: record == nil && local != nil)
+            pending: record?.pendingRevision != nil,
+            untrackedLocal: record == nil && local != nil && local?.isUntouchedFirstRead != true)
         if let choice {
             // A choice never applies to a new account, new local edit or newly changed server state.
             guard choice.conflict == conflict else { return .conflict(conflict) }
