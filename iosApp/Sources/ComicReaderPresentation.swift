@@ -36,12 +36,34 @@ extension View {
         }
     }
 
+    func linkedReaderPresentation(item: Binding<LinkedComic?>, store: LinkedFilesStore?,
+                                  onDismiss: @escaping () -> Void) -> some View {
+        modifier(LinkedReaderPresentation(store: store, item: item, onDismiss: onDismiss))
+    }
+
     @ViewBuilder
     func comicCoverSource(url: URL, namespace: Namespace.ID?) -> some View {
         if #available(iOS 18.0, *), let namespace {
             matchedTransitionSource(id: url, in: namespace)
         } else {
             self
+        }
+    }
+}
+
+private struct LinkedReaderPresentation: ViewModifier {
+    let store: LinkedFilesStore?
+    @Binding var item: LinkedComic?
+    let onDismiss: () -> Void
+
+    func body(content: Content) -> some View {
+        content.fullScreenCover(item: $item, onDismiss: onDismiss) { comic in
+            if let store {
+                ReaderView(comicURL: comic.progressURL, linkedFile: comic, onLocateLinkedFile: { url in
+                    try await store.link(url, replacing: comic.id)
+                }, onLinkedFileOpened: { store.refreshCoverIfNeeded(for: $0) })
+                .interactiveDismissDisabled()
+            }
         }
     }
 }

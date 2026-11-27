@@ -11,16 +11,23 @@ import ZIPFoundation
 final class LibraryStoreTests: XCTestCase {
 
     private var tempDir: URL!
+    private var listDefaults: UserDefaults!
+    private var listBrowser: JellyfinBrowserModel!
+    private var listCatalogue: JellyfinCatalogueModel!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
         tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("LeafLibraryTests_\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        listDefaults = try XCTUnwrap(UserDefaults(suiteName: tempDir.lastPathComponent))
+        listBrowser = JellyfinBrowserModel(defaults: listDefaults)
+        listCatalogue = JellyfinCatalogueModel(defaults: listDefaults)
     }
 
     override func tearDownWithError() throws {
         if let tempDir {
+            listDefaults?.removePersistentDomain(forName: tempDir.lastPathComponent)
             try? FileManager.default.removeItem(at: tempDir)
         }
         try super.tearDownWithError()
@@ -412,7 +419,7 @@ final class LibraryStoreTests: XCTestCase {
         let detailFresh = ReadingListDetailView(
             listId: created.id,
             library: store,
-            onDismiss: {}, unreadOnly: .constant(false)
+            onDismiss: {}, jellyfin: listBrowser, catalogue: listCatalogue, unreadOnly: .constant(false)
         )
         XCTAssertEqual(detailFresh.heroButtonText, "START: Event Part 1")
 
@@ -425,7 +432,7 @@ final class LibraryStoreTests: XCTestCase {
         let detailAfterReorder = ReadingListDetailView(
             listId: created.id,
             library: store,
-            onDismiss: {}, unreadOnly: .constant(false)
+            onDismiss: {}, jellyfin: listBrowser, catalogue: listCatalogue, unreadOnly: .constant(false)
         )
         XCTAssertEqual(detailAfterReorder.heroButtonText, "START: Event Part 2")
         XCTAssertEqual(detailAfterReorder.shortActionLabel, "START")
@@ -499,7 +506,7 @@ final class LibraryStoreTests: XCTestCase {
         let listDetail = ReadingListDetailView(
             listId: list.id,
             library: store,
-            onDismiss: {}, unreadOnly: .constant(false)
+            onDismiss: {}, jellyfin: listBrowser, catalogue: listCatalogue, unreadOnly: .constant(false)
         ).environmentObject(settings)
 
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))

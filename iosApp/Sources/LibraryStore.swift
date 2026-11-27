@@ -176,10 +176,17 @@ final class LibraryStore: ObservableObject {
         markComicsRead(urls: comics(inSeries: seriesName), read: read)
     }
 
-    func comics(inSeries name: String) -> [URL] {
-        sortIssues(comics.filter {
-            metadata[$0.lastPathComponent]?.series?.caseInsensitiveCompare(name) == .orderedSame
-        })
+    func comics(inSeries name: String, linked: [LinkedComic] = []) -> [URL] {
+        let index = shelfMetadata(linked: linked)
+        return sortIssues((comics + linked.map(\.progressURL)).filter {
+            index[$0.lastPathComponent]?.series?.caseInsensitiveCompare(name) == .orderedSame
+        }, metadata: index)
+    }
+
+    private func shelfMetadata(linked: [LinkedComic]) -> [String: ComicMetadataRecord] {
+        var result = metadata
+        for comic in linked { result[comic.progressURL.lastPathComponent] = comic.shelfMetadata }
+        return result
     }
 
     func addToSeries(urls: [URL], name: String) {
@@ -194,7 +201,7 @@ final class LibraryStore: ObservableObject {
 
     @discardableResult
     func createReadingList(name: String, urls: [URL] = []) -> ReadingListRecord {
-        let list = ReadingListStore.createList(name: name, itemFilenames: urls.map { $0.lastPathComponent })
+        let list = ReadingListStore.createList(name: name, itemFilenames: urls.map(Self.listMemberKey))
         refresh()
         return list
     }
@@ -210,8 +217,15 @@ final class LibraryStore: ObservableObject {
     }
 
     func addComicsToReadingList(listId: String, urls: [URL]) {
-        ReadingListStore.addComics(to: listId, filenames: urls.map { $0.lastPathComponent })
+        ReadingListStore.addComics(to: listId, filenames: urls.map(Self.listMemberKey))
         refresh()
+    }
+
+    private static func listMemberKey(_ url: URL) -> String {
+        if url.scheme == "leaf-files", let id = UUID(uuidString: String(url.lastPathComponent.dropFirst("linked-".count))) {
+            return "leaf-files:" + id.uuidString
+        }
+        return url.lastPathComponent
     }
 
     func removeComicFromReadingList(listId: String, url: URL) {
@@ -234,19 +248,23 @@ final class LibraryStore: ObservableObject {
     // MARK: - Item Resolution for Library UI
 
     func libraryItems(filter: LibraryFilter, searchQuery: String, excluding: Set<URL> = [],
-                      unreadOnly: Bool = false, available: Set<URL>? = nil) -> [LibraryItem] {
+                      unreadOnly: Bool = false, available: Set<URL>? = nil,
+                      linked: [LinkedComic] = []) -> [LibraryItem] {
+        let linked = available == nil ? linked : []
+        let metadata = shelfMetadata(linked: linked)
+        let linkedTitles = Dictionary(uniqueKeysWithValues: linked.map { ($0.progressURL, $0.title) })
         let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let comicMap = Dictionary(uniqueKeysWithValues: comics.map { ($0.lastPathComponent, $0) })
 
         let filteredComics: [URL] = {
-            let candidates = comics.filter {
+            let candidates = (comics + linked.map(\.progressURL)).filter {
                 !excluding.contains($0) && (available?.contains($0) ?? true) &&
                 (!unreadOnly || !ReadingProgress.isCompleted($0))
             }
             if q.isEmpty { return candidates }
             return candidates.filter { url in
                 let filename = url.lastPathComponent.lowercased()
-                let title = url.deletingPathExtension().lastPathComponent.lowercased()
+                let title = (linkedTitles[url] ?? url.deletingPathExtension().lastPathComponent).lowercased()
                 let series = metadata[url.lastPathComponent]?.series?.lowercased() ?? ""
                 return filename.contains(q) || title.contains(q) || series.contains(q)
             }
@@ -279,7 +297,7 @@ final class LibraryStore: ObservableObject {
                 if let s = metadata[url.lastPathComponent]?.series, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     let key = s.lowercased()
                     if let group = seriesGroups[key], group.count >= 2 {
-                        let sortedIssues = sortIssues(group)
+                        let sortedIssues = sortIssues(group, metadata: metadata)
                         let nextIssue = sortedIssues.first { !ReadingProgress.isCompleted($0) }
                             ?? sortedIssues.first ?? url
 
@@ -315,8 +333,8 @@ final class LibraryStore: ObservableObject {
                 }
             }
 
-            return seriesGroups.values.map { group in
-                let sortedIssues = sortIssues(group)
+            let grouped = seriesGroups.values.map { group in
+                let sortedIssues = sortIssues(group, metadata: metadata)
                 let nextIssue = sortedIssues.first { !ReadingProgress.isCompleted($0) }
                     ?? sortedIssues.first ?? group[0]
 
@@ -339,6 +357,10 @@ final class LibraryStore: ObservableObject {
                 }
                 return false
             }
+            // Keep an unassigned linked title discoverable on the default Series shelf.
+            let assigned = Set(seriesGroups.values.flatMap { $0 })
+            let standalone = filteredComics.filter { linkedTitles[$0] != nil && !assigned.contains($0) }
+            return grouped + standalone.map { .singleComic(url: $0, metadata: metadata[$0.lastPathComponent]) }
 
         case .readingLists:
             return listItems
@@ -352,7 +374,7 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    private func sortIssues(_ urls: [URL]) -> [URL] {
+    private func sortIssues(_ urls: [URL], metadata: [String: ComicMetadataRecord]) -> [URL] {
         urls.sorted { a, b in
             let ma = metadata[a.lastPathComponent]
             let mb = metadata[b.lastPathComponent]
@@ -363,7 +385,10 @@ final class LibraryStore: ObservableObject {
             let numA = ma?.issueNumber ?? Float.greatestFiniteMagnitude
             let numB = mb?.issueNumber ?? Float.greatestFiniteMagnitude
             if numA != numB { return numA < numB }
-            return a.lastPathComponent.localizedStandardCompare(b.lastPathComponent) == .orderedAscending
+            let aName = a.isFileURL ? a.lastPathComponent : ma?.title ?? a.lastPathComponent
+            let bName = b.isFileURL ? b.lastPathComponent : mb?.title ?? b.lastPathComponent
+            let nameOrder = aName.localizedStandardCompare(bName)
+            return nameOrder == .orderedSame ? a.absoluteString < b.absoluteString : nameOrder == .orderedAscending
         }
     }
 

@@ -1,6 +1,25 @@
 import SwiftUI
 import LeafShared
 
+/// Translate known credit labels for display without changing server metadata or custom roles.
+private func localizedJellyfinCreditRole(_ role: String) -> String {
+    let value = role.trimmingCharacters(in: .whitespacesAndNewlines)
+    switch value.lowercased() {
+    case "writer": return String(localized: "Writer")
+    case "author": return String(localized: "Author")
+    case "artist": return String(localized: "Artist")
+    case "penciler", "penciller": return String(localized: "Penciller")
+    case "colorist": return String(localized: "Colorist")
+    case "inker": return String(localized: "Inker")
+    case "letterer": return String(localized: "Letterer")
+    case "editor": return String(localized: "Editor")
+    case "coverartist", "cover artist": return String(localized: "Cover artist")
+    case "translator": return String(localized: "Translator")
+    case "creator": return String(localized: "Creator")
+    default: return role
+    }
+}
+
 struct JellyfinDetailView: View {
     let item: JellyfinBook
     @ObservedObject var model: JellyfinBrowserModel
@@ -133,6 +152,7 @@ struct JellyfinDetailView: View {
                 ForEach(Array(details.people.enumerated()), id: \.offset) { _, person in
                     let role = [person.type, person.role].compactMap { $0 }
                         .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                        .map(localizedJellyfinCreditRole)
                         .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
                         .joined(separator: " · ")
                     NavigationLink {
@@ -247,6 +267,8 @@ struct JellyfinDetailReadStyle: ButtonStyle {
 
 /// One bounded cover decode supplies both the artwork and the static hero atmosphere.
 struct JellyfinDetailHero<Actions: View>: View {
+    @Environment(\.displayScale) private var displayScale
+    private var coverPixels: Int { CoverResolution.pixels(width: 220, scale: displayScale) }
     let item: JellyfinBook
     let details: JellyfinItemDetails?
     let client: JellyfinClient?
@@ -256,13 +278,13 @@ struct JellyfinDetailHero<Actions: View>: View {
     @State private var cover: UIImage?
     var body: some View {
         JellyfinCinematicHero(item: item, details: details, cover: cover) { actions }
-        .task(id: [profileID, item.id, item.imageTags?["Primary"] ?? "", localURL?.path ?? ""]) {
+        .task(id: [profileID, item.id, item.imageTags?["Primary"] ?? "", localURL?.path ?? "", String(coverPixels)]) {
             cover = nil
             var image: UIImage?
-            if let localURL { image = await CoverLoader.load(for: localURL).cover }
-            if image == nil, let client, let data = try? await client.cover(item, maxWidth: 640) {
+            if let localURL { image = await CoverLoader.load(for: localURL, maxPixel: coverPixels).cover }
+            if image == nil, let client, let data = try? await client.cover(item, maxWidth: coverPixels) {
                 image = await Task.detached(priority: .utility) {
-                    JellyfinBookRow.thumbnail(data, maxPixel: 640)
+                    JellyfinBookRow.thumbnail(data, maxPixel: coverPixels)
                 }.value
             }
             guard !Task.isCancelled else { return }

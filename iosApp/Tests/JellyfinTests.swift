@@ -60,6 +60,34 @@ struct JellyfinTests {
         }
     }
 
+    @Test func reauthenticationReportsSuccessEvenWhenProfileIDIsUnchanged() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = try JellyfinHTTPFixture(payload: Data())
+        let base = try await server.start()
+        let suite = "leaf.signin-reauth." + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite); server.stop() }
+        let browser = JellyfinBrowserModel(defaults: defaults, credentials: JellyfinFixtureCredentials(),
+            imports: JellyfinImports(file: root.appendingPathComponent("imports.json")),
+            progressStore: JellyfinProgressStore(file: root.appendingPathComponent("progress.json")),
+            snapshotDirectory: root.appendingPathComponent("snapshots"))
+        browser.signIn(url: base.absoluteString, username: "fixture", password: "fixture", allowHTTP: true)
+        await browser.waitForIdle()
+        let profileID = try #require(browser.connection?.id)
+        browser.needsSignIn = true
+        var committed = false
+        browser.signIn(url: base.absoluteString, username: "fixture", password: "fixture", allowHTTP: true,
+            onSuccess: {
+                #expect(browser.connection?.id == profileID)
+                #expect(!browser.needsSignIn)
+                committed = true
+            })
+        await browser.waitForIdle()
+        #expect(committed)
+        #expect(browser.connection?.id == profileID)
+    }
+
     @Test(.timeLimit(.minutes(1))) func catalogueColdStartCachesWithoutImportingAndFallsBackOffline() async throws {
         let root = try directory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -77,12 +105,16 @@ struct JellyfinTests {
         let catalogue = JellyfinCatalogueModel(defaults: defaults, snapshotDirectory: root.appendingPathComponent("snapshots"))
         #expect(!catalogue.isCurrent(for: browser.connection))
         #expect(!catalogue.isCurrent(for: nil))
+        let beforeRefresh = Date()
         await catalogue.start(browser: browser)
         #expect(catalogue.isCurrent(for: browser.connection))
+        let refreshedAt = try #require(catalogue.lastCatalogueRefresh(for: browser.connection))
+        #expect(refreshedAt >= beforeRefresh && refreshedAt <= Date())
         let currentConnection = try #require(browser.connection)
         let anotherAccount = JellyfinConnection(id: "other-profile", baseURL: currentConnection.baseURL,
             userID: "other-user", serverID: currentConnection.serverID, username: "Other", allowsHTTP: true)
         #expect(!catalogue.isCurrent(for: anotherAccount))
+        #expect(catalogue.lastCatalogueRefresh(for: anotherAccount) == nil)
         #expect(catalogue.libraryID == "folder")
         #expect(catalogue.books.count == 2)
         #expect(!catalogue.hasMore)
@@ -94,6 +126,7 @@ struct JellyfinTests {
         let collection = try #require(catalogue.collections.first)
         let members = try await catalogue.collectionBooks(collection, browser: browser)
         #expect(members.map(\.id) == ["unknown"])
+        #expect(catalogue.lastCatalogueRefresh(for: browser.connection) == refreshedAt)
         let library = LibraryStore(directory: root.appendingPathComponent("Comics"))
         for large in [false, true] {
             let content = JellyfinMainGrid(catalogue: catalogue, browser: browser, filter: .series,
@@ -124,17 +157,26 @@ struct JellyfinTests {
         #expect(reopened.unavailable)
         #expect(reopened.unreachable)
         #expect(reopened.fromCache)
+        #expect(reopened.lastCatalogueRefresh(for: browser.connection) == refreshedAt)
         #expect(reopened.books.count == 2)
         #expect(defaults.data(forKey: "leaf.jellyfin.catalogue.6:server4:user") == nil)
         #expect(reopened.collections.count == 1)
         #expect(try await reopened.collectionBooks(collection, browser: browser).map(\.id) == ["unknown"])
         #expect(reopened.message == String(localized: "Jellyfin server is unreachable. Local copies are available in Offline."))
+        var legacySnapshot = try #require(JSONSerialization.jsonObject(with: snapshot) as? [String: Any])
+        legacySnapshot.removeValue(forKey: "refreshedAt")
+        defaults.set(try JSONSerialization.data(withJSONObject: legacySnapshot), forKey: "leaf.jellyfin.catalogue.6:server4:user")
+        let legacy = JellyfinCatalogueModel(defaults: defaults, snapshotDirectory: root.appendingPathComponent("legacy-date"))
+        await legacy.start(browser: browser)
+        #expect(legacy.books.count == 2)
+        #expect(legacy.lastCatalogueRefresh(for: browser.connection) == nil)
         await browser.disconnect()
         #expect(!reopened.isCurrent(for: browser.connection))
         await reopened.start(browser: browser)
         #expect(!reopened.isCurrent(for: currentConnection))
         #expect(reopened.books.isEmpty)
         #expect(reopened.libraryID == nil)
+        #expect(reopened.lastCatalogueRefresh(for: currentConnection) == nil)
     }
 
     @Test func independentUnreadProjectionUsesLocalProgressAndKeepsUnknownRemoteState() async throws {
