@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 /// Quick drags scroll. Only a downward drag after the platform hold interval peels.
 /// SwiftUI simultaneousGesture no longer opts into ancestor scroll gestures on newer SDKs.
@@ -32,12 +33,27 @@ struct CoverPeelGesture: UIViewRepresentable {
     final class HeldPeelPan: UIPanGestureRecognizer {
         private var beganAt: TimeInterval = 0
         private let holdDuration = UILongPressGestureRecognizer().minimumPressDuration
+        private var stationaryHold: DispatchWorkItem?
         var isArmed: Bool { ProcessInfo.processInfo.systemUptime - beganAt >= holdDuration }
         override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
             beganAt = ProcessInfo.processInfo.systemUptime
             super.touchesBegan(touches, with: event)
+            // Context-menu presses wait for this pan to fail, and a stationary pan only fails on
+            // touch-up. Fail a hold that has not started its drag shortly after arming, so the
+            // menu presents while the finger is still down instead of racing the release.
+            let hold = DispatchWorkItem { [weak self] in
+                guard let self, self.state == .possible else { return }
+                self.state = .failed
+            }
+            stationaryHold?.cancel()
+            stationaryHold = hold
+            DispatchQueue.main.asyncAfter(deadline: .now() + holdDuration * 1.5, execute: hold)
         }
-
+        override func reset() {
+            stationaryHold?.cancel()
+            stationaryHold = nil
+            super.reset()
+        }
     }
 
     final class GestureView: UIView {
