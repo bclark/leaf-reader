@@ -126,7 +126,16 @@ public enum ReadingListStore {
         defaults.set(links.filter { $0.value != filename }, forKey: "leaf.readingLists.remoteCopies.v1")
     }
 
+    /// Use the same durable identity in the picker, store and list operations.
+    static func memberKey(for filename: String) -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        let links = defaults.dictionary(forKey: "leaf.readingLists.remoteCopies.v1") as? [String: String] ?? [:]
+        return links.first(where: { $0.value == filename })?.key ?? filename
+    }
+
     static func localFilename(for member: String) -> String? {
+        guard LinkedComic.listID(member) == nil else { return nil }
         guard JellyfinListReference(token: member) != nil else { return member }
         lock.lock()
         defer { lock.unlock() }
@@ -140,9 +149,11 @@ public enum ReadingListStore {
 
     public static func removeComic(from listId: String, filename: String) {
         lock.lock()
+        let links = defaults.dictionary(forKey: "leaf.readingLists.remoteCopies.v1") as? [String: String] ?? [:]
+        let member = links.first(where: { $0.value == filename })?.key ?? filename
         var lists = inMemoryLists ?? loadLocked()
         if let idx = lists.firstIndex(where: { $0.id == listId }) {
-            lists[idx].itemFilenames.removeAll { $0 == filename }
+            lists[idx].itemFilenames.removeAll { $0 == member }
             inMemoryLists = lists
             saveLocked(lists)
         }
@@ -153,10 +164,12 @@ public enum ReadingListStore {
     public static func moveComic(in listId: String, filename: String, direction: Int) {
         guard direction != 0 else { return }
         lock.lock()
+        let links = defaults.dictionary(forKey: "leaf.readingLists.remoteCopies.v1") as? [String: String] ?? [:]
+        let member = links.first(where: { $0.value == filename })?.key ?? filename
         var lists = inMemoryLists ?? loadLocked()
         if let idx = lists.firstIndex(where: { $0.id == listId }) {
             var items = lists[idx].itemFilenames
-            if let itemIdx = items.firstIndex(of: filename) {
+            if let itemIdx = items.firstIndex(of: member) {
                 let targetIdx = itemIdx + (direction < 0 ? -1 : 1)
                 if items.indices.contains(targetIdx) {
                     items.swapAt(itemIdx, targetIdx)

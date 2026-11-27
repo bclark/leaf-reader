@@ -4,12 +4,15 @@ import UniformTypeIdentifiers
 /// The Leaf menu / about screen — the SwiftUI port of Android's MenuScreen.kt. Holds the AMOLED
 /// theme toggle, reading mode switch, grid columns setting, and the about section.
 struct MenuView: View {
+    @ObservedObject var jellyfin: JellyfinBrowserModel
+    @ObservedObject var catalogue: JellyfinCatalogueModel
     @EnvironmentObject private var settings: LeafSettings
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var defaultRTL = ReadingPrefs.defaultRightToLeft
     @State private var showingSmbSettings = false
+    @State private var showingJellyfinSettings = false
     @State private var showingExporter = false
     @State private var exportDocument = BackupJSONDocument()
     @State private var showingImporter = false
@@ -24,7 +27,7 @@ struct MenuView: View {
 
     private static let repoURL = URL(string: "https://github.com/bclark/leaf-reader")!
     private static let upstreamURL = URL(string: "https://github.com/batunii/chika")!
-    private static let privacyURL = URL(string: "https://github.com/bclark/leaf-reader/blob/main/PRIVACY.md")!
+    private static let privacyURL = URL(string: "https://digitalbc.net/leaf/privacy/ios/")!
     private static let licensesURL = URL(string: "https://github.com/bclark/leaf-reader/blob/main/THIRD_PARTY_NOTICES.md")!
 
     private var version: String {
@@ -45,6 +48,9 @@ struct MenuView: View {
         ZStack {
             settings.ground.ignoresSafeArea()
                 .sheet(isPresented: $showingSmbSettings) { SmbSettingsView() }
+                .sheet(isPresented: $showingJellyfinSettings, onDismiss: {
+                    Task { await catalogue.start(browser: jellyfin, force: true) }
+                }) { JellyfinBrowserView(model: jellyfin, catalogue: catalogue) }
 
             VStack(spacing: 0) {
                 // App Bar: leafPrimary anchors the brand at the top of the screen
@@ -167,6 +173,30 @@ struct MenuView: View {
 
                         Spacer().frame(height: 32)
 
+                        SectionLabel("CONNECTIONS").padding(.bottom, 10)
+                        Button { showingJellyfinSettings = true } label: {
+                            Text("Jellyfin settings")
+                                .leafControlFont(14, weight: 700)
+                                .frame(minWidth: 44, minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .foregroundColor(Leaf.goldText)
+                        if jellyfin.connection != nil {
+                            Menu {
+                                ForEach(catalogue.libraries) { item in
+                                    Button(item.name) {
+                                        Task { await catalogue.selectLibrary(item.id, browser: jellyfin) }
+                                    }
+                                }
+                            } label: {
+                                Text("Jellyfin libraries")
+                                    .leafControlFont(14, weight: 700)
+                                    .frame(minWidth: 44, minHeight: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .foregroundColor(Leaf.goldText)
+                        }
+
                         // ---- Library -----------------------------------------------------
                         Button { showingSmbSettings = true } label: {
                             Text("SMB Drive Settings")
@@ -178,6 +208,8 @@ struct MenuView: View {
                         .padding(.bottom, 24)
 
                         SectionLabel("LIBRARY")
+                        LibraryAppearanceControls()
+                            .padding(.vertical, 12)
                         Spacer().frame(height: 10)
                         Toggle("Default right-to-left reading", isOn: $defaultRTL)
                             .leafControlFont(14, weight: 700)
@@ -286,6 +318,38 @@ struct MenuView: View {
 
                         Spacer().frame(height: 32)
 
+                        // ---- Support Leaf ------------------------------------------------
+                        SectionLabel("SUPPORT LEAF")
+                        Spacer().frame(height: 10)
+                        Text("Enjoying Leaf? You can leave an optional tip to support development. All features remain free.")
+                            .leafControlFont(12, weight: 500)
+                            .lineSpacing(4)
+                            .foregroundColor(Leaf.text)
+                        Spacer().frame(height: 12)
+                        Button {
+                            showingTips = true
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "heart.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(Leaf.cream)
+                                Text("LEAVE A TIP")
+                                    .font(.custom("Anton-Regular", size: 15, relativeTo: .headline))
+                                    .tracking(0.5)
+                                    .foregroundColor(Leaf.cream)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(Leaf.crimson)
+                            .clipShape(RoundedCornerShape(cornerRadius: 4))
+                            .comicShadow(offset: 4, color: .black.opacity(0.6), corner: 4)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Leave a tip")
+                        .accessibilityHint("Choose an optional one-time purchase. All features remain free.")
+
+                        Spacer().frame(height: 24)
+
                         // ---- About -------------------------------------------------------
                         SectionLabel("ABOUT")
                         Spacer().frame(height: 16)
@@ -363,38 +427,6 @@ struct MenuView: View {
                             .background(settings.groundSoft)
                             .clipShape(RoundedCornerShape(cornerRadius: 4))
                         }
-
-                        Spacer().frame(height: 24)
-
-                        // ---- Support Leaf ------------------------------------------------
-                        SectionLabel("SUPPORT LEAF")
-                        Spacer().frame(height: 10)
-                        Text("Enjoying Leaf? You can leave an optional tip to support development. All features remain free.")
-                            .leafControlFont(12, weight: 500)
-                            .lineSpacing(4)
-                            .foregroundColor(Leaf.text)
-                        Spacer().frame(height: 12)
-                        Button {
-                            showingTips = true
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "heart.fill")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(Leaf.cream)
-                                Text("LEAVE A TIP")
-                                    .font(.custom("Anton-Regular", size: 15, relativeTo: .headline))
-                                    .tracking(0.5)
-                                    .foregroundColor(Leaf.cream)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(Leaf.crimson)
-                            .clipShape(RoundedCornerShape(cornerRadius: 4))
-                            .comicShadow(offset: 4, color: .black.opacity(0.6), corner: 4)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Leave a tip")
-                        .accessibilityHint("Choose an optional one-time purchase. All features remain free.")
 
                         Spacer().frame(height: 24)
 

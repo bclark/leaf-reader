@@ -12,7 +12,16 @@ final class CoverLoader: ObservableObject {
         let id = UUID()
         let task: Task<(UIImage?, Int), Never>
     }
-    private var pending: [Revision: Load] = [:]
+    private struct LoadKey: Hashable {
+        let revision: Revision
+        let maxPixel: Int
+    }
+    private final class CachedCover {
+        let image: UIImage
+        let maxPixel: Int
+        init(_ image: UIImage, maxPixel: Int) { self.image = image; self.maxPixel = maxPixel }
+    }
+    private var pending: [LoadKey: Load] = [:]
     private let worker = CoverDecodeWorker()
     private var memoryObserver: NSObjectProtocol?
 
@@ -39,14 +48,16 @@ final class CoverLoader: ObservableObject {
 
     static func invalidate(_ url: URL) {
         let revision = Revision(url: url, generation: shared.generations[url, default: 0])
-        shared.pending.removeValue(forKey: revision)?.task.cancel()
+        for key in shared.pending.keys.filter({ $0.revision == revision }) {
+            shared.pending.removeValue(forKey: key)?.task.cancel()
+        }
         shared.generations[url, default: 0] += 1
         cache.removeObject(forKey: url as NSURL)
         countCache.removeObject(forKey: url as NSURL)
     }
 
-    private static let cache: NSCache<NSURL, UIImage> = {
-        let cache = NSCache<NSURL, UIImage>()
+    private static let cache: NSCache<NSURL, CachedCover> = {
+        let cache = NSCache<NSURL, CachedCover>()
         cache.totalCostLimit = 48 * 1024 * 1024
         cache.countLimit = 128
         return cache
@@ -66,39 +77,43 @@ final class CoverLoader: ObservableObject {
     }
 
     static func cachedCover(for url: URL) -> UIImage? {
-        cache.object(forKey: url as NSURL)
+        cache.object(forKey: url as NSURL)?.image
     }
 
-    static func load(for url: URL) async -> (cover: UIImage?, pageCount: Int) {
+    static func load(for url: URL, maxPixel requested: Int = 600) async -> (cover: UIImage?, pageCount: Int) {
+        let maxPixel = min(CoverResolution.maximum, max(256, requested))
         guard !Task.isCancelled else { return (nil, 0) }
-        if let image = cache.object(forKey: url as NSURL),
+        if let hit = cache.object(forKey: url as NSURL), hit.maxPixel >= maxPixel,
            let count = countCache.object(forKey: url as NSURL) {
-            return (image, count.intValue)
+            return (hit.image, count.intValue)
         }
         let revision = Revision(url: url, generation: shared.generations[url, default: 0])
+        let key = LoadKey(revision: revision, maxPixel: maxPixel)
         let load: Load
-        if let existing = shared.pending[revision] {
+        if let existing = shared.pending[key] {
             load = existing
         } else {
             let worker = shared.worker
-            load = Load(task: Task { await worker.load(url) })
-            shared.pending[revision] = load
+            load = Load(task: Task { await worker.load(url, maxPixel: maxPixel) })
+            shared.pending[key] = load
         }
         let result = await load.task.value
         // Cancellation by one view must not cancel another consumer's shared decode.
         guard revision.generation == shared.generations[url, default: 0] else {
-            return Task.isCancelled ? (nil, 0) : await Self.load(for: url)
+            return Task.isCancelled ? (nil, 0) : await Self.load(for: url, maxPixel: maxPixel)
         }
         guard !load.task.isCancelled else { return (nil, 0) }
         // Another waiter may already have published, or pressure may have purged this flight.
-        guard shared.pending[revision]?.id == load.id else {
+        guard shared.pending[key]?.id == load.id else {
             return Task.isCancelled ? (nil, 0) : result
         }
-        shared.pending.removeValue(forKey: revision)
+        shared.pending.removeValue(forKey: key)
         if let image = result.0 {
             let cost = image.cgImage.map { $0.bytesPerRow * $0.height }
                 ?? Int(image.size.width * image.size.height * image.scale * image.scale * 4)
-            cache.setObject(image, forKey: url as NSURL, cost: cost)
+            if (cache.object(forKey: url as NSURL)?.maxPixel ?? 0) <= maxPixel {
+                cache.setObject(CachedCover(image, maxPixel: maxPixel), forKey: url as NSURL, cost: cost)
+            }
         }
         countCache.setObject(NSNumber(value: result.1), forKey: url as NSURL)
         return Task.isCancelled ? (nil, 0) : result
@@ -107,7 +122,7 @@ final class CoverLoader: ObservableObject {
 
 /// Serial admission bounds simultaneous archive/decode allocations during fast grid scrolling.
 private actor CoverDecodeWorker {
-    func load(_ url: URL) -> (UIImage?, Int) {
+    func load(_ url: URL, maxPixel: Int) -> (UIImage?, Int) {
         guard !Task.isCancelled else { return (nil, 0) }
         let interval = LeafPerformance.signposter.beginInterval("Cover decode", id: LeafPerformance.signposter.makeSignpostID())
         defer { LeafPerformance.signposter.endInterval("Cover decode", interval) }
@@ -116,7 +131,7 @@ private actor CoverDecodeWorker {
             let count = archive.pageCount
             guard count > 0, !Task.isCancelled, let data = try? archive.readPage(0) else { return (nil, count) }
             // Preserve the format fallback; common formats take the bounded ImageIO path.
-            return (thumbnail(from: data, maxPixel: 600) ?? UIImage(data: data), count)
+            return (thumbnail(from: data, maxPixel: maxPixel) ?? UIImage(data: data), count)
         }
     }
 

@@ -4,11 +4,14 @@ import SwiftUI
 struct ContinueReadingCard: View {
     @EnvironmentObject private var settings: LeafSettings
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.displayScale) private var displayScale
+    private var coverPixels: Int { CoverResolution.pixels(width: wide ? 76 : 92, scale: displayScale) }
     @ObservedObject private var covers = CoverLoader.shared
     let item: LibraryContinueItem
     let client: JellyfinClient?
     let profileID: String?
     let wide: Bool
+    var linkedCover: UIImage? = nil
     let open: () -> Void
     @State private var cover: UIImage?
 
@@ -19,7 +22,7 @@ struct ContinueReadingCard: View {
                 : AnyLayout(HStackLayout(alignment: .top, spacing: 14))
             layout {
                 Group {
-                    if let cover { LibraryCoverArtwork(image: cover) }
+                    if let cover = linkedCover ?? cover { LibraryCoverArtwork(image: cover) }
                     else { GeneratedCover(title: item.title, columns: 4) }
                 }
                 .frame(width: wide ? 76 : 92, height: wide ? 108 : 131)
@@ -34,6 +37,9 @@ struct ContinueReadingCard: View {
                         .font(.custom("Anton-Regular", size: wide ? 20 : 22, relativeTo: .title3))
                         .foregroundColor(Leaf.text).lineLimit(typeSize.isAccessibilitySize ? nil : (wide ? 1 : 2))
                         .multilineTextAlignment(.leading)
+                    if item.linked != nil {
+                        Text("Files").leafControlFont(11, weight: 700).foregroundStyle(Leaf.goldText)
+                    }
                     Group {
                         if let count = item.total { Text("Page \(item.page + 1) of \(count)") }
                         else { Text("Page \(item.page + 1)") }
@@ -70,10 +76,10 @@ struct ContinueReadingCard: View {
         .task(id: imageKey) {
             cover = nil
             if let url = item.url {
-                let result = await CoverLoader.load(for: url)
+                let result = await CoverLoader.load(for: url, maxPixel: coverPixels)
                 if !Task.isCancelled { cover = result.cover }
-            } else if let book = item.book, let client, let data = try? await client.cover(book) {
-                let image = await Task.detached(priority: .utility) { JellyfinBookRow.thumbnail(data) }.value
+            } else if let book = item.book, let client, let data = try? await client.cover(book, maxWidth: coverPixels) {
+                let image = await Task.detached(priority: .utility) { JellyfinBookRow.thumbnail(data, maxPixel: coverPixels) }.value
                 if !Task.isCancelled { cover = image }
             }
         }
@@ -83,10 +89,11 @@ struct ContinueReadingCard: View {
         let action = wide ? String(localized: "Continue") : String(localized: "Continue reading")
         let position = item.total.map { String(localized: "Page \(item.page + 1) of \($0)") }
             ?? String(localized: "Page \(item.page + 1)")
-        return "\(action), \(item.title), \(position)"
+        let source = item.linked == nil ? "" : ", " + String(localized: "Files")
+        return "\(action), \(item.title)\(source), \(position)"
     }
 
     private var imageKey: String {
-        "\(profileID ?? ""):\(item.id):\(item.book?.imageTags?["Primary"] ?? ""):\(item.url.map { String(describing: covers.revisions(for: [$0])) } ?? "")"
+        "\(coverPixels):\(profileID ?? ""):\(item.id):\(item.book?.imageTags?["Primary"] ?? ""):\(item.url.map { String(describing: covers.revisions(for: [$0])) } ?? "")"
     }
 }

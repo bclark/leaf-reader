@@ -14,7 +14,10 @@ final class BackupManagerTests: XCTestCase {
         )
         let metadata = ["Spidey_01.cbz": meta]
         let readingList = ReadingListRecord(name: "Favorites", itemFilenames: ["Spidey_01.cbz"])
-        let settings = LeafSettings()
+        let suiteName = "Leaf.BackupManagerTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = LeafSettings(defaults: defaults)
         settings.amoled = true
         settings.pageSlideEnabled = true
         settings.libraryColumns = 3

@@ -375,7 +375,7 @@ final class JellyfinClient: JellyfinProgressTransport, @unchecked Sendable {
         var url = baseURL.appendingPathComponent("Items").appendingPathComponent(item.id)
             .appendingPathComponent("Images/Primary")
         var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        parts?.queryItems = [URLQueryItem(name: "maxWidth", value: String(min(640, max(160, maxWidth)))), URLQueryItem(name: "tag", value: tag)]
+        parts?.queryItems = [URLQueryItem(name: "maxWidth", value: String(min(CoverResolution.maximum, max(160, maxWidth)))), URLQueryItem(name: "tag", value: tag)]
         if let encoded = parts?.url { url = encoded }
         let file = try await download(request(url.absoluteString), limit: 2 * 1024 * 1024)
         defer { try? FileManager.default.removeItem(at: file) }

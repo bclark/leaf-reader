@@ -7,6 +7,7 @@ struct SeriesDetailView: View {
     let seriesName: String
     let volume: String?
     @ObservedObject var library: LibraryStore
+    var linkedFiles: LinkedFilesStore? = nil
     let onDismiss: () -> Void
     @Binding var unreadOnly: Bool
     var searchQuery = ""
@@ -14,14 +15,46 @@ struct SeriesDetailView: View {
 
     @Namespace private var coverTransition
     @State private var openComic: OpenComic?
+    @State private var openLinked: LinkedComic?
+    @State private var seriesError: String?
     @EnvironmentObject private var settings: LeafSettings
     @State private var showAddComicsSheet = false
     @State private var selectedToAdd: Set<URL> = []
     @State private var addSearchQuery = ""
     @State private var comicToRemove: URL?
 
+    private var visibleLinks: [LinkedComic] { availableCopies == nil ? linkedFiles?.comics ?? [] : [] }
+
     private var seriesComics: [URL] {
-        library.comics(inSeries: seriesName).filter { availableCopies?.contains($0) ?? true }
+        library.comics(inSeries: seriesName, linked: visibleLinks).filter { availableCopies?.contains($0) ?? true }
+    }
+
+    private func metadata(for url: URL) -> ComicMetadataRecord? {
+        linkedFiles?.comic(for: url)?.shelfMetadata ?? library.metadata[url.lastPathComponent]
+    }
+
+    private func title(for url: URL) -> String {
+        linkedFiles?.comic(for: url)?.title ?? metadata(for: url)?.title ?? url.deletingPathExtension().lastPathComponent
+    }
+
+    private func open(_ url: URL) {
+        if let comic = linkedFiles?.comic(for: url) { openLinked = comic }
+        else if url.isFileURL { openComic = OpenComic(url: url) }
+    }
+
+    private func mark(_ urls: [URL], read: Bool) {
+        for url in urls {
+            if let comic = linkedFiles?.comic(for: url) { linkedFiles?.markRead(comic, read: read) }
+        }
+        library.markComicsRead(urls: urls.filter(\.isFileURL), read: read)
+    }
+
+    private func updateSeries(_ urls: [URL], name: String?, volume: String?) {
+        do {
+            try linkedFiles?.setSeries(urls: urls, name: name, volume: volume)
+            if let name { library.addToSeries(urls: urls.filter(\.isFileURL), name: name) }
+            else { library.setSeries(urls: urls.filter(\.isFileURL), series: nil, volume: nil) }
+        } catch { seriesError = error.localizedDescription }
     }
 
     private var completedCount: Int {
@@ -39,9 +72,9 @@ struct SeriesDetailView: View {
 
     var heroButtonText: String {
         guard let target = nextUnread else { return String(localized: "START") }
-        let title = (library.metadata[target.lastPathComponent]?.title ?? target.deletingPathExtension().lastPathComponent)
+        let title = title(for: target)
         if allRead {
-            let firstTitle = (seriesComics.first.flatMap { library.metadata[$0.lastPathComponent]?.title ?? $0.deletingPathExtension().lastPathComponent } ?? title)
+            let firstTitle = seriesComics.first.map { self.title(for: $0) } ?? title
             return String(localized: "READ FROM START: \(firstTitle)")
         }
         let started = (ReadingProgress.get(target)?.page ?? 0) > 0
@@ -104,6 +137,12 @@ struct SeriesDetailView: View {
         .comicReaderPresentation(item: $openComic, namespace: coverTransition) {
             library.refresh()
         }
+        .linkedReaderPresentation(item: $openLinked, store: linkedFiles) {
+            library.refresh(backfill: false)
+        }
+        .alert("Could not update linked Files", isPresented: Binding(
+            get: { seriesError != nil }, set: { if !$0 { seriesError = nil } }
+        )) { Button("OK", role: .cancel) {} } message: { Text(seriesError ?? "") }
         .sheet(isPresented: $showAddComicsSheet) {
             addComicsSheet.leafAppearance(settings.theme)
         }
@@ -114,7 +153,7 @@ struct SeriesDetailView: View {
             Button("Cancel", role: .cancel) { comicToRemove = nil }
             Button("Remove", role: .destructive) {
                 if let url = comicToRemove {
-                    library.setSeries(urls: [url], series: nil, volume: nil)
+                    updateSeries([url], name: nil, volume: nil)
                 }
                 comicToRemove = nil
             }
@@ -176,22 +215,32 @@ struct SeriesDetailView: View {
                     ForEach(seriesComics.filter {
                         (!unreadOnly || !ReadingProgress.isCompleted($0)) &&
                         LibraryBrowseState.matches(searchQuery, values: [$0.lastPathComponent,
-                            library.metadata[$0.lastPathComponent]?.title ?? "", seriesName])
+                            title(for: $0), seriesName])
                     }, id: \.self) { url in
                         let isRead = ReadingProgress.isCompleted(url)
                         let lastPage = ReadingProgress.get(url)?.page ?? 0
+                        Group {
+                            if let linkedFiles, let comic = linkedFiles.comic(for: url) {
+                                Button { open(url) } label: {
+                                    LinkedFileCard(comic: comic, store: linkedFiles, columns: cols)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("linked-file-\(comic.id.uuidString)")
+                            } else {
                         SeriesIssueCard(
                             url: url,
-                            metadata: library.metadata[url.lastPathComponent],
+                            metadata: metadata(for: url),
                             progress: ReadingProgress.get(url),
                             columns: cols,
                             coverTransition: coverTransition,
-                            onOpen: { openComic = OpenComic(url: url) },
+                            onOpen: { open(url) },
                             onRemove: { comicToRemove = url }
                         )
+                            }
+                        }
                         .contextMenu {
                             Button {
-                                openComic = OpenComic(url: url)
+                                open(url)
                             } label: {
                                 Label(
                                     lastPage > 0 ? String(localized: "Continue Reading (pg \(lastPage + 1))") : String(localized: "Read Comic"),
@@ -199,7 +248,7 @@ struct SeriesDetailView: View {
                                 )
                             }
                             Button {
-                                library.markComicsRead(urls: [url], read: !isRead)
+                                mark([url], read: !isRead)
                             } label: {
                                 Label(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: "checkmark.circle")
                             }
@@ -261,7 +310,7 @@ struct SeriesDetailView: View {
             if !seriesComics.isEmpty {
                 HStack(spacing: 8) {
                     Button {
-                        library.markComicsRead(urls: seriesComics, read: !allRead)
+                        mark(seriesComics, read: !allRead)
                     } label: {
                         BookStatusBadgeIcon(isAllCompleted: allRead)
                             .frame(width: 36, height: 36)
@@ -281,7 +330,7 @@ struct SeriesDetailView: View {
 
                     if let target = allRead ? seriesComics.first : nextUnread {
                         Button {
-                            openComic = OpenComic(url: target)
+                            open(target)
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: "play.fill")
@@ -322,11 +371,11 @@ struct SeriesDetailView: View {
     private var addComicsSheet: some View {
         NavigationStack {
             let q = addSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            let availableComics = library.comics.filter { url in
+            let availableComics = (library.comics + visibleLinks.map(\.progressURL)).filter { url in
                 guard !seriesComics.contains(url) else { return false }
                 if q.isEmpty { return true }
-                let title = url.deletingPathExtension().lastPathComponent.lowercased()
-                let series = library.metadata[url.lastPathComponent]?.series?.lowercased() ?? ""
+                let title = title(for: url).lowercased()
+                let series = metadata(for: url)?.series?.lowercased() ?? ""
                 return title.contains(q) || series.contains(q)
             }
             ZStack {
@@ -379,13 +428,20 @@ struct SeriesDetailView: View {
                                 else { selectedToAdd.insert(url) }
                             } label: {
                                 HStack(spacing: 12) {
-                                    SmallCoverThumb(url: url)
+                                    if let linkedFiles, let comic = linkedFiles.comic(for: url) {
+                                        LinkedCoverThumb(comic: comic, store: linkedFiles)
+                                    } else {
+                                        SmallCoverThumb(url: url)
+                                    }
                                     VStack(alignment: .leading, spacing: 3) {
-                                        Text(url.deletingPathExtension().lastPathComponent)
+                                        Text(title(for: url))
                                             .leafControlFont(13, weight: 700)
                                             .foregroundColor(Leaf.text)
                                             .lineLimit(1)
-                                        if let s = library.metadata[url.lastPathComponent]?.series, !s.isEmpty {
+                                        if url.scheme == "leaf-files" {
+                                            Text("Files").leafControlFont(11).foregroundColor(Leaf.goldText)
+                                        }
+                                        if let s = metadata(for: url)?.series, !s.isEmpty {
                                             Text("Current: \(s)")
                                                 .leafControlFont(11)
                                                 .foregroundColor(Leaf.secondaryText)
@@ -413,7 +469,7 @@ struct SeriesDetailView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add (\(selectedToAdd.count))") {
-                        library.addToSeries(urls: Array(selectedToAdd), name: seriesName)
+                        updateSeries(Array(selectedToAdd), name: seriesName, volume: volume)
                         showAddComicsSheet = false
                     }
                     .foregroundColor(selectedToAdd.isEmpty ? Leaf.secondaryText : Leaf.goldText)
@@ -421,6 +477,23 @@ struct SeriesDetailView: View {
                 }
             }
         }
+    }
+}
+
+struct LinkedCoverThumb: View {
+    let comic: LinkedComic
+    @ObservedObject var store: LinkedFilesStore
+    var body: some View {
+        Group {
+            if let image = store.cover(for: comic) {
+                LibraryCoverArtwork(image: image)
+            } else {
+                GeneratedCover(title: comic.title, columns: 4)
+            }
+        }
+        .frame(width: 36, height: 50)
+        .clipShape(RoundedCornerShape(cornerRadius: 3))
+        .accessibilityHidden(true)
     }
 }
 
@@ -465,6 +538,7 @@ struct SeriesIssueCard: View {
     var onOpen: (() -> Void)? = nil
     var onRemove: (() -> Void)? = nil
 
+    @State private var coverPixels = 0
     @State private var cover: UIImage?
     @State private var pages = 0
 
@@ -581,8 +655,11 @@ struct SeriesIssueCard: View {
                 .lineLimit(1)
                 .padding(.top, 2)
         }
-        .task(id: covers.revisions(for: [url])) {
-            let loaded = await CoverLoader.load(for: url)
+        .libraryCoverResolution($coverPixels)
+        .task(id: StackCoverRequest(keys: covers.revisions(for: [url]).map { .local($0) }, pixels: coverPixels)) {
+            guard coverPixels > 0 else { return }
+            let loaded = await CoverLoader.load(for: url, maxPixel: coverPixels)
+            guard !Task.isCancelled else { return }
             cover = loaded.cover
             pages = loaded.pageCount
             ReadingProgress.resyncTotalIfNeeded(url, actualTotal: loaded.pageCount)

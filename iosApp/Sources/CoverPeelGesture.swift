@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// A card owns downward peeling; its enclosing scroll view owns other drag directions.
+/// Quick drags scroll. Only a downward drag after the platform hold interval peels.
 /// SwiftUI simultaneousGesture no longer opts into ancestor scroll gestures on newer SDKs.
 struct CoverPeelGesture: UIViewRepresentable {
     struct Value {
@@ -15,7 +15,7 @@ struct CoverPeelGesture: UIViewRepresentable {
 
     func makeUIView(context: Context) -> GestureView {
         let view = GestureView()
-        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handle(_:)))
+        let pan = HeldPeelPan(target: context.coordinator, action: #selector(Coordinator.handle(_:)))
         pan.maximumNumberOfTouches = 1
         pan.delegate = context.coordinator
         view.pan = pan
@@ -25,6 +25,19 @@ struct CoverPeelGesture: UIViewRepresentable {
 
     func updateUIView(_ view: GestureView, context: Context) {
         context.coordinator.parent = self
+    }
+
+    /// Observe the touch start without recognizing a competing long press. This lets the
+    /// existing native context menu keep a stationary hold, while a held drag can peel.
+    final class HeldPeelPan: UIPanGestureRecognizer {
+        private var beganAt: TimeInterval = 0
+        private let holdDuration = UILongPressGestureRecognizer().minimumPressDuration
+        var isArmed: Bool { ProcessInfo.processInfo.systemUptime - beganAt >= holdDuration }
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            beganAt = ProcessInfo.processInfo.systemUptime
+            super.touchesBegan(touches, with: event)
+        }
+
     }
 
     final class GestureView: UIView {
@@ -47,8 +60,20 @@ struct CoverPeelGesture: UIViewRepresentable {
         var parent: CoverPeelGesture
         init(_ parent: CoverPeelGesture) { self.parent = parent }
 
+        func gestureRecognizer(_ recognizer: UIGestureRecognizer,
+                               shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+            // Window-level system gestures keep their own priority.
+            guard let otherView = other.view, !(otherView is UIWindow) else { return false }
+            // Competing cover taps/context presses wait for the directional pan to fail.
+            // Keep the system edge-back gesture independent and never order peer peels.
+            let priority = recognizer is HeldPeelPan && !(other is HeldPeelPan)
+                && !(other is UIScreenEdgePanGestureRecognizer)
+            return priority
+        }
+
         func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
-            guard let pan = recognizer as? UIPanGestureRecognizer else { return false }
+            guard let pan = recognizer as? HeldPeelPan else { return false }
+            guard pan.isArmed else { return false }
             let velocity = pan.velocity(in: pan.view)
             return velocity.y > 0 && velocity.y > abs(velocity.x)
         }

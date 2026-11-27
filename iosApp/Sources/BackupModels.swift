@@ -39,6 +39,9 @@ struct BackupSettings: Codable, Equatable {
     var portraitSpread: Bool
     var landscapeSpread: Bool
     var libraryColumns: Int
+    var libraryShowTitles: Bool?
+    var libraryShowDetails: Bool?
+    var libraryShowReadingIndicators: Bool?
 
     init(
         defaultRightToLeft: Bool = false,
@@ -47,7 +50,10 @@ struct BackupSettings: Codable, Equatable {
         pageFitMode: String = "FIT_PAGE",
         portraitSpread: Bool = false,
         landscapeSpread: Bool = false,
-        libraryColumns: Int = 2
+        libraryColumns: Int = 2,
+        libraryShowTitles: Bool? = nil,
+        libraryShowDetails: Bool? = nil,
+        libraryShowReadingIndicators: Bool? = nil
     ) {
         self.defaultRightToLeft = defaultRightToLeft
         self.amoledTheme = amoledTheme
@@ -56,6 +62,9 @@ struct BackupSettings: Codable, Equatable {
         self.portraitSpread = portraitSpread
         self.landscapeSpread = landscapeSpread
         self.libraryColumns = libraryColumns
+        self.libraryShowTitles = libraryShowTitles
+        self.libraryShowDetails = libraryShowDetails
+        self.libraryShowReadingIndicators = libraryShowReadingIndicators
     }
 }
 

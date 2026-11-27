@@ -46,7 +46,7 @@ final class LibraryHeaderUITests: XCTestCase {
         add(attachment)
     }
 
-    func testLibraryPrimaryActionReservesSpaceAndKeepsCreateListReachable() {
+    func testLibraryPrimaryActionOverlaysCoversAndKeepsFinalListReachable() {
         continueAfterFailure = false
         for (theme, largeText) in [("light", false), ("dark", true)] {
             let app = launch(theme: theme, largeText: largeText)
@@ -65,15 +65,18 @@ final class LibraryHeaderUITests: XCTestCase {
             capture("library-primary-action-" + theme, app: app)
             XCTAssertGreaterThanOrEqual(action.frame.height, 44)
             let content = app.scrollViews.firstMatch
-            XCTAssertGreaterThanOrEqual(action.frame.minY, content.frame.maxY - 1,
-                "The primary action must have its own space instead of covering library content")
+            XCTAssertLessThan(action.frame.maxY, content.frame.maxY + 1)
+            XCTAssertLessThan(action.frame.minY, content.frame.maxY - 44,
+                "Covers must continue behind the floating primary action")
             let addTile = app.buttons["CREATE LIST"]
             for _ in 0..<12 {
-                if addTile.exists && addTile.isHittable && addTile.frame.maxY <= content.frame.maxY { break }
-                scrollUp(app)
+                if addTile.exists && addTile.isHittable && addTile.frame.maxY <= action.frame.minY { break }
+                // The trailing overlay can occupy the old drag start at accessibility sizes.
+                scrollUp(app, column: 0.02)
             }
             XCTAssertTrue(addTile.exists && addTile.isHittable)
-            XCTAssertLessThanOrEqual(addTile.frame.maxY, content.frame.maxY)
+            XCTAssertLessThanOrEqual(addTile.frame.maxY, action.frame.minY,
+                "The final item must scroll clear of the floating action")
             capture("library-primary-action-final-item-" + theme, app: app)
             action.tap()
             let name = app.textFields["library.newListName"]
@@ -261,7 +264,7 @@ final class LibraryHeaderUITests: XCTestCase {
                 let frame = card.frame.intersection(app.scrollViews.firstMatch.frame)
                 let origin = app.coordinate(withNormalizedOffset: .zero)
                 origin.withOffset(CGVector(dx: frame.midX, dy: frame.minY + frame.height * 0.15))
-                    .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: frame.midX, dy: frame.minY + frame.height * 0.85)))
+                    .press(forDuration: 0.65, thenDragTo: origin.withOffset(CGVector(dx: frame.midX, dy: frame.minY + frame.height * 0.85)))
                 if index == 0 { XCTAssertNotEqual(card.value as? String, initial) }
             }
             XCTAssertEqual(card.value as? String, initial, "A full downward-peel cycle must return to its starting cover")
@@ -304,10 +307,12 @@ final class LibraryHeaderUITests: XCTestCase {
         capture("library-scrolled-return", app: app)
         let add = app.buttons["Add comics"]
         XCTAssertTrue(add.exists && add.isHittable)
-        XCTAssertGreaterThanOrEqual(add.frame.minY, app.scrollViews.firstMatch.frame.maxY - 1,
-            "The reserved Add Comics band must stay outside scrolling covers")
+        XCTAssertLessThan(add.frame.minY, app.scrollViews.firstMatch.frame.maxY - 44,
+            "The floating Add comics action must overlay the scrollable grid")
         add.tap()
-        XCTAssertTrue(app.buttons["From Files"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Copy from Files"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Link from Files"].exists)
+        XCTAssertFalse(app.buttons["Read from Files"].exists)
         XCTAssertTrue(app.buttons["From SMB Drive"].exists)
         XCTAssertTrue(app.buttons["From Jellyfin"].exists)
         capture("source-chooser", app: app)

@@ -36,12 +36,17 @@ final class JellyfinCatalogueModel: ObservableObject {
     private var folders: [String: String] = [:]
     private var collectionMembers: [String: [JellyfinBook]] = [:]
     private var lastRefresh: Date?
+    @Published private var refreshedAt: Date?
     private var generation = UUID()
     private var scope: JellyfinConnection?
     /// A visible Continue item must belong to the same authenticated session as its client.
     func isCurrent(for connection: JellyfinConnection?) -> Bool {
         guard let connection else { return false }
         return scope == connection
+    }
+
+    func lastCatalogueRefresh(for connection: JellyfinConnection?) -> Date? {
+        isCurrent(for: connection) ? refreshedAt : nil
     }
 
     private var offset = 0
@@ -67,13 +72,14 @@ final class JellyfinCatalogueModel: ObservableObject {
         var removedBooks: [JellyfinBook]? = nil
         var folders: [String: String]? = nil
         var complete: Bool? = nil
+        var refreshedAt: Date? = nil
         var collections: [JellyfinBook]? = nil
         var collectionMembers: [String: [JellyfinBook]]? = nil
 
         func sanitized() -> Snapshot {
             Snapshot(libraryID: libraryID, books: books.map(\.withoutServerPath), offset: offset,
                 hasMore: hasMore, removedBooks: removedBooks?.map(\.withoutServerPath), folders: folders,
-                complete: complete, collections: collections?.map(\.withoutServerPath),
+                complete: complete, refreshedAt: refreshedAt, collections: collections?.map(\.withoutServerPath),
                 collectionMembers: collectionMembers?.mapValues { $0.map(\.withoutServerPath) })
         }
     }
@@ -87,7 +93,7 @@ final class JellyfinCatalogueModel: ObservableObject {
         searchGeneration = UUID()
         searchBooks = []; searchQuery = ""; searchMessage = nil; searching = false; searchHasMore = false
         collectionMembers = [:]
-        folders = [:]; indexComplete = false; lastRefresh = nil
+        folders = [:]; indexComplete = false; lastRefresh = nil; refreshedAt = nil
         scope = nil
         books = []; removedBooks = []; collections = []; libraries = []; libraryID = nil
         offset = 0; loading = false; hasMore = false; message = nil
@@ -103,7 +109,7 @@ final class JellyfinCatalogueModel: ObservableObject {
         let saved = await restoreSnapshot(key: key(connection))
         guard generation == token, browser.connection == connection, !Task.isCancelled else { return }
         if let saved {
-            libraryID = saved.libraryID; books = saved.books; removedBooks = saved.removedBooks ?? []
+            libraryID = saved.libraryID; refreshedAt = saved.refreshedAt; books = saved.books; removedBooks = saved.removedBooks ?? []
             offset = saved.offset; hasMore = saved.hasMore; fromCache = true
             folders = saved.folders ?? [:]; indexComplete = saved.complete ?? !saved.hasMore
             collections = saved.collections ?? []; collectionMembers = saved.collectionMembers ?? [:]
@@ -118,7 +124,7 @@ final class JellyfinCatalogueModel: ObservableObject {
             try validate(token, connection, browser)
             libraries = page.items.filter { $0.collectionType == "books" || $0.collectionType == nil }
             if let selected = libraryID, !libraries.contains(where: { $0.id == selected }) {
-                libraryID = nil; books = []; removedBooks = []; collections = []; collectionMembers = [:]; folders = [:]; offset = 0; hasMore = false; fromCache = false
+                libraryID = nil; books = []; removedBooks = []; collections = []; collectionMembers = [:]; folders = [:]; offset = 0; hasMore = false; fromCache = false; refreshedAt = nil
             }
             if libraryID == nil, libraries.count == 1 { libraryID = libraries.first?.id }
             if libraryID != nil { try await index(browser: browser, token: token) }
@@ -131,12 +137,13 @@ final class JellyfinCatalogueModel: ObservableObject {
         generation = UUID()
         loading = false
         searchGeneration = UUID(); searchBooks = []; searchQuery = ""; searching = false
-        libraryID = id; books = []; removedBooks = []; collections = []; collectionMembers = [:]; folders = [:]; offset = 0; hasMore = false; indexComplete = false
+        libraryID = id; refreshedAt = nil; books = []; removedBooks = []; collections = []; collectionMembers = [:]; folders = [:]; offset = 0; hasMore = false; indexComplete = false
         let token = generation
         let connection = scope
         let saved = if let connection { await restoreSnapshot(key: key(connection) + ".library." + id) } else { nil as Snapshot? }
         guard generation == token, connection == browser.connection, !Task.isCancelled else { return }
         if let saved {
+            refreshedAt = saved.libraryID == id ? saved.refreshedAt : nil
             books = saved.books; removedBooks = saved.removedBooks ?? []; folders = saved.folders ?? [:]; indexComplete = saved.complete ?? false
             collections = saved.collections ?? []; collectionMembers = saved.collectionMembers ?? [:]
             fromCache = true
@@ -159,9 +166,9 @@ final class JellyfinCatalogueModel: ObservableObject {
         await refresh(browser: browser)
     }
 
-    private func saveSnapshot(connection: JellyfinConnection, libraryID: String) async throws {
+    private func saveSnapshot(connection: JellyfinConnection, libraryID: String, completedRefresh: Date? = nil) async throws {
         let snapshot = Snapshot(libraryID: libraryID, books: books, offset: offset, hasMore: hasMore,
-            removedBooks: removedBooks, folders: folders, complete: indexComplete,
+            removedBooks: removedBooks, folders: folders, complete: indexComplete, refreshedAt: completedRefresh ?? refreshedAt,
             collections: collections, collectionMembers: collectionMembers)
         let keys = [key(connection), key(connection) + ".library." + libraryID]
         try await snapshots.write(keys: keys) { try JSONEncoder().encode(snapshot.sanitized()) }
@@ -221,8 +228,10 @@ final class JellyfinCatalogueModel: ObservableObject {
                 books = fresh
                 indexComplete = true
             }
-            try await saveSnapshot(connection: connection, libraryID: libraryID)
+            let completedRefresh = hasMore ? nil : Date()
+            try await saveSnapshot(connection: connection, libraryID: libraryID, completedRefresh: completedRefresh)
             try validate(token, connection, browser)
+            if let completedRefresh { refreshedAt = completedRefresh }
             await Task.yield()
         } while hasMore
     }

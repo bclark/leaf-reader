@@ -22,7 +22,10 @@ enum BackupManager {
             pageFitMode: settings.pageFitMode == .fitWidth ? "FIT_WIDTH" : "FIT_PAGE",
             portraitSpread: settings.portraitSpread,
             landscapeSpread: settings.landscapeSpread,
-            libraryColumns: settings.libraryColumns
+            libraryColumns: settings.libraryColumns,
+            libraryShowTitles: settings.libraryShowTitles,
+            libraryShowDetails: settings.libraryShowDetails,
+            libraryShowReadingIndicators: settings.libraryShowReadingIndicators
         )
 
         var backupComics: [BackupComic] = []
@@ -63,7 +66,8 @@ enum BackupManager {
         var backupLists: [BackupReadingList] = []
         for list in readingLists {
             var items: [BackupReadingListItem] = []
-            for (idx, filename) in list.itemFilenames.enumerated() {
+            // Linked Files permissions and identifiers are device-local and cannot be restored.
+            for (idx, filename) in list.itemFilenames.filter({ LinkedComic.listID($0) == nil }).enumerated() {
                 if let remote = JellyfinListReference(token: filename) {
                     var item = BackupReadingListItem(comicTitle: "", sortOrder: idx)
                     item.serverId = remote.serverID; item.userId = remote.userID; item.itemId = remote.itemID
@@ -323,6 +327,9 @@ enum BackupManager {
 
         // 3. Restore Preferences / Settings (if available)
         if let bSettings = payload.settings {
+            settings.libraryShowTitles = bSettings.libraryShowTitles ?? true
+            settings.libraryShowDetails = bSettings.libraryShowDetails ?? false
+            settings.libraryShowReadingIndicators = bSettings.libraryShowReadingIndicators ?? true
             settings.amoled = bSettings.amoledTheme
             settings.pageSlideEnabled = bSettings.pageSlideEnabled
             settings.pageFitMode = (bSettings.pageFitMode == "FIT_WIDTH") ? .fitWidth : .fitPage

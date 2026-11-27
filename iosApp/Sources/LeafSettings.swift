@@ -61,8 +61,21 @@ final class LeafSettings: ObservableObject {
         didSet { defaults.set(libraryColumns, forKey: Self.libraryColumnsKey) }
     }
 
+    @Published var libraryShowTitles: Bool {
+        didSet { defaults.set(libraryShowTitles, forKey: "leaf.libraryShowTitles") }
+    }
+    @Published var libraryShowDetails: Bool {
+        didSet { defaults.set(libraryShowDetails, forKey: "leaf.libraryShowDetails") }
+    }
+    @Published var libraryShowReadingIndicators: Bool {
+        didSet { defaults.set(libraryShowReadingIndicators, forKey: "leaf.libraryShowReadingIndicators") }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        libraryShowTitles = defaults.object(forKey: "leaf.libraryShowTitles") as? Bool ?? true
+        libraryShowDetails = defaults.object(forKey: "leaf.libraryShowDetails") as? Bool ?? false
+        libraryShowReadingIndicators = defaults.object(forKey: "leaf.libraryShowReadingIndicators") as? Bool ?? true
         let savedTheme = defaults.string(forKey: "leaf.appTheme").flatMap(AppTheme.init(rawValue:))
         let oldAmoled = defaults.object(forKey: Self.amoledKey) != nil
             ? defaults.bool(forKey: Self.amoledKey) : defaults.bool(forKey: Self.legacyAmoledKey)

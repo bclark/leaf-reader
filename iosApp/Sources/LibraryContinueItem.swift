@@ -14,6 +14,7 @@ struct LibraryContinueItem: Identifiable {
     let title: String
     let url: URL?
     let book: JellyfinBook?
+    var linked: LinkedComic? = nil
     let page: Int
     let total: Int?
     let openedAt: Double
@@ -21,7 +22,7 @@ struct LibraryContinueItem: Identifiable {
     var fraction: Double? { total.map { min(max(Double(page + 1) / Double($0), 0), 1) } }
 
     static func ranked(local: [Local], remote: [JellyfinBook], downloadedIDs: Set<String>,
-                       remoteAvailable: Bool) -> [Self] {
+                       remoteAvailable: Bool, linked: [LinkedComic] = []) -> [Self] {
         var result = local.compactMap { entry -> Self? in
             let progress = entry.progress
             guard progress.total > 0, progress.page >= 0, progress.page < progress.total,
@@ -29,6 +30,13 @@ struct LibraryContinueItem: Identifiable {
             return Self(id: "local:" + entry.url.lastPathComponent,
                 title: ComicMetadataStore.displayFilename(for: entry.url), url: entry.url, book: nil,
                 page: progress.page, total: progress.total, openedAt: entry.openedAt)
+        }
+        result += linked.compactMap { comic -> Self? in
+            let key = comic.progressURL
+            guard let progress = ReadingProgress.get(key), progress.total > 0, progress.page >= 0,
+                  progress.page < progress.total, !progress.isCompleted else { return nil }
+            return Self(id: comic.listToken, title: comic.title, url: nil, book: nil, linked: comic,
+                        page: progress.page, total: progress.total, openedAt: ReadingProgress.openedAt(key))
         }
         if remoteAvailable {
             var seen = downloadedIDs

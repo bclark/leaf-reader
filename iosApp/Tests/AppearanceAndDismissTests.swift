@@ -54,6 +54,55 @@ struct AppearanceAndDismissTests {
         #expect(pixel[1] > pixel[2])
     }
 
+    @Test func unreadSingleOwnedSeriesCoverPreservesTopAndBottomArtworkWithoutEmptyTrack() throws {
+        let url = URL(fileURLWithPath: "/fixture/Synthetic.cbz")
+        func card(issues: Int, progress: Double) -> ComicStackCard {
+            ComicStackCard(seriesName: "Fixture", volume: nil, issues: [url],
+                           totalIssues: issues, unreadIssues: issues, progressFraction: progress,
+                           onOpenSeries: {})
+        }
+        let single = card(issues: 1, progress: 0)
+        #expect(single.keepsWholeCover)
+        #expect(LibraryReadingState.local(nil) == .unread)
+        let multiple = card(issues: 2, progress: 0)
+        #expect(!multiple.keepsWholeCover)
+
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 140, height: 400)).image { ctx in
+            UIColor.blue.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: 140, height: 400))
+            UIColor.red.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: 140, height: 32))
+            UIColor.green.setFill()
+            ctx.fill(CGRect(x: 0, y: 368, width: 140, height: 32))
+        }
+        let renderer = ImageRenderer(content:
+            LibraryCoverArtwork(image: image, contentMode: single.keepsWholeCover ? .fit : .fill)
+                .frame(width: 140, height: 200)
+                .background(.white)
+        )
+        renderer.scale = 1
+        let output = try #require(renderer.cgImage)
+        #expect(output.width == 140 && output.height == 200)
+
+        func sample(x: Int, y: Int) throws -> [UInt8] {
+            let pixel = try #require(output.cropping(to: CGRect(x: CGFloat(x), y: CGFloat(y), width: 1, height: 1)))
+            var bytes = [UInt8](repeating: 0, count: 4)
+            try bytes.withUnsafeMutableBytes { raw in
+                let context = try #require(CGContext(data: raw.baseAddress, width: 1, height: 1,
+                    bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            }
+            return bytes
+        }
+        let top = try sample(x: 70, y: 5)
+        let bottom = try sample(x: 70, y: 194)
+        let neutral = try sample(x: 15, y: 100)
+        #expect(top[0] > 200 && top[1] < 60 && top[2] < 60)
+        #expect(bottom[1] > 200 && bottom[0] < 60 && bottom[2] < 60)
+        #expect(neutral.prefix(3).allSatisfy { $0 > 230 })
+    }
+
     @Test func nativeAppearanceCanClearForcedModeWithoutDismissing() async throws {
         let host = UIHostingController(rootView: Color.clear.leafAppearance(.dark))
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
