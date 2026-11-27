@@ -176,7 +176,9 @@ internal fun JellyfinDetailScreen(
                                             TextButton(onClick = { onCreator(person) },
                                                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                                                     .semantics { contentDescription = label },
-                                                contentPadding = PaddingValues(vertical = 8.dp),
+                                                // The default pill clips edge-aligned text in taller, multiline rows.
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(8.dp),
                                                 colors = ButtonDefaults.textButtonColors(
                                                     contentColor = MaterialTheme.colorScheme.onSurface)) {
                                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -185,6 +187,7 @@ internal fun JellyfinDetailScreen(
                                                     Text(person.name, style = MaterialTheme.typography.titleLarge,
                                                         textDecoration = TextDecoration.Underline)
                                                 }
+                                                Spacer(Modifier.width(8.dp))
                                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, null,
                                                     modifier = Modifier.size(24.dp).rotate(180f))
                                             }
@@ -396,6 +399,7 @@ internal fun creatorRole(person: JellyfinPerson): String = when (
 @Preview(name = "Detail • Phone dark", widthDp = 390, heightDp = 844,
     uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES)
 @Preview(name = "Detail • Tablet light", widthDp = 840, heightDp = 1000, uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO)
+@Preview(name = "Detail • Large creator text", widthDp = 390, heightDp = 844, fontScale = 2f)
 @Composable
 internal fun JellyfinDetailPreview() {
     ComicReaderTheme(mode = ThemeMode.SYSTEM) {
@@ -408,7 +412,8 @@ internal fun JellyfinDetailPreview() {
             JellyfinDetailState(item, JellyfinItemIdentity("fixture", "fixture", item.id), false,
                 JellyfinItemDetails(JellyfinItemIdentity("fixture", "fixture", item.id), item,
                     overview = "A synthetic preview: a cartographer follows a forgotten trail through a forest of stories.",
-                    people = listOf(JellyfinPerson("A. Example", "Writer"), JellyfinPerson("B. Example", "Artist")),
+                    people = listOf(JellyfinPerson("Alexandria Fernández Example", "Writer"),
+                        JellyfinPerson("B. Example", "Artist")),
                     genres = listOf("Adventure"), indexNumber = 1, playedPercentage = 25.0)),
             {}, false, null, null, {}, {}, {}, {},
             cover = { _, modifier -> JellyfinCoverImage(syntheticCover, modifier) },
