@@ -271,9 +271,10 @@ final class LibraryStore: ObservableObject {
         }()
 
         if recentlyAdded {
-            // A Jellyfin copy's creation date is its download date, not its addition date.
+            // A Jellyfin copy's creation date is its download date, not its addition date,
+            // and a comic linked from Files has no recorded addition date.
             let remoteCopies = ReadingListStore.remoteCopyFilenames()
-            let local = filteredComics.filter { !remoteCopies.contains($0.lastPathComponent) }
+            let local = filteredComics.filter { $0.isFileURL && !remoteCopies.contains($0.lastPathComponent) }
             return Self.newestFirst(local) { url in
                 (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate
             }.map { url in

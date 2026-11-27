@@ -64,6 +64,7 @@ struct LocalizationTests {
         #expect(french.localizedString(forKey: "Library appearance", value: nil, table: nil) == "Apparence de la bibliothèque")
         #expect(french.localizedString(forKey: "Link from Files", value: nil, table: nil) == "Lier depuis Fichiers")
         #expect(french.localizedString(forKey: "Files", value: nil, table: nil) == "Fichiers")
+        #expect(french.localizedString(forKey: "Recently Added (local comics)", value: nil, table: nil) == "Ajouts récents (BD locales)")
         let permission = french.localizedString(forKey: "NSLocalNetworkUsageDescription", value: nil, table: "InfoPlist")
         #expect(permission != "NSLocalNetworkUsageDescription")
         #expect(permission.contains("SMB"))

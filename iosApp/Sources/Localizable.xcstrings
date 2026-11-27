@@ -9052,6 +9052,12 @@
             "state": "translated",
             "value": "No hay cómics locales para ordenar por fecha de adición."
           }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "machine_translated",
+            "value": "Aucune BD locale à trier par date d’ajout."
+          }
         }
       }
     },
@@ -9062,6 +9068,12 @@
             "state": "translated",
             "value": "Agregados recientemente (cómics locales)"
           }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "machine_translated",
+            "value": "Ajouts récents (BD locales)"
+          }
         }
       }
     },
@@ -9071,6 +9083,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mostrar el orden predeterminado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "machine_translated",
+            "value": "Afficher l’ordre par défaut"
           }
         }
       }

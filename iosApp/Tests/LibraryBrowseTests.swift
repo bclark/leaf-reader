@@ -42,7 +42,7 @@ struct LibraryBrowseTests {
         #expect(sorted.map(\.lastPathComponent) == ["A.pdf", "B.pdf", "C.pdf", "D.pdf", "E.pdf"])
     }
 
-    @Test func recentlyAddedUsesManagedCopiesButNotJellyfinDownloadDates() throws {
+    @Test func recentlyAddedUsesManagedCopiesButNotJellyfinOrLinkedFiles() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let original = root.appendingPathComponent(UUID().uuidString + ".pdf")
@@ -65,7 +65,8 @@ struct LibraryBrowseTests {
         let ref = try #require(JellyfinListReference(serverID: "server", userID: "user", itemID: UUID().uuidString))
         ReadingListStore.linkRemote(ref, filename: download.lastPathComponent)
         let library = LibraryStore(directory: root)
-        let items = library.libraryItems(filter: .all, searchQuery: "", recentlyAdded: true)
+        let linked = LinkedComic(id: UUID(), bookmark: Data(), title: "Linked", pageCount: 2, fingerprint: "linked")
+        let items = library.libraryItems(filter: .all, searchQuery: "", linked: [linked], recentlyAdded: true)
         #expect(items.compactMap { item -> String? in
             if case .singleComic(let url, _) = item { return url.lastPathComponent }
             return nil
