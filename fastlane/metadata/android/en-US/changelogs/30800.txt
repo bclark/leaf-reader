@@ -1,0 +1,5 @@
+A cleaner shelf and a steadier flip.
+• Series cards now focus on cover and title, with issue counters on the artwork.
+• Find catalogue freshness beneath your Jellyfin connection in Settings.
+• Fixed the outgoing-cover flash when peeling through a Series.
+• Long server addresses wrap beside a readable connection badge.
