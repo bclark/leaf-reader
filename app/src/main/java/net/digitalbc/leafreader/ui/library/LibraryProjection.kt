@@ -8,6 +8,7 @@ internal data class LibraryProjectionInput(
     val allComics: List<ComicEntity>, val lists: List<ReadingListEntity>,
     val allListItems: List<ReadingListItemEntity>, val query: String, val filter: LibraryFilter,
     val unreadOnly: Boolean = false, val readableIds: Set<Long> = emptySet(),
+    val recentlyAdded: Boolean = false,
 )
 
 /** Pure row preparation, executed on Default by LibraryViewModel, never by a lazy item. */
@@ -20,6 +21,16 @@ internal fun projectLibrary(input: LibraryProjectionInput): List<LibraryItem> = 
                 it.title.contains(q, ignoreCase = true) ||
                 (it.series?.contains(q, ignoreCase = true) == true)
             }
+        }
+
+        if (recentlyAdded) {
+            return filteredComics.asSequence()
+                // A Jellyfin copy's local timestamp is its download date, not its addition date.
+                .filter { it.source != "jellyfin" && (!unreadOnly || it.isUnread) }
+                .sortedWith(compareByDescending<ComicEntity> { it.dateAdded.coerceAtLeast(0L) }
+                    .thenBy { it.id })
+                .map { LibraryItem.SingleComic(it) }
+                .toList()
         }
 
         val itemsByList = allListItems.groupBy { it.listId }

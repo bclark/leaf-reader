@@ -32,4 +32,21 @@ class LibraryProjectionTest {
         assertEquals(series, projectLibrary(input.copy(filter = LibraryFilter.SERIES)).single())
         assertEquals(1, projectLibrary(input.copy(filter = LibraryFilter.READING_LISTS)).size)
     }
+    @Test fun recentlyAddedUsesImportDateWithoutChangingDefaultOrIncludingDownloads() {
+        val rows = listOf(
+            comic(5, 0).copy(dateAdded = 0, lastOpened = 600),
+            comic(4, 19).copy(dateAdded = 50, lastOpened = 100),
+            comic(2, 0).copy(dateAdded = 50, lastOpened = 0, source = "smb"),
+            comic(3, 0).copy(dateAdded = 90, lastOpened = 0, source = "jellyfin"),
+            comic(1, 0).copy(dateAdded = 5, lastOpened = 900),
+        )
+        val input = LibraryProjectionInput(rows, emptyList(), emptyList(), "", LibraryFilter.ALL)
+        fun ids(input: LibraryProjectionInput) =
+            projectLibrary(input).filterIsInstance<LibraryItem.SingleComic>().map { it.comic.id }
+
+        assertEquals(listOf(5L, 4L, 2L, 3L, 1L), ids(input))
+        assertEquals(listOf(2L, 4L, 1L, 5L), ids(input.copy(recentlyAdded = true)))
+        assertEquals(listOf(2L, 1L, 5L), ids(input.copy(recentlyAdded = true, unreadOnly = true)))
+        assertEquals(listOf(1L), ids(input.copy(recentlyAdded = true, query = "Book 1")))
+    }
 }

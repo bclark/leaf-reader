@@ -134,6 +134,13 @@ public enum ReadingListStore {
         return links.first(where: { $0.value == filename })?.key ?? filename
     }
 
+    static func remoteCopyFilenames() -> Set<String> {
+        lock.lock()
+        defer { lock.unlock() }
+        let links = defaults.dictionary(forKey: "leaf.readingLists.remoteCopies.v1") as? [String: String] ?? [:]
+        return Set(links.values)
+    }
+
     static func localFilename(for member: String) -> String? {
         guard LinkedComic.listID(member) == nil else { return nil }
         guard JellyfinListReference(token: member) != nil else { return member }

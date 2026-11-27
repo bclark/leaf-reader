@@ -48,7 +48,7 @@ struct LibraryView: View {
     @State private var showRemoteDetail = false
 
     private var showsRemote: Bool {
-        jellyfin.connection != nil && !downloadedOnly
+        jellyfin.connection != nil && !downloadedOnly && !browse.recentlyAdded
     }
 
     private var selectedFilter: LibraryFilter { browse.view.filter }
@@ -152,7 +152,7 @@ struct LibraryView: View {
     private var currentItems: [LibraryItem] {
         let items = library.libraryItems(filter: selectedFilter, searchQuery: searchQuery,
             unreadOnly: browse.unreadOnly, available: downloadedOnly ? readableOfflineComics : nil,
-            linked: isEditMode ? [] : linkedFiles.comics)
+            linked: isEditMode ? [] : linkedFiles.comics, recentlyAdded: browse.recentlyAdded)
         guard showsRemote, selectedFilter != .readingLists else { return items }
         // Preserve the existing Jellyfin catalogue while keeping Files comics in the normal card grid.
         return items.filter {
@@ -511,6 +511,13 @@ struct LibraryView: View {
                     Menu {
                         Button("Select comics") { isEditMode = true; selectedComics = [] }
                             .disabled(library.comics.isEmpty || showsRemote || isEditMode)
+                        if !isEditMode {
+                            if browse.recentlyAdded {
+                                Button("Show default order") { browse.toggleRecentlyAdded() }
+                            } else {
+                                Button("Recently Added (local comics)") { browse.toggleRecentlyAdded() }
+                            }
+                        }
                         Divider()
                         Button("Library appearance") { showLibraryAppearance = true }
                         Button("Settings and more") { showMenu = true }
@@ -710,7 +717,19 @@ struct LibraryView: View {
                     }
                     if !isEditMode && !isSearchOpen { continueSection(wide: UIDevice.current.userInterfaceIdiom == .pad && width >= 600) }
                     if linkingFile { ProgressView("Linking comic from Files…").padding() }
-                    if jellyfin.connection != nil {
+                    if browse.recentlyAdded && !isEditMode {
+                        Button {
+                            browse.toggleRecentlyAdded()
+                        } label: {
+                            Label("Recently Added (local comics)", systemImage: "xmark.circle")
+                                .frame(minHeight: 44)
+                        }
+                        .padding(.horizontal, 18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityHint("Show default order")
+                        .accessibilityIdentifier("library.recentlyAdded")
+                    }
+                    if jellyfin.connection != nil && !browse.recentlyAdded {
                         JellyfinCatalogueStatus(catalogue: catalogue, browser: jellyfin,
                             connect: { showJellyfinBrowser = true })
                     }
@@ -939,7 +958,7 @@ struct LibraryView: View {
             }
             .coordinateSpace(name: "library.scroll")
             .onPreferenceChange(LibraryScrollPositions.self) { positions in
-                guard restoringView != browse.view else { return }
+                guard !browse.recentlyAdded, restoringView != browse.view else { return }
                 let prefix = browse.view.rawValue + ":"
                 if let first = positions.filter({ $0.key.hasPrefix(prefix) }).min(by: { abs($0.value.minY) < abs($1.value.minY) }) {
                     // Align the same points in the item and viewport to keep its partial offset.
@@ -949,17 +968,27 @@ struct LibraryView: View {
                 }
             }
             .onChange(of: browse.view) { view in
+                guard !browse.recentlyAdded else { return }
                 let target = pendingScrollTarget.flatMap { $0.id.hasPrefix(view.rawValue + ":") ? $0 : nil }
                 ?? scrollPositions[view] ?? (view.rawValue + ":top", .top)
                 Task { @MainActor in
                     await Task.yield()
-                    guard browse.view == view else { return }
+                    guard browse.view == view, !browse.recentlyAdded else { return }
                     proxy.scrollTo(target.id, anchor: target.anchor)
                     await Task.yield()
                     if browse.view == view { restoringView = nil }
                 }
             }
-            .refreshable { await catalogue.refresh(browser: jellyfin) }
+            .onChange(of: browse.recentlyAdded) { active in
+                let view = browse.view
+                let target = (active ? nil : scrollPositions[view]) ?? (view.rawValue + ":top", .top)
+                Task { @MainActor in
+                    await Task.yield()
+                    guard browse.view == view, browse.recentlyAdded == active else { return }
+                    proxy.scrollTo(target.id, anchor: target.anchor)
+                }
+            }
+            .refreshable { if !browse.recentlyAdded { await catalogue.refresh(browser: jellyfin) } }
         }
     }
 
@@ -1081,6 +1110,7 @@ struct LibraryView: View {
             return String(localized: "No readable local copies yet. Add comics from Files or SMB, or download a Jellyfin comic.")
         }
         if browse.unreadOnly { return String(localized: "No unread comics match this view.") }
+        if browse.recentlyAdded { return String(localized: "No local comics to sort by date added.") }
         switch selectedFilter {
         case .all: return String(localized: "No comics yet. Tap LOAD COMIC to add a CBZ, CBR, or PDF.")
         case .series: return String(localized: "No series stacks yet. Group comics by setting a Series Name.")

@@ -106,10 +106,13 @@ final class ComicImportPipeline: @unchecked Sendable {
         }
         try Self.validate(prepared, cancellation: cancellation)
         var destination = directory.appendingPathComponent(filename)
+        var previousCreationDate: Date?
         if fm.fileExists(atPath: destination.path) {
             switch collision {
             case .cancel: throw ComicImportError.collision
-            case .replace: break
+            case .replace:
+                // Replacing the same library entry is not a new addition.
+                previousCreationDate = (try? fm.attributesOfItem(atPath: destination.path))?[.creationDate] as? Date
             case .keepBoth:
                 var suffix = 2
                 repeat {
@@ -123,6 +126,9 @@ final class ComicImportPipeline: @unchecked Sendable {
         if namedPrepared != prepared { try fm.moveItem(at: prepared, to: namedPrepared) }
         let metadata = ComicMetadataStore.parseDefault(for: namedPrepared)
         let pageCount = try CbzArchive(url: namedPrepared).pageCount
+        if let previousCreationDate {
+            try? fm.setAttributes([.creationDate: previousCreationDate], ofItemAtPath: namedPrepared.path)
+        }
         phase(.publishing)
         try cancellation.check()
         // Journal the collision-resolved filename before the atomic commit.

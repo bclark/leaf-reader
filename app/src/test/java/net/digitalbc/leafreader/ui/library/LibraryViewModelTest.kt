@@ -109,6 +109,23 @@ class LibraryViewModelTest {
         settings.jellyfinUserId = "user"
     }
 
+    @Test fun recentlyAddedRestoresPreviousFilterUnlessAnotherViewIsChosen() {
+        viewModel.unreadOnly.value = true
+        viewModel.setLibraryFilter(LibraryFilter.READING_LISTS)
+        viewModel.toggleRecentlyAdded()
+        assertTrue(viewModel.recentlyAdded.value)
+        assertEquals(LibraryFilter.ALL, viewModel.libraryFilter.value)
+        assertTrue(viewModel.unreadOnly.value)
+        viewModel.toggleRecentlyAdded()
+        assertFalse(viewModel.recentlyAdded.value)
+        assertEquals(LibraryFilter.READING_LISTS, viewModel.libraryFilter.value)
+
+        viewModel.toggleRecentlyAdded()
+        viewModel.setLibraryFilter(LibraryFilter.SERIES)
+        assertFalse(viewModel.recentlyAdded.value)
+        assertEquals(LibraryFilter.SERIES, viewModel.libraryFilter.value)
+    }
+
     @Test fun globalSearchLeavesCollectionAndRestoresItsQueryWithoutRetargetingAnAccount() = runBlocking {
         configureJellyfin()
         val vm = JellyfinCatalogueViewModel(repository, settings, defaultDispatcher = testDispatcher, ioDispatcher = testDispatcher,
