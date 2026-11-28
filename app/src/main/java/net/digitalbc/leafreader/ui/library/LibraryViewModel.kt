@@ -81,6 +81,7 @@ data class LibraryRows(
     val unreadOnly: Boolean = false,
     val items: List<LibraryItem> = emptyList(),
     val selectableComicIds: Set<Long> = emptySet(),
+    val recentlyAdded: Boolean = false,
 )
 
 data class JellyfinDetailState(
@@ -247,8 +248,24 @@ class LibraryViewModel(
         _defaultRightToLeft.value = settings.defaultRightToLeft
     }
 
+    private val _recentlyAdded = MutableStateFlow(false)
+    val recentlyAdded = _recentlyAdded.asStateFlow()
+    private var libraryFilterBeforeRecent: LibraryFilter? = null
+
     fun setLibraryFilter(filter: LibraryFilter) {
+        libraryFilterBeforeRecent = null
+        _recentlyAdded.value = false
         _libraryFilter.value = filter
+    }
+
+    fun toggleRecentlyAdded() {
+        if (_recentlyAdded.value) {
+            setLibraryFilter(libraryFilterBeforeRecent ?: LibraryFilter.ALL)
+        } else {
+            libraryFilterBeforeRecent = _libraryFilter.value
+            _libraryFilter.value = LibraryFilter.ALL
+            _recentlyAdded.value = true
+        }
     }
 
     val comics: StateFlow<List<ComicEntity>> = combine(repository.comics, _searchQuery) { list, query ->
@@ -268,6 +285,7 @@ class LibraryViewModel(
     ) { rows, lists, items, query, filter ->
         LibraryProjectionInput(rows, lists, items, query, filter)
     }.combine(unreadOnly) { input, unread -> input.copy(unreadOnly = unread) }
+        .combine(_recentlyAdded) { input, recent -> input.copy(recentlyAdded = recent) }
         .combine(readableComics) { input, readable -> input to readable }
         .mapLatest { (input, readable) ->
         withContext(defaultDispatcher) {
@@ -279,7 +297,7 @@ class LibraryViewModel(
                     is LibraryItem.ReadingListItem -> emptyList()
                 }
             }.toSet()
-            LibraryRows(input.filter, input.query, input.unreadOnly, items, selectableIds)
+            LibraryRows(input.filter, input.query, input.unreadOnly, items, selectableIds, input.recentlyAdded)
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryRows())
 

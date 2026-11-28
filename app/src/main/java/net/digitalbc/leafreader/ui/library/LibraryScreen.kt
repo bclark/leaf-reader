@@ -163,6 +163,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.digitalbc.leafreader.data.db.ComicEntity
 import net.digitalbc.leafreader.data.db.ReadingListEntity
+import net.digitalbc.leafreader.data.library.CoverImageDecoder
 import net.digitalbc.leafreader.data.smb.SmbEntry
 import net.digitalbc.leafreader.ui.brand.LeafWordmark
 import net.digitalbc.leafreader.ui.brand.LeafShape
@@ -214,6 +215,7 @@ fun LibraryScreen(
     val progressConflicts by viewModel.progressConflicts.collectAsStateWithLifecycle()
     val coverSelections by viewModel.coverSelections.collectAsStateWithLifecycle()
     val currentFilter by viewModel.libraryFilter.collectAsStateWithLifecycle()
+    val recentlyAdded by viewModel.recentlyAdded.collectAsStateWithLifecycle()
     var isSearchOpen by rememberSaveable { mutableStateOf(false) }
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
@@ -238,10 +240,10 @@ fun LibraryScreen(
         catalogue?.closeCollection()
         viewModel.setSearchQuery(collectionRootQuery)
     }
-    val downloadedOnly = !isSearchOpen && (currentFilter == LibraryFilter.OFFLINE ||
+    val downloadedOnly = !recentlyAdded && !isSearchOpen && (currentFilter == LibraryFilter.OFFLINE ||
         (requestedDownloads && (remoteSeries != null || catalogueState?.collection != null)))
     LaunchedEffect(launchFallback, catalogueState?.accountScope) {
-        if (launchFallback) viewModel.setLibraryFilter(LibraryFilter.OFFLINE)
+        if (launchFallback && !recentlyAdded) viewModel.setLibraryFilter(LibraryFilter.OFFLINE)
     }
     var remoteListSelection by remember(catalogueState?.accountScope) { mutableStateOf<RemoteListSelection?>(null) }
     var remoteSelecting by remember(catalogueState?.accountScope) { mutableStateOf(false) }
@@ -259,7 +261,7 @@ fun LibraryScreen(
         else { viewModel.removeRemoteSelection(items, copyFailure); remoteSelecting = false; remoteSelected = emptyMap() }
     }
     val remoteMode = viewModel.hasJellyfinConfig && catalogue != null &&
-        (currentFilter != LibraryFilter.OFFLINE) && !isEditMode
+        (currentFilter != LibraryFilter.OFFLINE) && !isEditMode && !recentlyAdded
     val downloadedCopies by viewModel.downloadedCopies.collectAsStateWithLifecycle()
     val representedLocalIds = if (remoteMode && (currentFilter == LibraryFilter.SERIES || isSearchOpen))
         catalogueState?.entries.orEmpty().mapNotNull { downloadedCopies[it.item.id]?.id }.toSet() else emptySet()
@@ -310,8 +312,8 @@ fun LibraryScreen(
     }
 
     LaunchedEffect(catalogue, viewModel.jellyfinBrowsePositionKey(null), currentFilter,
-        catalogueState?.library?.id, catalogueState?.launchFailure, catalogueState?.browsingSaved, catalogueState?.collection?.id, searchQuery, downloadedOnly, unreadOnly) {
-        if (viewModel.hasJellyfinConfig && catalogue != null) {
+        catalogueState?.library?.id, catalogueState?.launchFailure, catalogueState?.browsingSaved, catalogueState?.collection?.id, searchQuery, downloadedOnly, unreadOnly, recentlyAdded) {
+        if (!recentlyAdded && viewModel.hasJellyfinConfig && catalogue != null) {
             catalogue.ensure()
             viewModel.refreshDownloadedJellyfinItems()
             if (catalogueState?.library != null) {
@@ -609,6 +611,16 @@ fun LibraryScreen(
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_appearance)) },
                                     onClick = { menuExpanded = false; showAppearance = true })
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(androidx.compose.ui.res.stringResource(
+                                        if (recentlyAdded) net.digitalbc.leafreader.R.string.library_default_order
+                                        else net.digitalbc.leafreader.R.string.library_recently_added)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        remoteSeries = null
+                                        viewModel.toggleRecentlyAdded()
+                                        menuFocus.requestFocus()
+                                    })
                                 androidx.compose.material3.HorizontalDivider()
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_settings_more)) },
@@ -721,15 +733,15 @@ fun LibraryScreen(
         }
 
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-            isRefreshing = catalogueState?.refreshing == true,
-            onRefresh = { if (viewModel.hasJellyfinConfig) catalogue?.refresh() },
+            isRefreshing = !recentlyAdded && catalogueState?.refreshing == true,
+            onRefresh = { if (!recentlyAdded && viewModel.hasJellyfinConfig) catalogue?.refresh() },
             modifier = Modifier.fillMaxWidth().weight(1f),
         ) {
             Box(Modifier.matchParentSize().halftone(LeafSecondary, alpha = 0.05f))
 
             val gridKey = listOf(viewModel.jellyfinBrowsePositionKey(null),
                 if (remoteMode) catalogueState?.library?.id.orEmpty() else "", currentFilter.name,
-                searchQuery, downloadedOnly.toString(), unreadOnly.toString(), remoteSeries.orEmpty(), catalogueState?.collection?.id.orEmpty())
+                searchQuery, downloadedOnly.toString(), unreadOnly.toString(), recentlyAdded.toString(), remoteSeries.orEmpty(), catalogueState?.collection?.id.orEmpty())
                 .joinToString(":") { "${it.length}:$it" }
             val targetView = when (currentFilter) {
                 LibraryFilter.ALL -> JellyfinCatalogueView.ALL
@@ -738,7 +750,8 @@ fun LibraryScreen(
                 LibraryFilter.OFFLINE -> JellyfinCatalogueView.DOWNLOADED
             }
             val localRowsReady = preparedLocalRows.filter == currentFilter &&
-                preparedLocalRows.query == searchQuery && preparedLocalRows.unreadOnly == unreadOnly
+                preparedLocalRows.query == searchQuery && preparedLocalRows.unreadOnly == unreadOnly &&
+                preparedLocalRows.recentlyAdded == recentlyAdded
             val remoteRowsReady = catalogueState != null &&
                 (catalogueState.loaded || catalogueState.error != null || catalogueState.launchFailure != null) &&
                 (catalogueState.library == null || (catalogueState.view == targetView &&
@@ -876,7 +889,20 @@ fun LibraryScreen(
                             }, loadCover = { item, width -> viewModel.loadJellyfinCover(item, width) })
                     }
                 }
-                val showDownloadedFilter = !isSearchOpen && (remoteSeries != null || catalogueState?.collection != null)
+                if (recentlyAdded && !isEditMode) {
+                    item(key = "recently-added", span = { GridItemSpan(maxLineSpan) }) {
+                        androidx.compose.material3.FilterChip(
+                            selected = true,
+                            modifier = Modifier.heightIn(min = 48.dp),
+                            onClick = viewModel::toggleRecentlyAdded,
+                            label = { Text(androidx.compose.ui.res.stringResource(
+                                net.digitalbc.leafreader.R.string.library_recently_added)) },
+                            trailingIcon = { Icon(Icons.Default.Close, contentDescription = androidx.compose.ui.res.stringResource(
+                                net.digitalbc.leafreader.R.string.library_default_order), modifier = Modifier.size(16.dp)) },
+                        )
+                    }
+                }
+                val showDownloadedFilter = !recentlyAdded && !isSearchOpen && (remoteSeries != null || catalogueState?.collection != null)
                 val showSearchContext = remoteMode && searchQuery.isNotBlank()
                 if (showDownloadedFilter || showSearchContext) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
@@ -977,7 +1003,8 @@ fun LibraryScreen(
                             }
                         } else {
                             Text(
-                                if (downloadedOnly) androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_offline_empty)
+                                if (recentlyAdded) androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_no_local_additions)
+                                else if (downloadedOnly) androidx.compose.ui.res.stringResource(net.digitalbc.leafreader.R.string.library_offline_empty)
                                 else "No comics yet. Tap LOAD COMIC to add a CBZ, CBR, or PDF.",
                                 fontFamily = Archivo,
                                 fontSize = 13.sp,
@@ -2098,9 +2125,10 @@ internal fun ComicCard(
             val cover = rememberCover(comic?.coverPath)
             val remoteBitmap = rememberRemoteCover(remote?.item, remoteCoverWidthPx, load = loadRemoteCover)
             if (remoteBitmap != null) {
-                Image(remoteBitmap.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                val image = remoteBitmap.asImageBitmap()
+                Image(image, null, Modifier.fillMaxSize(), contentScale = libraryCoverScale(image))
             } else if (cover != null) {
-                Image(cover, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Image(cover, null, Modifier.fillMaxSize(), contentScale = libraryCoverScale(cover))
             } else {
                 GeneratedCover(title, columns = columns)
             }
@@ -2564,7 +2592,8 @@ internal fun rememberCover(path: String?, foreground: Boolean = true): ImageBitm
                 withContext(Dispatchers.IO) {
                     runCatching {
                         val file = File(path)
-                        if (file.exists()) BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap() else null
+                        if (file.exists()) BitmapFactory.decodeFile(file.absolutePath)
+                            ?.let(CoverImageDecoder::frontCoverOrOriginal)?.asImageBitmap() else null
                     }.getOrNull()
                 }
             }
@@ -2865,7 +2894,7 @@ private fun CoverStackCard(
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                 ) {
                     if (cover3 != null) {
-                        Image(cover3, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        Image(cover3, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = libraryCoverScale(cover3))
                     }
                     Box(Modifier.matchParentSize().graphicsLayer { alpha = backCoverDimming.value }.background(Color.Black.copy(alpha = 0.28f)))
                 }
@@ -2891,7 +2920,7 @@ private fun CoverStackCard(
 
                 ) {
                     if (cover2 != null) {
-                        Image(cover2, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        Image(cover2, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = libraryCoverScale(cover2))
                     }
 
                     val layer2IssueNum = if (issueCount > 0) ((topIndex + 1) % issueCount + issueCount) % issueCount + 1 else 2
@@ -3457,3 +3486,6 @@ private fun ColumnDensityIcon(columns: Int, modifier: Modifier = Modifier) {
         }
     }
 }
+
+private fun libraryCoverScale(cover: ImageBitmap): ContentScale =
+    if (cover.width > cover.height) ContentScale.Fit else ContentScale.Crop

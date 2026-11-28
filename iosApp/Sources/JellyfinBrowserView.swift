@@ -7,6 +7,7 @@ struct JellyfinBrowserView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @StateObject var model = JellyfinBrowserModel()
+    @ObservedObject var catalogue: JellyfinCatalogueModel
     var onConnected: (@MainActor () -> Void)? = nil
     @State private var server = ""
     @State private var username = ""
@@ -33,8 +34,10 @@ struct JellyfinBrowserView: View {
                             .font(.footnote).foregroundStyle(.secondary)
                         Button("Sign in") {
                             model.signIn(url: server, username: username, password: password, allowHTTP: allowHTTP,
-                                onSuccess: onConnected)
-                            password = ""
+                                onSuccess: {
+                                    password = ""
+                                    onConnected?()
+                                })
                         }
                         .disabled(model.busy || username.isEmpty || password.isEmpty)
                     }.disabled(model.busy)
@@ -44,6 +47,16 @@ struct JellyfinBrowserView: View {
                         Text(model.connection?.baseURL.absoluteString ?? "").font(.footnote).foregroundStyle(.secondary)
                         Text("Downloads stay in your library for offline reading. Use Sync reading position on a downloaded comic to exchange progress with Jellyfin.")
                             .font(.footnote)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Last catalogue refresh").font(.caption).foregroundStyle(.secondary)
+                            if let date = catalogue.lastCatalogueRefresh(for: model.connection) {
+                                Text(date, format: .dateTime.year().month(.abbreviated).day().hour().minute())
+                                    .font(.footnote)
+                            } else {
+                                Text("Not yet refreshed").font(.footnote)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
                         Button("Disconnect", role: .destructive) { Task { await model.disconnect() } }.disabled(model.busy)
                     }
                     Section(model.folders.last?.name ?? String(localized: "Jellyfin libraries")) {
@@ -77,7 +90,7 @@ struct JellyfinBrowserView: View {
                 if model.busy && model.activeItemID == nil {
                     Section {
                         JellyfinActivityView(activity: model.activity, transferred: model.transferred,
-                            total: model.total, cancel: { model.cancel() })
+                            total: model.total, cancel: { password = ""; model.cancel() })
                     }
                 }
                 if let message = model.message {
@@ -215,8 +228,8 @@ struct JellyfinBookRow: View {
               width.doubleValue * height.doubleValue <= JellyfinImportLimits.pixels,
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceThumbnailMaxPixelSize: min(640, max(160, maxPixel))
+                kCGImageSourceThumbnailMaxPixelSize: min(CoverResolution.maximum, max(160, maxPixel))
               ] as CFDictionary) else { return nil }
-        return UIImage(cgImage: image)
+        return UIImage(cgImage: frontCoverImage(image))
     }
 }

@@ -31,6 +31,16 @@ struct DisplaySpread: Equatable {
 struct ReaderView: View {
     let comicURL: URL
     var openingCover: UIImage? = nil
+    var linkedFile: LinkedComic? = nil
+    var onLocateLinkedFile: ((URL) async throws -> LinkedComic)? = nil
+    var onLinkedFileOpened: ((LinkedComic) -> Void)? = nil
+
+    @State private var replacementLink: LinkedComic?
+    @State private var coverRequestedFor: LinkedComic?
+    @State private var showingLocate = false
+    @State private var resolvingLink = false
+    private var activeLink: LinkedComic? { replacementLink ?? linkedFile }
+    private var readsExternalFile: Bool { linkedFile != nil }
 
     private enum LoadState {
         case loading
@@ -53,6 +63,8 @@ struct ReaderView: View {
     @State private var state: LoadState = .loading
     @State private var page = 0
     @State private var pageCount = 1
+    // DIG-20: stays true until this session leaves page 1 of a comic with no tracked progress.
+    @State private var untouchedFirstRead = false
 
     // Display spreads: current page/spread and preloaded adjacent spreads for instant transitions
     @State private var currentSpread: DisplaySpread?
@@ -78,7 +90,9 @@ struct ReaderView: View {
     @State private var scrub: Double = 0
     @State private var scrubbing = false
 
-    private var title: String { ComicMetadataStore.displayFilename(for: comicURL) }
+    private var title: String {
+        activeLink?.title ?? ComicMetadataStore.displayFilename(for: comicURL)
+    }
     private var isReady: Bool { if case .ready = state { return true }; return false }
 
     private var currentLoader: PageLoader? {
@@ -132,13 +146,25 @@ struct ReaderView: View {
                     }
                     .ignoresSafeArea()
                 } else {
-                    ProgressView().tint(Leaf.ochre)
+                    VStack(spacing: 16) {
+                        ProgressView().tint(Leaf.ochre)
+                        if readsExternalFile { Button("Back") { dismiss() }.frame(minHeight: 44) }
+                    }
                 }
             case .failed(let message):
                 VStack(spacing: 10) {
                     Image(systemName: "exclamationmark.triangle").foregroundColor(Leaf.ochre)
                     Text(message).font(.archivo(14)).foregroundColor(Leaf.text)
                         .multilineTextAlignment(.center)
+                    if linkedFile != nil {
+                        if resolvingLink { ProgressView().tint(Leaf.ochre) }
+                        HStack(spacing: 16) {
+                            Button("Retry") { load() }.frame(minHeight: 44)
+                            Button("Locate File") { showingLocate = true }.frame(minHeight: 44)
+                        }
+                        .disabled(resolvingLink)
+                    }
+                    if readsExternalFile { Button("Back") { dismiss() }.frame(minHeight: 44) }
                 }
                 .padding()
             case .ready(let loader):
@@ -165,6 +191,29 @@ struct ReaderView: View {
         .navigationBarHidden(true)
         .statusBarHidden(!showChrome)
         .task(id: covers.revisions(for: [comicURL])) { load() }
+        .onChange(of: currentSpread?.isReady) { ready in
+            guard ready == true, let link = activeLink, coverRequestedFor != link else { return }
+            coverRequestedFor = link
+            onLinkedFileOpened?(link)
+        }
+        .fileImporter(isPresented: $showingLocate, allowedContentTypes: LinkedFilesStore.supportedTypes) { result in
+            guard let onLocateLinkedFile else { return }
+            resolvingLink = true
+            let token = loadToken
+            Task { @MainActor in
+                defer { resolvingLink = false }
+                do {
+                    let replacement = try await onLocateLinkedFile(result.get())
+                    guard token == loadToken else { return }
+                    replacementLink = replacement
+                    load()
+                } catch {
+                    if token == loadToken, (error as? CocoaError)?.code != .userCancelled {
+                        state = .failed(String(localized: "Could not relink this comic: \(error.localizedDescription)"))
+                    }
+                }
+            }
+        }
         .onChange(of: scenePhase) { phase in
             if phase != .active { dismissal.reset() }
         }
@@ -185,26 +234,58 @@ struct ReaderView: View {
         scrubbing = false
         hasReloaded = loadedRevision != nil
         loadedRevision = covers.revisions(for: [comicURL])
-        do {
-            let archive = try CbzArchive(url: comicURL)
-            let loader = PageLoader(archive: archive)
-            guard loader.pageCount > 0 else { state = .failed(String(localized: "No image pages found in this archive")); return }
-            pageCount = loader.pageCount
-            ReadingProgress.resyncTotalIfNeeded(comicURL, actualTotal: pageCount)
-            rightToLeft = ReadingProgress.readingDirection(comicURL)
-            if let r = LeafDebug.env("LEAF_DEBUG_RTL") { rightToLeft = (r == "1") }
-            if let saved = ReadingProgress.get(comicURL) {
-                page = min(max(saved.page, 0), pageCount - 1)
+        untouchedFirstRead = ReadingProgress.get(comicURL)?.isUntouchedFirstRead ?? true
+        if let link = activeLink {
+            state = .loading
+            let token = loadToken
+            Self.ioQueue.async {
+                let result = Result {
+                    let url = try link.resolveURL()
+                    return PageLoader(archive: try CbzArchive(url: url, readInPlace: true, reopeningBookmark: true))
+                }
+                DispatchQueue.main.async {
+                    guard token == loadToken else { return }
+                    switch result {
+                    case .success(let loader): finishLoading(loader)
+                    case .failure: failExternalRead()
+                    }
+                }
             }
-            if let p = LeafDebug.env("LEAF_DEBUG_PAGE"), let pi = Int(p) {
-                page = min(max(pi, 0), pageCount - 1)
+        } else {
+            do {
+                finishLoading(PageLoader(archive: try CbzArchive(url: comicURL)))
+            } catch {
+                state = .failed(String(localized: "Could not open archive: \(error.localizedDescription)"))
             }
-            state = .ready(loader)
-            ReadingProgress.markOpened(comicURL)
-            loadCurrentAndAdjacent(loader: loader, targetPage: page)
-        } catch {
-            state = .failed(String(localized: "Could not open archive: \(error.localizedDescription)"))
         }
+    }
+
+    private func failExternalRead() {
+        loadToken &+= 1
+        currentSpread = nil; nextSpread = nil; prevSpread = nil
+        state = .failed(String(localized: "This linked comic is unavailable. Check Files and retry, or locate the original file."))
+    }
+
+    private func finishLoading(_ loader: PageLoader) {
+        guard loader.pageCount > 0 else {
+            if readsExternalFile { failExternalRead() }
+            else { state = .failed(String(localized: "No image pages found in this archive")) }
+            return
+        }
+        pageCount = loader.pageCount
+        // Linked files use their stable synthetic progress URL, not the provider path.
+        ReadingProgress.resyncTotalIfNeeded(comicURL, actualTotal: pageCount)
+        rightToLeft = ReadingProgress.readingDirection(comicURL)
+        if let saved = ReadingProgress.get(comicURL) {
+            page = min(max(saved.page, 0), pageCount - 1)
+        }
+        if let r = LeafDebug.env("LEAF_DEBUG_RTL") { rightToLeft = (r == "1") }
+        if let p = LeafDebug.env("LEAF_DEBUG_PAGE"), let pi = Int(p) {
+            page = min(max(pi, 0), pageCount - 1)
+        }
+        state = .ready(loader)
+        ReadingProgress.markOpened(comicURL)
+        loadCurrentAndAdjacent(loader: loader, targetPage: page)
     }
 
     private func resetZoom() {
@@ -216,7 +297,9 @@ struct ReaderView: View {
         guard isReady, loadedRevision == covers.revisions(for: [comicURL]) else { return }
         // A single-page comic uses page 1 as its completed marker, while displaying page 0.
         let savedPage = pageCount == 1 && ReadingProgress.isCompleted(comicURL) ? 1 : page
-        ReadingProgress.set(comicURL, page: savedPage, step: -1, total: pageCount, rtl: rightToLeft)
+        if page != 0 { untouchedFirstRead = false }
+        ReadingProgress.set(comicURL, page: savedPage, step: -1, total: pageCount, rtl: rightToLeft,
+                            isEdit: !untouchedFirstRead)
     }
 
     private func syncLoadSpread(loader: PageLoader, spread: ReaderSpread?) -> DisplaySpread? {
@@ -300,7 +383,8 @@ struct ReaderView: View {
             currentSpread = nil
             loadSpreadImages(loader: loader, spread: currS) { spread in
                 guard token == self.loadToken else { return }
-                self.currentSpread = spread
+                if self.readsExternalFile, spread?.isReady != true { self.failExternalRead() }
+                else { self.currentSpread = spread }
             }
         }
         PageCurlRenderer.shared.prewarmTextures(for: [currentSpread?.firstImage, currentSpread?.secondImage])
@@ -759,6 +843,7 @@ struct ReaderView: View {
             )
             .ignoresSafeArea(edges: [.bottom, .horizontal])
         )
+        .onAppear { if !scrubbing { scrub = Double(page) } }
         .onChange(of: page) { if !scrubbing { scrub = Double($0) } }
     }
 

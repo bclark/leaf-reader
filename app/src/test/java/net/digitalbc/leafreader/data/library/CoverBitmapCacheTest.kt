@@ -36,6 +36,25 @@ class CoverBitmapCacheTest {
         assertEquals("Disconnect/cache invalidation must remove disk copies", 13, fetches)
     }
 
+    @Test fun preparesExistingDiskThumbWithoutRefetchingOrReplacingRawData() = runTest {
+        val store = CoverThumbnailStore(files.newFolder())
+        val original = Bitmap.createBitmap(192, 128, Bitmap.Config.ARGB_8888)
+        val pixels = IntArray(192 * 128) { index ->
+            if (index % 192 in 90..99) 0xff161616.toInt() else 0xff878787.toInt()
+        }
+        original.setPixels(pixels, 0, 192, 0, 0, 192, 128)
+        CoverBitmapCache(backgroundScope, thumbnails = store).get(key) { original }
+
+        val prepared = CoverBitmapCache(backgroundScope, thumbnails = store,
+            prepareForDisplay = CoverImageDecoder::frontCoverOrOriginal)
+        val front = requireNotNull(prepared.get(key) { error("Offline thumbnail unexpectedly fetched") })
+        assertEquals(92, front.width)
+        assertSame(front, prepared.peek(key))
+        val diskOriginal = store.read(key, store.generation())
+        assertEquals(192, diskOriginal?.width)
+        assertFalse(original.isRecycled)
+    }
+
     @Test fun independentCachedReadsDoNotQueueBehindASlowRead() = runBlocking<Unit> {
         val block = java.util.concurrent.atomic.AtomicBoolean(false)
         val once = java.util.concurrent.atomic.AtomicBoolean(false)

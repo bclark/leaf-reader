@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Identifiable wrapper so a series detail can be presented via `.fullScreenCover(item:)`.
 private struct OpenSeries: Identifiable {
@@ -16,16 +17,23 @@ private struct OpenReadingList: Identifiable {
 /// The Leaf library — pulp-comic identity matching Android: ink ground with a halftone wash,
 /// brand mark, Ochre badges, filter pills, interactive series neat stacks, reading lists,
 /// and configurable grid columns.
+private struct LibraryPrimaryActionHeight: PreferenceKey {
+    static var defaultValue: CGFloat { 0 }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 struct LibraryView: View {
     @EnvironmentObject private var settings: LeafSettings
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var library = LibraryStore()
+    @StateObject private var linkedFiles = LinkedFilesStore()
     @StateObject private var jellyfin = JellyfinBrowserModel()
     @StateObject private var catalogue = JellyfinCatalogueModel()
     @StateObject private var onboarding = FirstLaunchOnboarding()
     @State private var onboardingFocusRequest = 0
     @State private var browse = LibraryBrowseState()
     @State private var offlineComics: Set<URL> = []
+    @State private var primaryActionHeight: CGFloat = 0
     @State private var offlineRevisions: Set<CoverLoader.Revision> = []
     @State private var checkingOffline = false
     private typealias ScrollTarget = (id: String, anchor: UnitPoint)
@@ -40,15 +48,22 @@ struct LibraryView: View {
     @State private var showRemoteDetail = false
 
     private var showsRemote: Bool {
-        jellyfin.connection != nil && !downloadedOnly
+        jellyfin.connection != nil && !downloadedOnly && !browse.recentlyAdded
     }
 
     private var selectedFilter: LibraryFilter { browse.view.filter }
     @State private var showPicker = false
+    private enum FilesAction { case copy, link }
+    @State private var filesAction = FilesAction.copy
+    @State private var openedLinkedFile: LinkedComic?
+    @State private var pendingUnlink: LinkedComic?
+    @State private var linkingFile = false
+    @State private var linkedFileError: String?
     @State private var showImportSource = false
     @State private var showSmbBrowser = false
     @State private var showJellyfinBrowser = false
     @State private var showMenu = false
+    @State private var showLibraryAppearance = false
 
     // Single comic awaiting delete confirmation
     @State private var pendingDelete: URL?
@@ -109,11 +124,13 @@ struct LibraryView: View {
         return LibraryContinueItem.ranked(local: continueRevisions == revisions
             ? localContinue.filter { readableContinue.contains($0.url) } : [],
             remote: catalogue.books, downloadedIDs: Set(jellyfin.downloaded.keys),
-            remoteAvailable: remoteContinueAvailable)
+            remoteAvailable: remoteContinueAvailable, linked: downloadedOnly ? [] : linkedFiles.comics)
     }
 
     private func resume(_ item: LibraryContinueItem) {
-        if let url = item.url {
+        if let linked = item.linked {
+            openedLinkedFile = linked
+        } else if let url = item.url {
             openComic = OpenComic(url: url)
         } else if remoteContinueAvailable, let book = item.book {
             remoteBook = book
@@ -123,14 +140,28 @@ struct LibraryView: View {
 
     /// Nothing local and no server: the empty state replaces the grid, tile and onboarding card.
     private var showsEmptyLibrary: Bool {
-        library.comics.isEmpty && jellyfin.connection == nil && searchQuery.isEmpty
+        library.comics.isEmpty && (downloadedOnly || linkedFiles.comics.isEmpty)
+            && jellyfin.connection == nil && searchQuery.isEmpty
             && selectedFilter != .readingLists && !isEditMode
     }
 
+    private var showsEmptyLists: Bool {
+        selectedFilter == .readingLists && library.readingLists.isEmpty && searchQuery.isEmpty && !isEditMode
+    }
+
     private var currentItems: [LibraryItem] {
-        library.libraryItems(filter: selectedFilter, searchQuery: searchQuery,
-            unreadOnly: browse.unreadOnly,
-            available: downloadedOnly ? readableOfflineComics : nil)
+        let items = library.libraryItems(filter: selectedFilter, searchQuery: searchQuery,
+            unreadOnly: browse.unreadOnly, available: downloadedOnly ? readableOfflineComics : nil,
+            linked: isEditMode ? [] : linkedFiles.comics, recentlyAdded: browse.recentlyAdded)
+        guard showsRemote, selectedFilter != .readingLists else { return items }
+        // Preserve the existing Jellyfin catalogue while keeping Files comics in the normal card grid.
+        return items.filter {
+            switch $0 {
+            case .singleComic(let url, _): return url.scheme == "leaf-files"
+            case .seriesStack(_, _, let issues, _, _, _, _): return issues.contains { $0.scheme == "leaf-files" }
+            case .readingListItem: return false
+            }
+        }
     }
 
     private func availableColumns(for width: CGFloat) -> [Int] {
@@ -149,6 +180,11 @@ struct LibraryView: View {
         return min(max(settings.libraryColumns, 2), avail.last ?? 2)
     }
 
+    private func openFiles(_ action: FilesAction) {
+        filesAction = action
+        showPicker = true
+    }
+
     var body: some View {
         Group {
             if onboarding.isComplete {
@@ -156,11 +192,13 @@ struct LibraryView: View {
             } else {
                 FirstLaunchOnboardingView(onboarding: onboarding, busy: library.importing,
                     focusRequest: onboardingFocusRequest,
-                    chooseFile: { showPicker = true }, connect: { showJellyfinBrowser = true })
+                    chooseFile: { openFiles(.copy) }, connect: { showJellyfinBrowser = true })
             }
         }
-        .environment(\.tipPromptAllowed, !isEditMode && !isSearchOpen && !showMenu
-            && !showPicker && !showImportSource && !showSmbBrowser && !showJellyfinBrowser)
+        .environmentObject(library)
+        .environment(\.tipPromptAllowed, !isEditMode && !isSearchOpen && !showMenu && !showLibraryAppearance
+            && !showPicker && openedLinkedFile == nil
+            && !showImportSource && !showSmbBrowser && !showJellyfinBrowser)
         .sheet(isPresented: $showJellyfinBrowser, onDismiss: {
             onboardingFocusRequest += 1
             Task {
@@ -168,23 +206,43 @@ struct LibraryView: View {
                 await jellyfin.restoreDownloads(library: library)
             }
         }) {
-            JellyfinBrowserView(model: jellyfin, onConnected: {
+            JellyfinBrowserView(model: jellyfin, catalogue: catalogue, onConnected: {
                 guard !onboarding.isComplete, showJellyfinBrowser else { return }
                 onboarding.finish()
                 showJellyfinBrowser = false
             }).environmentObject(library)
         }
-        .fileImporter(isPresented: $showPicker, allowedContentTypes: LibraryStore.importableTypes,
-            allowsMultipleSelection: true) { result in
+        .fileImporter(isPresented: $showPicker, allowedContentTypes: filesAction == .copy
+            ? LibraryStore.importableTypes : LinkedFilesStore.supportedTypes,
+            allowsMultipleSelection: filesAction == .copy) { result in
             switch result {
             case .success(let urls):
-                urls.forEach { url in
-                    library.importComic(from: url) { _ in onboarding.finish() }
+                switch filesAction {
+                case .copy:
+                    urls.forEach { url in library.importComic(from: url) { _ in onboarding.finish() } }
+                case .link:
+                    guard let url = urls.first else { return }
+                    linkingFile = true
+                    Task { @MainActor in
+                        defer { linkingFile = false }
+                        do {
+                            try await linkedFiles.link(url)
+                            if downloadedOnly { browse.select(.series) }
+                        } catch { linkedFileError = error.localizedDescription }
+                    }
                 }
             case .failure(let error):
-                if (error as? CocoaError)?.code != .userCancelled { library.importError = error.localizedDescription }
+                if (error as? CocoaError)?.code != .userCancelled {
+                    if filesAction == .link { linkedFileError = error.localizedDescription }
+                    else { library.importError = error.localizedDescription }
+                }
             }
         }
+        .alert("Could not update linked Files", isPresented: Binding(
+            get: { linkedFileError != nil }, set: { if !$0 { linkedFileError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(linkedFileError ?? "") }
         .onChange(of: showPicker) { presented in if !presented { onboardingFocusRequest += 1 } }
         .onChange(of: library.importing) { busy in if !busy { onboardingFocusRequest += 1 } }
         .alert("Import failed", isPresented: Binding(
@@ -238,9 +296,9 @@ struct LibraryView: View {
                     GeometryReader { geo in
                         content(for: geo.size)
                     }
-                    libraryPrimaryAction
                 }
-
+                .overlay(alignment: .bottomTrailing) { libraryPrimaryAction }
+                .onPreferenceChange(LibraryPrimaryActionHeight.self) { primaryActionHeight = $0 }
 
                 if isEditMode {
                     editActionBar
@@ -255,7 +313,7 @@ struct LibraryView: View {
                 SeriesDetailView(
                     seriesName: series.name,
                     volume: series.volume,
-                    library: library,
+                    library: library, linkedFiles: linkedFiles,
                     onDismiss: { openSeries = nil },
                     unreadOnly: $browse.unreadOnly, searchQuery: searchQuery,
                     availableCopies: downloadedOnly ? readableOfflineComics : nil
@@ -266,7 +324,7 @@ struct LibraryView: View {
             .fullScreenCover(item: $openReadingList) { listTarget in
                 ReadingListDetailView(
                     listId: listTarget.id,
-                    library: library,
+                    library: library, linkedFiles: linkedFiles,
                     onDismiss: { openReadingList = nil },
                     initialShowAddComics: listTarget.showAddComics,
                     jellyfin: jellyfin, catalogue: catalogue, downloadedOnly: downloadedOnly,
@@ -275,15 +333,44 @@ struct LibraryView: View {
                 .environmentObject(settings)
                 .onDisappear { library.refresh() }
             }
+            .sheet(isPresented: $showLibraryAppearance) {
+                NavigationStack {
+                    Form { LibraryAppearanceControls() }
+                        .navigationTitle("Library appearance")
+                        .toolbar { ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showLibraryAppearance = false }
+                        } }
+                }
+                .environmentObject(settings)
+                .leafAppearance(settings.theme)
+            }
             .fullScreenCover(isPresented: $showMenu) {
-                MenuView()
+                MenuView(jellyfin: jellyfin, catalogue: catalogue)
                     .environmentObject(settings)
                     .environmentObject(library)
             }
             .confirmationDialog("Add Comics", isPresented: $showImportSource, titleVisibility: .visible) {
-                Button("From Files") { showPicker = true }
+                Button("Copy from Files") { openFiles(.copy) }
+                Button("Link from Files") { openFiles(.link) }.disabled(linkingFile)
                 Button("From SMB Drive") { showSmbBrowser = true }
                 Button("From Jellyfin") { showJellyfinBrowser = true }
+            }
+            .linkedReaderPresentation(item: $openedLinkedFile, store: linkedFiles) {
+                library.refresh(backfill: false)
+            }
+            .alert("Remove link?", isPresented: Binding(
+                get: { pendingUnlink != nil }, set: { if !$0 { pendingUnlink = nil } }
+            )) {
+                Button("Cancel", role: .cancel) { pendingUnlink = nil }
+                Button("Remove Link", role: .destructive) {
+                    if let comic = pendingUnlink {
+                        do { try linkedFiles.remove(comic); library.refresh(backfill: false) }
+                        catch { linkedFileError = error.localizedDescription }
+                    }
+                    pendingUnlink = nil
+                }
+            } message: {
+                Text("The original in Files stays untouched. Leaf removes this shelf entry and its reading progress.")
             }
             .navigationDestination(isPresented: $showRemoteDetail) {
                 if let remoteBook {
@@ -424,7 +511,15 @@ struct LibraryView: View {
                     Menu {
                         Button("Select comics") { isEditMode = true; selectedComics = [] }
                             .disabled(library.comics.isEmpty || showsRemote || isEditMode)
+                        if !isEditMode {
+                            if browse.recentlyAdded {
+                                Button("Show default order") { browse.toggleRecentlyAdded() }
+                            } else {
+                                Button("Recently Added (local comics)") { browse.toggleRecentlyAdded() }
+                            }
+                        }
                         Divider()
+                        Button("Library appearance") { showLibraryAppearance = true }
                         Button("Settings and more") { showMenu = true }
                     } label: {
                         Image(systemName: "line.3.horizontal")
@@ -621,7 +716,20 @@ struct LibraryView: View {
                             connect: { showJellyfinBrowser = true })
                     }
                     if !isEditMode && !isSearchOpen { continueSection(wide: UIDevice.current.userInterfaceIdiom == .pad && width >= 600) }
-                    if jellyfin.connection != nil {
+                    if linkingFile { ProgressView("Linking comic from Files…").padding() }
+                    if browse.recentlyAdded && !isEditMode {
+                        Button {
+                            browse.toggleRecentlyAdded()
+                        } label: {
+                            Label("Recently Added (local comics)", systemImage: "xmark.circle")
+                                .frame(minHeight: 44)
+                        }
+                        .padding(.horizontal, 18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityHint("Show default order")
+                        .accessibilityIdentifier("library.recentlyAdded")
+                    }
+                    if jellyfin.connection != nil && !browse.recentlyAdded {
                         JellyfinCatalogueStatus(catalogue: catalogue, browser: jellyfin,
                             connect: { showJellyfinBrowser = true })
                     }
@@ -632,7 +740,8 @@ struct LibraryView: View {
                             select: { remoteBook = $0; showRemoteDetail = true },
                             selectGroup: { remoteGroup = $0 })
                             .environmentObject(library)
-                    } else {
+                    }
+                    if !showsRemote || selectedFilter == .readingLists || !items.isEmpty {
                     if showsRemote && selectedFilter == .readingLists {
                         JellyfinCollectionsSection(catalogue: catalogue, browser: jellyfin,
                             unreadOnly: $browse.unreadOnly, searchQuery: searchQuery)
@@ -670,6 +779,23 @@ struct LibraryView: View {
                         Button("Clear Unread only") { browse.unreadOnly = false; unreadButtonFocused = true }
                             .frame(minHeight: 44)
                     }
+                    if showsEmptyLists {
+                        Button {
+                            newListNameInput = ""
+                            showCreateListSheet = true
+                        } label: {
+                            Label("Create Reading List", systemImage: "plus")
+                                .leafControlFont(15, weight: 700)
+                                .foregroundStyle(Leaf.ink)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 12)
+                                .frame(minHeight: 44)
+                                .background(Leaf.ochre, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     // The empty state stands alone; reading lists stay reachable from the Lists view.
                     if !showsEmptyLibrary {
                     LazyVGrid(columns: gridColumns, spacing: cols >= 4 ? 14 : 18) {
@@ -677,6 +803,9 @@ struct LibraryView: View {
                             Group {
                             switch item {
                             case .singleComic(let url, let meta):
+                                if let comic = linkedFiles.comic(for: url) {
+                                    linkedShelfCard(comic, columns: cols)
+                                } else {
                                 Button {
                                     if isEditMode {
                                         toggleSelect(url)
@@ -729,6 +858,7 @@ struct LibraryView: View {
                                         }
                                     }
                                 }
+                                }
 
                             case .seriesStack(let name, let volume, let issues, let topComic, let total, let unread, let fraction):
                                 ComicStackCard(
@@ -742,6 +872,7 @@ struct LibraryView: View {
                                     columns: cols,
                                     isEditMode: isEditMode,
                                     isSelected: issues.allSatisfy { selectedComics.contains($0) },
+                                    linkedFiles: linkedFiles,
                                     onOpenSeries: {
                                         if isEditMode {
                                             let allInSeriesSelected = issues.allSatisfy { selectedComics.contains($0) }
@@ -763,7 +894,10 @@ struct LibraryView: View {
                                     }
                                     Button {
                                         let allDone = unread == 0
-                                        library.markComicsRead(urls: issues, read: !allDone)
+                                        library.markComicsRead(urls: issues.filter(\.isFileURL), read: !allDone)
+                                        for comic in issues.compactMap({ linkedFiles.comic(for: $0) }) {
+                                            linkedFiles.markRead(comic, read: !allDone)
+                                        }
                                     } label: {
                                         Label(unread == 0 ? String(localized: "Mark All Unread") : String(localized: "Mark All Read"), systemImage: "checkmark.circle")
                                     }
@@ -775,6 +909,15 @@ struct LibraryView: View {
                                     previewUrls: previewUrls,
                                     itemCount: count,
                                     columns: cols,
+                                    members: ReadingListMember.resolve(list.itemFilenames, local: library.comics,
+                                        metadata: library.metadata,
+                                        books: catalogue.isCurrent(for: jellyfin.connection) ? catalogue.knownBooks : [],
+                                        connection: jellyfin.connection, linked: linkedFiles.comics).filter {
+                                            (!downloadedOnly || $0.url.map { readableOfflineComics.contains($0) } == true) &&
+                                            LibraryBrowseState.includes(completed: $0.completed, unreadOnly: browse.unreadOnly)
+                                        },
+                                    remoteClient: jellyfin.client, remoteProfileID: jellyfin.connection?.id ?? "",
+                                    remoteCopies: jellyfin.downloaded, linkedFiles: linkedFiles,
                                     onOpenList: {
                                         openReadingList = OpenReadingList(id: list.id, showAddComics: false)
                                     }
@@ -798,7 +941,7 @@ struct LibraryView: View {
                         }
 
                         // Comics are added from the bottom action; lists keep their in-grid tile.
-                        if !isEditMode && searchQuery.isEmpty && selectedFilter == .readingLists {
+                        if !isEditMode && !showsEmptyLists && searchQuery.isEmpty && selectedFilter == .readingLists {
                             AddTile(importing: false, columns: cols, title: "CREATE LIST") {
                                 newListNameInput = ""
                                 showCreateListSheet = true
@@ -811,10 +954,11 @@ struct LibraryView: View {
                     }
                     }
                 }
+                .padding(.bottom, isEditMode ? 0 : max(100, primaryActionHeight + 32))
             }
             .coordinateSpace(name: "library.scroll")
             .onPreferenceChange(LibraryScrollPositions.self) { positions in
-                guard restoringView != browse.view else { return }
+                guard !browse.recentlyAdded, restoringView != browse.view else { return }
                 let prefix = browse.view.rawValue + ":"
                 if let first = positions.filter({ $0.key.hasPrefix(prefix) }).min(by: { abs($0.value.minY) < abs($1.value.minY) }) {
                     // Align the same points in the item and viewport to keep its partial offset.
@@ -824,18 +968,52 @@ struct LibraryView: View {
                 }
             }
             .onChange(of: browse.view) { view in
+                guard !browse.recentlyAdded else { return }
                 let target = pendingScrollTarget.flatMap { $0.id.hasPrefix(view.rawValue + ":") ? $0 : nil }
                 ?? scrollPositions[view] ?? (view.rawValue + ":top", .top)
                 Task { @MainActor in
                     await Task.yield()
-                    guard browse.view == view else { return }
+                    guard browse.view == view, !browse.recentlyAdded else { return }
                     proxy.scrollTo(target.id, anchor: target.anchor)
                     await Task.yield()
                     if browse.view == view { restoringView = nil }
                 }
             }
-            .refreshable { await catalogue.refresh(browser: jellyfin) }
+            .onChange(of: browse.recentlyAdded) { active in
+                let view = browse.view
+                let target = (active ? nil : scrollPositions[view]) ?? (view.rawValue + ":top", .top)
+                Task { @MainActor in
+                    await Task.yield()
+                    guard browse.view == view, browse.recentlyAdded == active else { return }
+                    proxy.scrollTo(target.id, anchor: target.anchor)
+                }
+            }
+            .refreshable { if !browse.recentlyAdded { await catalogue.refresh(browser: jellyfin) } }
         }
+    }
+
+    private func linkedShelfCard(_ comic: LinkedComic, columns: Int) -> some View {
+        Button { openedLinkedFile = comic } label: {
+            LinkedFileCard(comic: comic, store: linkedFiles, columns: columns)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("linked-file-\(comic.id.uuidString)")
+        .contextMenu {
+            Button("Set Series Name", systemImage: "square.stack.3d.up") {
+                selectedComics = [comic.progressURL]
+                seriesInputName = comic.shelfMetadata.series ?? ""
+                seriesInputVolume = comic.shelfMetadata.volume ?? ""
+                showSetSeriesSheet = true
+            }
+            Button("Add to Reading List", systemImage: "list.bullet") {
+                selectedComics = [comic.progressURL]
+                showAddToListSheet = true
+            }
+            Button("Remove Link", systemImage: "link.badge.minus", role: .destructive) {
+                pendingUnlink = comic
+            }
+        }
+        .accessibilityAction(named: Text("Remove Link")) { pendingUnlink = comic }
     }
 
     private func continueSection(wide: Bool) -> some View {
@@ -878,12 +1056,13 @@ struct LibraryView: View {
 
     private func continueCard(_ item: LibraryContinueItem, wide: Bool) -> some View {
         ContinueReadingCard(item: item, client: jellyfin.client, profileID: jellyfin.connection?.id,
-            wide: wide, open: { resume(item) })
+            wide: wide, linkedCover: item.linked.flatMap { linkedFiles.cover(for: $0) },
+            open: { resume(item) })
     }
 
     @ViewBuilder
     private var libraryPrimaryAction: some View {
-        if !isEditMode && !showsEmptyLibrary {
+        if !isEditMode && !showsEmptyLibrary && !showsEmptyLists {
             HStack {
                 Spacer()
                 Button {
@@ -914,6 +1093,12 @@ struct LibraryView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(selectedFilter == .readingLists ? Text("Create Reading List") : Text("Add comics"))
                 .disabled(library.importing && selectedFilter != .readingLists)
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.preference(key: LibraryPrimaryActionHeight.self, value: geometry.size.height)
+                            .allowsHitTesting(false)
+                    }
+                }
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
@@ -925,6 +1110,7 @@ struct LibraryView: View {
             return String(localized: "No readable local copies yet. Add comics from Files or SMB, or download a Jellyfin comic.")
         }
         if browse.unreadOnly { return String(localized: "No unread comics match this view.") }
+        if browse.recentlyAdded { return String(localized: "No local comics to sort by date added.") }
         switch selectedFilter {
         case .all: return String(localized: "No comics yet. Tap LOAD COMIC to add a CBZ, CBR, or PDF.")
         case .series: return String(localized: "No series stacks yet. Group comics by setting a Series Name.")
@@ -1061,11 +1247,11 @@ struct LibraryView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        library.setSeries(
-                            urls: Array(selectedComics),
-                            series: seriesInputName.trimmingCharacters(in: .whitespacesAndNewlines),
-                            volume: seriesInputVolume.trimmingCharacters(in: .whitespacesAndNewlines)
-                        )
+                        let urls = Array(selectedComics)
+                        do {
+                            try linkedFiles.setSeries(urls: urls, name: seriesInputName, volume: seriesInputVolume)
+                            library.setSeries(urls: urls.filter(\.isFileURL), series: seriesInputName, volume: seriesInputVolume)
+                        } catch { linkedFileError = error.localizedDescription }
                         showSetSeriesSheet = false
                         if isEditMode {
                             isEditMode = false
@@ -1076,6 +1262,10 @@ struct LibraryView: View {
                 }
             }
         }
+    }
+
+    private var hasListChoices: Bool {
+        !library.comics.isEmpty || !linkedFiles.comics.isEmpty || (catalogue.isCurrent(for: jellyfin.connection) && !catalogue.books.isEmpty)
     }
 
     private var createListSheet: some View {
@@ -1107,12 +1297,12 @@ struct LibraryView: View {
                         if isEditMode {
                             isEditMode = false
                             selectedComics.removeAll()
-                        } else if preselected.isEmpty && !library.comics.isEmpty {
+                        } else if preselected.isEmpty && hasListChoices {
                             pendingCreatedListID = created.id
                         }
                         showCreateListSheet = false
                     } label: {
-                        Label(selectedComics.isEmpty && !library.comics.isEmpty ? String(localized: "Create & Add Comics") : String(localized: "Create"), systemImage: "checkmark")
+                        Label(selectedComics.isEmpty && hasListChoices ? String(localized: "Create & Add Comics") : String(localized: "Create"), systemImage: "checkmark")
                             .labelStyle(.iconOnly)
                     }
                     .disabled(newListNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -1204,7 +1394,6 @@ struct ComicStackCard: View {
     let totalIssues: Int
     let unreadIssues: Int
     let progressFraction: Double
-    var showsProgress = true
     var columns: Int = 2
     var isEditMode: Bool = false
     var isSelected: Bool = false
@@ -1212,16 +1401,27 @@ struct ComicStackCard: View {
     var remoteClient: JellyfinClient? = nil
     var remoteProfileID = ""
     var remoteCopies: [String: URL] = [:]
+    var linkedFiles: LinkedFilesStore? = nil
     let onOpenSeries: () -> Void
+
+    // A single owned series cover should show all its artwork, not a cropped stack preview.
+    var keepsWholeCover: Bool { totalIssues == 1 && remoteBooks.isEmpty }
+    private var frontAspect: CGFloat {
+        guard keepsWholeCover, let size = topCoverImage?.size, size.width > 0, size.height > 0 else { return 0.7 }
+        return size.width / size.height
+    }
 
     @State private var topIndex: Int = 0
     @State private var didInitTopIndex = false
     @State private var peelOffsetY: CGFloat = 0
     @State private var cardHeight: CGFloat = 220
 
-    @State private var topCoverImage: UIImage?
-    @State private var layer2CoverImage: UIImage?
-    @State private var layer3CoverImage: UIImage?
+    @State private var stackCovers = StackCoverImages()
+    @State private var coverPixels = 0
+    @State private var loadedCoverPixels = 0
+    private var topCoverImage: UIImage? { stackCovers.image(for: coverKeys.first) }
+    private var layer2CoverImage: UIImage? { stackCovers.image(for: coverKeys.dropFirst().first) }
+    private var layer3CoverImage: UIImage? { stackCovers.image(for: coverKeys.dropFirst(2).first) }
 
     private var count: Int { max(remoteBooks.isEmpty ? issues.count : remoteBooks.count, 1) }
 
@@ -1241,6 +1441,33 @@ struct ComicStackCard: View {
         guard issues.count >= 3 else { return nil }
         let idx = ((topIndex + 2) % count + count) % count
         return issues[idx]
+    }
+
+    private var coverKeys: [StackCoverKey] {
+        if !remoteBooks.isEmpty {
+            return (0..<min(3, remoteBooks.count)).map { offset in
+                let book = remoteBooks[(topIndex + offset) % remoteBooks.count]
+                if let url = remoteCopies[book.id] {
+                    return .local(covers.revisions(for: [url])[0])
+                }
+                return .remote(profile: remoteProfileID, item: book.id, imageTag: book.imageTags?["Primary"] ?? "")
+            }
+        }
+        return [currentTopComic, layer2Comic, layer3Comic].compactMap { $0 }.map { url in
+            if let comic = linkedFiles?.comic(for: url) { return .linked(url, linkedFiles?.coverRevisions[comic.id] ?? 0) }
+            return .local(covers.revisions(for: [url])[0])
+        }
+    }
+
+    private var currentReadingState: LibraryReadingState {
+        if !remoteBooks.isEmpty {
+            let states = remoteBooks.map { book in
+                remoteCopies[book.id].map { LibraryReadingState.local(ReadingProgress.get($0)) }
+                    ?? .remote(book.userData)
+            }
+            return .remoteCollection(states)
+        }
+        return .collection(issues.map { .local(ReadingProgress.get($0)) }, fraction: progressFraction)
     }
 
     private var currentIssueNum: Int {
@@ -1300,7 +1527,7 @@ struct ComicStackCard: View {
 
                         stackBadge(issueNumber: layer2IssueNum)
 
-                        progressBarView
+
                     }
                     .aspectRatio(0.7, contentMode: .fit)
                     .background(settings.groundSoft)
@@ -1315,7 +1542,7 @@ struct ComicStackCard: View {
                 ZStack(alignment: .bottom) {
                     Group {
                         if let topCoverImage {
-                            LibraryCoverArtwork(image: topCoverImage)
+                            LibraryCoverArtwork(image: topCoverImage, contentMode: keepsWholeCover ? .fit : .fill)
                         } else {
                             GeneratedCover(title: seriesName, columns: columns)
                         }
@@ -1324,13 +1551,26 @@ struct ComicStackCard: View {
                     .clipped()
 
                     stackBadge(issueNumber: currentIssueNum)
+                    if !isEditMode { LibraryReadingIndicator(state: currentReadingState) }
+                    if !remoteBooks.isEmpty, remoteCopies[remoteBooks[topIndex % count].id] != nil {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .foregroundStyle(Leaf.paperWhite).padding(6)
+                            .background(Leaf.ink.opacity(0.85), in: Circle()).padding(6)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    }
+                    if let url = currentTopComic, url.scheme == "leaf-files" {
+                        Text("Files").leafControlFont(10, weight: 700)
+                            .foregroundStyle(Leaf.cream).padding(4)
+                            .background(Leaf.ink.opacity(0.85), in: RoundedRectangle(cornerRadius: 3))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(6)
+                    }
 
-                    progressBarView
+
                 }
-                .aspectRatio(0.7, contentMode: .fit)
+                .aspectRatio(frontAspect, contentMode: .fit)
                 .background(
                     GeometryReader { geo in
-                        Leaf.deepInkSurface
+                        (keepsWholeCover ? settings.groundSoft : Leaf.deepInkSurface)
                             .onAppear {
                                 if geo.size.height > 0 { cardHeight = geo.size.height }
                             }
@@ -1348,7 +1588,7 @@ struct ComicStackCard: View {
                 .offset(y: peelOffsetY)
                 .opacity(peelProgress > 0.75 ? Double(max(0, 1 - (peelProgress - 0.75) / 0.25)) : 1.0)
             }
-            .aspectRatio(0.7, contentMode: .fit)
+            .aspectRatio(frontAspect, contentMode: .fit)
             .padding(.top, totalIssues >= 3 ? 10 : (totalIssues >= 2 ? 5 : 0))
             .contentShape(Rectangle())
             .overlay(
@@ -1388,19 +1628,19 @@ struct ComicStackCard: View {
             )
             .onTapGesture { onOpenSeries() }
 
-            // Series Name in Archivo ExtraBold
+            if settings.libraryShowTitles {
             Text(seriesName)
                 .leafControlFont(columns >= 4 ? 10.5 : 12, weight: 800)
                 .foregroundColor(Leaf.text)
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 .padding(.top, columns >= 4 ? 6 : 9)
-
-            // Subtitle: X issues · Y unread
-            Text(remoteBooks.isEmpty ? String(localized: "\(totalIssues) issues · \(unreadIssues) unread") : String(localized: "\(totalIssues) loaded comics"))
-                .leafControlFont(columns >= 4 ? 8.5 : 9.5, weight: 600)
-                .foregroundColor(unreadIssues > 0 ? Leaf.goldText : Leaf.secondaryText)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-                .padding(.top, 2)
+            }
+            if settings.libraryShowDetails {
+                Text("\(totalIssues) comics")
+                    .leafControlFont(columns >= 4 ? 8.5 : 9.5)
+                    .foregroundColor(Leaf.secondaryText)
+                    .padding(.top, 2)
+            }
         }
         .onAppear {
             if !didInitTopIndex {
@@ -1417,32 +1657,36 @@ struct ComicStackCard: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(seriesName)
-        .accessibilityValue(Text("\(currentIssueNum) / \(count)"))
+        .accessibilityValue(Text("\(currentIssueNum) / \(count), \(currentReadingState.label)"))
         .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityAction { onOpenSeries() }
         .accessibilityAction(named: Text("Next cover")) { topIndex = (topIndex + 1) % count }
-        .task(id: remoteProfileID + String(topIndex) + covers.revisions(for: issues).description) {
-            if !remoteBooks.isEmpty {
-                topCoverImage = await remoteCover(at: topIndex)
-                layer2CoverImage = remoteBooks.count > 1 ? await remoteCover(at: topIndex + 1) : nil
-                layer3CoverImage = remoteBooks.count > 2 ? await remoteCover(at: topIndex + 2) : nil
-            } else {
-                if let currentTopComic { topCoverImage = await CoverLoader.load(for: currentTopComic).cover }
-                if let l2 = layer2Comic { layer2CoverImage = await CoverLoader.load(for: l2).cover }
-                if let l3 = layer3Comic { layer3CoverImage = await CoverLoader.load(for: l3).cover }
+        .libraryCoverResolution($coverPixels)
+        .task(id: StackCoverRequest(keys: coverKeys, pixels: coverPixels)) {
+            guard coverPixels > 0 else { return }
+            let pixels = coverPixels
+            let keys = coverKeys
+            stackCovers.retain(keys)
+            for key in keys where stackCovers.image(for: key) == nil || loadedCoverPixels < pixels {
+                let image = await loadCover(for: key)
+                guard !Task.isCancelled else { return }
+                stackCovers.set(image, for: key)
             }
+            loadedCoverPixels = pixels
         }
     }
 
-    private func remoteCover(at index: Int) async -> UIImage? {
-        guard !remoteBooks.isEmpty else { return nil }
-        if let url = remoteCopies[remoteBooks[index % remoteBooks.count].id] {
-            return await CoverLoader.load(for: url).cover
+    private func loadCover(for key: StackCoverKey) async -> UIImage? {
+        switch key {
+        case .local(let revision): return await CoverLoader.load(for: revision.url, maxPixel: coverPixels).cover
+        case .linked(let url, _): return linkedFiles?.comic(for: url).flatMap { linkedFiles?.cover(for: $0) }
+        case .remote(let profile, let id, let tag):
+            guard profile == remoteProfileID,
+                  let book = remoteBooks.first(where: { $0.id == id && ($0.imageTags?["Primary"] ?? "") == tag }),
+                  let remoteClient, let data = try? await remoteClient.cover(book, maxWidth: coverPixels) else { return nil }
+            return await Task.detached(priority: .utility) { JellyfinBookRow.thumbnail(data, maxPixel: coverPixels) }.value
         }
-        guard let remoteClient, !remoteBooks.isEmpty,
-              let data = try? await remoteClient.cover(remoteBooks[index % remoteBooks.count]) else { return nil }
-        let image = await Task.detached(priority: .utility) { JellyfinBookRow.thumbnail(data) }.value
-        return Task.isCancelled ? nil : image
     }
 
     @ViewBuilder
@@ -1465,22 +1709,9 @@ struct ComicStackCard: View {
         .padding(.bottom, columns >= 4 ? 9 : 13)
     }
 
-    @ViewBuilder
-    private var progressBarView: some View {
-        if showsProgress {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Leaf.ink
-                Leaf.ochre.frame(width: geo.size.width * CGFloat(progressFraction))
-            }
-        }
-        .frame(height: columns >= 4 ? 5 : 7)
-        }
-    }
 }
 
-/// Reading List Card displayed in the library grid — "Messy Stack" visual with rotated layers
-/// and downward cover peel matching Android's `ReadingListCard`.
+/// Reading List Card
 struct ReadingListCard: View {
     @ObservedObject private var covers = CoverLoader.shared
     @EnvironmentObject private var settings: LeafSettings
@@ -1488,43 +1719,60 @@ struct ReadingListCard: View {
     let previewUrls: [URL]
     let itemCount: Int
     var columns: Int = 2
+    var members: [ReadingListMember]? = nil
+    var remoteClient: JellyfinClient? = nil
+    var remoteProfileID = ""
+    var remoteCopies: [String: URL] = [:]
+    var linkedFiles: LinkedFilesStore? = nil
     let onOpenList: () -> Void
 
     @State private var topIndex: Int = 0
     @State private var peelOffsetY: CGFloat = 0
     @State private var cardHeight: CGFloat = 220
 
-    @State private var topCoverImage: UIImage?
-    @State private var layer2CoverImage: UIImage?
-    @State private var layer3CoverImage: UIImage?
+    @State private var stackCovers = StackCoverImages()
+    @State private var coverPixels = 0
+    @State private var loadedCoverPixels = 0
+    private var topCoverImage: UIImage? { stackCovers.image(for: coverSlots.first ?? nil) }
+    private var layer2CoverImage: UIImage? { stackCovers.image(for: coverSlots.dropFirst().first ?? nil) }
+    private var layer3CoverImage: UIImage? { stackCovers.image(for: coverSlots.dropFirst(2).first ?? nil) }
 
-    private var count: Int { max(previewUrls.count, 1) }
-
-    private var currentTopComic: URL? {
-        guard !previewUrls.isEmpty else { return nil }
-        let idx = (topIndex % count + count) % count
-        return previewUrls[idx]
+    private var previewMembers: [ReadingListMember] {
+        members ?? previewUrls.map { ReadingListMember(id: $0.lastPathComponent, url: $0, book: nil,
+            title: $0.deletingPathExtension().lastPathComponent) }
     }
-
-    private var layer2Comic: URL? {
-        guard previewUrls.count >= 2 else { return nil }
-        let idx = ((topIndex + 1) % count + count) % count
-        return previewUrls[idx]
+    private var count: Int { max(previewMembers.count, 1) }
+    private var coverSlots: [StackCoverKey?] {
+        (0..<min(3, previewMembers.count)).map { offset in
+            let member = previewMembers[(topIndex + offset) % count]
+            if let url = member.url { return .local(covers.revisions(for: [url])[0]) }
+            if let comic = member.linked { return .linked(comic.progressURL, linkedFiles?.coverRevisions[comic.id] ?? 0) }
+            if let book = member.book {
+                if let copy = remoteCopies[book.id] { return .local(covers.revisions(for: [copy])[0]) }
+                return .remote(profile: remoteProfileID, item: book.id, imageTag: book.imageTags?["Primary"] ?? "")
+            }
+            return nil
+        }
     }
+    private var coverKeys: [StackCoverKey] { coverSlots.compactMap { $0 } }
 
-    private var layer3Comic: URL? {
-        guard previewUrls.count >= 3 else { return nil }
-        let idx = ((topIndex + 2) % count + count) % count
-        return previewUrls[idx]
+    private var currentReadingState: LibraryReadingState {
+        var states = previewMembers.map { member -> LibraryReadingState in
+            if let url = member.url ?? member.linked?.progressURL { return .local(ReadingProgress.get(url)) }
+            if let book = member.book, let copy = remoteCopies[book.id] { return .local(ReadingProgress.get(copy)) }
+            return .remote(member.book?.userData)
+        }
+        if previewMembers.count < itemCount { states.append(.unknown) }
+        return .collection(states)
     }
 
     private var currentItemNum: Int {
-        guard !previewUrls.isEmpty else { return 1 }
+        guard !previewMembers.isEmpty else { return 1 }
         return (topIndex % count + count) % count + 1
     }
 
     private var layer2ItemNum: Int {
-        guard !previewUrls.isEmpty else { return 2 }
+        guard !previewMembers.isEmpty else { return 2 }
         return ((topIndex + 1) % count + count) % count + 1
     }
 
@@ -1626,6 +1874,23 @@ struct ReadingListCard: View {
                         )
                         .padding(columns >= 4 ? 4 : 6)
                 }
+                .overlay { LibraryReadingIndicator(state: currentReadingState) }
+                .overlay(alignment: .topLeading) {
+                    if !previewMembers.isEmpty {
+                        let member = previewMembers[topIndex % count]
+                        if member.linked != nil {
+                            Text("Files").leafControlFont(10, weight: 700)
+                                .foregroundStyle(Leaf.cream).padding(4)
+                                .background(Leaf.ink.opacity(0.85), in: RoundedRectangle(cornerRadius: 3)).padding(6)
+                        } else if let book = member.book, remoteCopies[book.id] != nil {
+                            Image(systemName: "arrow.down.circle.fill").foregroundStyle(Leaf.paperWhite).padding(6)
+                                .background(Leaf.ink.opacity(0.85), in: Circle()).padding(6)
+                        } else if member.url == nil && member.book == nil {
+                            Text("Unavailable comic").leafControlFont(11, weight: 700).foregroundStyle(Leaf.cream)
+                                .padding(6).background(Leaf.ink.opacity(0.85)).padding(6)
+                        }
+                    }
+                }
                 .aspectRatio(0.7, contentMode: .fit)
                 .background(
                     GeometryReader { geo in
@@ -1670,7 +1935,7 @@ struct ReadingListCard: View {
                                 peelOffsetY = cardHeight * 1.15
                             }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-                                topIndex = (topIndex + 1) % max(previewUrls.count, 1)
+                                topIndex = (topIndex + 1) % count
                                 peelOffsetY = 0
                             }
                         } else {
@@ -1682,41 +1947,92 @@ struct ReadingListCard: View {
             )
             .onTapGesture { onOpenList() }
 
+            if settings.libraryShowTitles {
             Text(list.name)
                 .font(.archivo(columns >= 4 ? 10.5 : 12, weight: 800))
                 .foregroundColor(Leaf.text)
                 .lineLimit(2)
                 .padding(.top, columns >= 4 ? 6 : 9)
+            }
 
+            if settings.libraryShowDetails {
             Text("\(itemCount) items")
                 .font(.archivo(columns >= 4 ? 8.5 : 9.5, weight: 600))
                 .foregroundColor(Leaf.secondaryText)
                 .lineLimit(1)
                 .padding(.top, 2)
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(list.name)
-        .accessibilityValue(Text("\(currentItemNum) / \(count)"))
+        .accessibilityValue(Text("\(currentItemNum) / \(count), \(currentReadingState.label)"))
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { onOpenList() }
         .accessibilityAction(named: Text("Next cover")) { topIndex = (topIndex + 1) % count }
-        .task(id: covers.revisions(for: previewUrls) + covers.revisions(for: [currentTopComic].compactMap { $0 })) {
-            if let top = currentTopComic {
-                topCoverImage = await CoverLoader.load(for: top).cover
-            } else {
-                topCoverImage = nil
+        .libraryCoverResolution($coverPixels)
+        .task(id: StackCoverRequest(keys: coverKeys, pixels: coverPixels)) {
+            guard coverPixels > 0 else { return }
+            let pixels = coverPixels
+            let keys = coverKeys
+            stackCovers.retain(keys)
+            for key in keys where stackCovers.image(for: key) == nil || loadedCoverPixels < pixels {
+                let image: UIImage?
+                switch key {
+                case .local(let revision): image = await CoverLoader.load(for: revision.url, maxPixel: coverPixels).cover
+                case .linked(let url, _): image = linkedFiles?.comic(for: url).flatMap { linkedFiles?.cover(for: $0) }
+                case .remote(_, let id, let tag):
+                    if let book = previewMembers.compactMap(\.book).first(where: {
+                        $0.id == id && ($0.imageTags?["Primary"] ?? "") == tag
+                    }), let remoteClient, let data = try? await remoteClient.cover(book, maxWidth: coverPixels) {
+                        image = await Task.detached(priority: .utility) { JellyfinBookRow.thumbnail(data, maxPixel: coverPixels) }.value
+                    } else { image = nil }
+                }
+                guard !Task.isCancelled else { return }
+                stackCovers.set(image, for: key)
             }
-            if let l2 = layer2Comic {
-                layer2CoverImage = await CoverLoader.load(for: l2).cover
-            } else {
-                layer2CoverImage = nil
+            loadedCoverPixels = pixels
+        }
+    }
+}
+
+/// A provider-linked file is a separate shelf item, never a downloaded or imported comic.
+struct LinkedFileCard: View {
+    @EnvironmentObject private var settings: LeafSettings
+    let comic: LinkedComic
+    @ObservedObject var store: LinkedFilesStore
+    var columns = 2
+    @State private var cover: UIImage?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ZStack(alignment: .bottom) {
+            Group {
+                if let cover { LibraryCoverArtwork(image: cover) }
+                else { GeneratedCover(title: comic.title, columns: columns) }
             }
-            if let l3 = layer3Comic {
-                layer3CoverImage = await CoverLoader.load(for: l3).cover
-            } else {
-                layer3CoverImage = nil
+            .aspectRatio(0.7, contentMode: .fit)
+            .clipShape(RoundedCornerShape(cornerRadius: 4))
+            LibraryReadingIndicator(state: .local(ReadingProgress.get(comic.progressURL)))
+            Text("Files").leafControlFont(10, weight: 700)
+                .foregroundStyle(Leaf.cream).padding(4)
+                .background(Leaf.ink.opacity(0.85), in: RoundedRectangle(cornerRadius: 3))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(6)
+            }
+            if settings.libraryShowTitles {
+            Text(comic.title)
+                .leafControlFont(12, weight: 800)
+                .foregroundColor(Leaf.text)
+                .lineLimit(2)
+            }
+            if settings.libraryShowDetails {
+                Text("\(comic.pageCount) pages").leafControlFont(11).foregroundColor(Leaf.secondaryText)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(comic.title)
+        .accessibilityValue(Text("\(String(localized: "Files")), \(LibraryReadingState.local(ReadingProgress.get(comic.progressURL)).label)"))
+        .task(id: store.coverRevisions[comic.id, default: 0]) { cover = store.cover(for: comic) }
     }
 }
 
@@ -1730,14 +2046,12 @@ struct ComicCard: View {
     var isEditMode: Bool = false
     var isSelected: Bool = false
     var coverTransition: Namespace.ID? = nil
+    @State private var coverPixels = 0
     @State private var cover: UIImage?
     @State private var pages = 0
 
     private var title: String { ComicMetadataStore.displayFilename(for: url) }
-    private var lastPage: Int { progress?.page ?? 0 }
     private var pageCount: Int { progress?.total ?? pages }
-    private var started: Bool { lastPage > 0 }
-    private var pct: Double { pageCount > 0 ? min(max(Double(lastPage + 1) / Double(pageCount), 0), 1) : 0 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1768,13 +2082,7 @@ struct ComicCard: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 }
 
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Leaf.ink
-                        Leaf.ochre.frame(width: geo.size.width * CGFloat(pct))
-                    }
-                }
-                .frame(height: columns >= 4 ? 5 : 7)
+                if !isEditMode { LibraryReadingIndicator(state: .local(progress)) }
             }
             .aspectRatio(0.7, contentMode: .fit)
             .background(settings.groundSoft)
@@ -1786,20 +2094,29 @@ struct ComicCard: View {
             )
             .shadow(color: .black.opacity(0.24), radius: columns >= 4 ? 3 : 5, y: 3)
 
+            if settings.libraryShowTitles {
             Text(title)
                 .font(.archivo(columns >= 4 ? 10 : 12, weight: 800)).foregroundColor(Leaf.text)
                 .lineLimit(2).multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, columns >= 4 ? 6 : 9)
-            Text(started
-                 ? String(localized: "\(pct.formatted(.percent.precision(.fractionLength(0)))) · page \(lastPage + 1) of \(pageCount)")
-                 : String(localized: "\(pageCount) pages"))
+            }
+            if settings.libraryShowDetails {
+            Text("\(pageCount) pages")
                 .font(.archivo(columns >= 4 ? 8.5 : 9.5)).foregroundColor(Leaf.secondaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 2)
+            }
         }
-        .task(id: covers.revisions(for: [url])) {
-            let loaded = await CoverLoader.load(for: url)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(LibraryReadingState.local(progress).label)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .libraryCoverResolution($coverPixels)
+        .task(id: StackCoverRequest(keys: covers.revisions(for: [url]).map { .local($0) }, pixels: coverPixels)) {
+            guard coverPixels > 0 else { return }
+            let loaded = await CoverLoader.load(for: url, maxPixel: coverPixels)
+            guard !Task.isCancelled else { return }
             cover = loaded.cover
             pages = loaded.pageCount
         }
@@ -1809,13 +2126,14 @@ struct ComicCard: View {
 /// The card proposes the artwork bounds; a wide image must not enlarge its layout or hit region.
 struct LibraryCoverArtwork: View {
     let image: UIImage
+    var contentMode: ContentMode = .fill
 
     var body: some View {
         Color.clear
             .overlay {
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFill()
+                    .aspectRatio(contentMode: image.size.width > image.size.height ? .fit : contentMode)
             }
             .clipped()
             .contentShape(Rectangle())

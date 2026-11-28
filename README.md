@@ -9,7 +9,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg" alt="License: MPL 2.0"></a>
   <img src="https://img.shields.io/badge/platform-Android%208.0%2B-3DDC84.svg" alt="Android 8.0+">
-  <img src="https://img.shields.io/badge/platform-iOS%2017.0%2B-000000.svg" alt="iOS 17.0+">
+  <img src="https://img.shields.io/badge/platform-iOS%2026.0%2B-000000.svg" alt="iOS 26.0+">
   <img src="https://img.shields.io/badge/architecture-Kotlin%20Multiplatform-7F52FF.svg" alt="Kotlin Multiplatform">
 </p>
 

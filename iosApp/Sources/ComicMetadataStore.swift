@@ -157,17 +157,21 @@ public enum ComicMetadataStore {
     }
 
     public static func parseDefault(for url: URL) -> ComicMetadataRecord {
-        let filename = url.lastPathComponent
-        let fileMeta = ComicMetadataParser.shared.parseFilename(filename: filename)
+        let xml = (try? CbzArchive(url: url))?.readComicInfoXml()
+        return parseMetadata(filename: url.lastPathComponent, xml: xml)
+    }
 
-        // 1. Try reading ComicInfo.xml if CBZ and merge with filename fallback
-        if let archive = try? CbzArchive(url: url), let xml = archive.readComicInfoXml() {
+    static func parseMetadata(filename: String, xml: String? = nil) -> ComicMetadataRecord {
+        let fileMeta = ComicMetadataParser.shared.parseFilename(filename: filename)
+        let baseTitle = (filename as NSString).deletingPathExtension
+
+        if let xml {
             let xmlMeta = ComicMetadataParser.shared.parseComicInfoXml(xml: xml)
             let series = xmlMeta.series ?? fileMeta.series
             let volume = xmlMeta.volume ?? fileMeta.volume
             let issueNum = xmlMeta.issueNumber?.floatValue ?? fileMeta.issueNumber?.floatValue
             let year = xmlMeta.year?.intValue ?? fileMeta.year?.intValue
-            let title = xmlMeta.title ?? fileMeta.title ?? url.deletingPathExtension().lastPathComponent
+            let title = xmlMeta.title ?? fileMeta.title ?? baseTitle
             return ComicMetadataRecord(
                 series: series,
                 volume: volume,
@@ -183,7 +187,7 @@ public enum ComicMetadataStore {
             volume: fileMeta.volume,
             issueNumber: fileMeta.issueNumber?.floatValue,
             year: fileMeta.year?.intValue,
-            title: fileMeta.title ?? url.deletingPathExtension().lastPathComponent
+            title: fileMeta.title ?? baseTitle
         )
     }
 

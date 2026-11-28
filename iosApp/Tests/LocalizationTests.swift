@@ -47,12 +47,30 @@ struct LocalizationTests {
             )
             print("Leaf language matching \(language): \(matching)")
             #expect(!matching.isEmpty)
-            if language == "en" || language == "fr" {
+            if language == "en" {
                 #expect(matching.first == "en")
             }
+            if language == "fr" { #expect(matching.first == "fr") }
             if language == "es-MX" {
                 #expect(matching.first == "es-MX")
             }
+        }
+    }
+
+    @Test func reviewedFrenchAndCurrentLibraryCopyArePackaged() throws {
+        let path = try #require(Bundle.main.path(forResource: "fr", ofType: "lproj"))
+        let french = try #require(Bundle(path: path))
+        #expect(french.localizedString(forKey: "Unread only", value: nil, table: nil) == "Non lues uniquement")
+        #expect(french.localizedString(forKey: "Library appearance", value: nil, table: nil) == "Apparence de la bibliothèque")
+        #expect(french.localizedString(forKey: "Link from Files", value: nil, table: nil) == "Lier depuis Fichiers")
+        #expect(french.localizedString(forKey: "Files", value: nil, table: nil) == "Fichiers")
+        #expect(french.localizedString(forKey: "Recently Added (local comics)", value: nil, table: nil) == "Ajouts récents (BD locales)")
+        let permission = french.localizedString(forKey: "NSLocalNetworkUsageDescription", value: nil, table: "InfoPlist")
+        #expect(permission != "NSLocalNetworkUsageDescription")
+        #expect(permission.contains("SMB"))
+        for count in [0, 1, 2, 11] {
+            let format = french.localizedString(forKey: "%lld SELECTED", value: nil, table: nil)
+            #expect(String(format: format, locale: Locale(identifier: "fr_FR"), Int64(count)) == "SÉLECTION : \(count)")
         }
     }
 

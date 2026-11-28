@@ -10,29 +10,19 @@ struct JellyfinCatalogueStatus: View {
             if let message = catalogue.message {
                 Text(message).font(.footnote)
             }
-            if let selected = catalogue.libraries.first(where: { $0.id == catalogue.libraryID }) {
-                Text(selected.name).font(.headline)
-            }
             if catalogue.fromCache { Text("Saved catalogue").font(.footnote) }
             if catalogue.loading { ProgressView("Loading Jellyfin…") }
-            HStack {
-                if browser.needsSignIn || catalogue.requiresSignIn {
-                    Button("Sign in") { browser.needsSignIn = true; connect() }
-                } else {
-                    Button("Retry") { Task { await catalogue.start(browser: browser, force: true) } }
-                        .disabled(catalogue.loading)
-                }
-                Spacer()
-                Menu("Jellyfin libraries") {
-                    ForEach(catalogue.libraries) { library in
-                        Button(library.name) {
-                            Task { await catalogue.selectLibrary(library.id, browser: browser) }
-                        }
+            if catalogue.message != nil || catalogue.fromCache || browser.needsSignIn || catalogue.requiresSignIn {
+                HStack {
+                    if browser.needsSignIn || catalogue.requiresSignIn {
+                        Button("Sign in") { browser.needsSignIn = true; connect() }
+                    } else {
+                        Button("Retry") { Task { await catalogue.start(browser: browser, force: true) } }
+                            .disabled(catalogue.loading)
                     }
-                    Button("Connection settings", action: connect)
                 }
+                .frame(minHeight: 44)
             }
-            .frame(minHeight: 44)
         }
         .padding(.horizontal, 18)
     }
@@ -68,7 +58,7 @@ struct JellyfinMainGrid: View {
         let entries = visible
         VStack(alignment: .leading, spacing: 16) {
             if catalogue.libraryID == nil && !catalogue.loading {
-                Text("Choose a Jellyfin library above.").foregroundStyle(.secondary)
+                Text("Choose a Jellyfin library in Menu.").foregroundStyle(.secondary)
             } else if entries.isEmpty && !catalogue.loading {
                 Text("No matching comics in the loaded catalogue.").foregroundStyle(.secondary)
             }
@@ -122,10 +112,17 @@ struct JellyfinMainGrid: View {
 }
 
 struct JellyfinComicCard: View {
+    @EnvironmentObject private var settings: LeafSettings
     let book: JellyfinBook
     @ObservedObject var browser: JellyfinBrowserModel
     var columns = 2
+    @State private var loadedIdentity = ""
+    @State private var coverPixels = 0
     @State private var cover: UIImage?
+    private var readingState: LibraryReadingState {
+        if let copy = browser.downloaded[book.id] { return .local(ReadingProgress.get(copy)) }
+        return .remote(book.userData)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -135,35 +132,45 @@ struct JellyfinComicCard: View {
                 } else {
                     GeneratedCover(title: book.name, columns: columns)
                 }
-                if let percent = book.userData?.PlayedPercentage, percent.isFinite {
-                    GeometryReader { geometry in
-                        Leaf.ochre.frame(width: geometry.size.width * min(1, max(0, percent / 100)))
-                    }
-                    .frame(height: columns >= 4 ? 5 : 7)
-                    .background(Leaf.ink)
+                LibraryReadingIndicator(state: readingState)
+                if browser.downloaded[book.id] != nil {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .foregroundStyle(Leaf.paperWhite).padding(6)
+                        .background(Leaf.ink.opacity(0.85), in: Circle()).padding(6)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             }
             .aspectRatio(0.7, contentMode: .fit)
             .clipShape(RoundedCornerShape(cornerRadius: 4))
             .shadow(color: .black.opacity(0.24), radius: columns >= 4 ? 3 : 5, y: 3)
+            .accessibilityHidden(true)
+            if settings.libraryShowTitles {
             Text(book.name)
                 .leafControlFont(columns >= 4 ? 10 : 12, weight: 800)
                 .foregroundStyle(Leaf.text).lineLimit(2)
+            }
+            if settings.libraryShowDetails {
             HStack(spacing: 4) {
                 Text("Jellyfin")
                 if browser.downloaded[book.id] != nil { Image(systemName: "arrow.down.circle.fill") }
-                if book.userData?.Played == true { Text("Finished") }
+
             }
             .font(.caption2).foregroundStyle(Leaf.secondaryText)
+            }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(browser.downloaded[book.id] != nil ? Text("Available offline") : Text("Needs connection"))
-        .task(id: (browser.connection?.id ?? "") + book.id + (book.imageTags?["Primary"] ?? "")) {
-            cover = nil
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: book.name + ", Jellyfin"))
+        .accessibilityValue(Text("\(browser.downloaded[book.id] != nil ? String(localized: "Available offline") : String(localized: "Needs connection")), \(readingState.label)"))
+        .libraryCoverResolution($coverPixels)
+        .task(id: (browser.connection?.id ?? "") + book.id + (book.imageTags?["Primary"] ?? "") + ":" + String(coverPixels)) {
+            guard coverPixels > 0 else { return }
+            let identity = (browser.connection?.id ?? "") + book.id + (book.imageTags?["Primary"] ?? "")
+            if loadedIdentity != identity { cover = nil; loadedIdentity = identity }
             if let local = browser.downloaded[book.id] {
-                cover = await CoverLoader.load(for: local).cover
-            } else if let client = browser.client, let data = try? await client.cover(book) {
-                let image = await Task.detached(priority: .utility) { JellyfinBookRow.thumbnail(data) }.value
+                let image = await CoverLoader.load(for: local, maxPixel: coverPixels).cover
+                if !Task.isCancelled { cover = image }
+            } else if let client = browser.client, let data = try? await client.cover(book, maxWidth: coverPixels) {
+                let image = await Task.detached(priority: .utility) { JellyfinBookRow.thumbnail(data, maxPixel: coverPixels) }.value
                 if !Task.isCancelled { cover = image }
             }
         }
@@ -175,17 +182,11 @@ struct JellyfinSeriesCard: View {
     @ObservedObject var browser: JellyfinBrowserModel
     let columns: Int
     let open: () -> Void
-    private var progress: Double? {
-        let values = group.books.compactMap { $0.userData?.PlayedPercentage }.filter { $0.isFinite }
-        guard !values.isEmpty, values.count == group.books.count else { return nil }
-        return values.reduce(0) { $0 + min(100, max(0, $1)) } / Double(values.count) / 100
-    }
-
     var body: some View {
         ComicStackCard(seriesName: group.name, volume: nil, issues: [],
             totalIssues: group.books.count,
             unreadIssues: group.books.filter { $0.userData?.Played == false }.count,
-            progressFraction: progress ?? 0, showsProgress: progress != nil, columns: columns,
+            progressFraction: 0, columns: columns,
             remoteBooks: group.books, remoteClient: browser.client,
             remoteProfileID: browser.connection?.id ?? "", remoteCopies: browser.downloaded, onOpenSeries: open)
     }
