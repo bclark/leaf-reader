@@ -179,6 +179,7 @@ class LibraryRepositoryJellyfinTest {
         settings.jellyfinServerUrl = baseUrl()
         settings.jellyfinAllowInsecureHttp = true
         server.enqueue(MockResponse().setBody(okio.Buffer().write(createValidCbzBytes())))
+        server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
         val downloaded = repository.importJellyfinComic(item).getOrThrow()
         val attached = repository.observeListReferences(list).first().first()
         assertEquals(downloaded, attached.comicId)
@@ -386,6 +387,7 @@ class LibraryRepositoryJellyfinTest {
             vm.openJellyfinDetail(item)
             withTimeout(5000) { vm.jellyfinDetail.first { it?.loading == false && !it.checkingLocal } }
             server.enqueue(MockResponse().setBody(okio.Buffer().write(createValidCbzBytes(3))))
+            server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
             vm.downloadJellyfinDetail(openWhenReady = true)
             val ready = withTimeout(10000) { vm.jellyfinDetail.first { it?.readyComicId != null } }!!
             val comic = comicDao.getById(ready.readyComicId!!)!!
@@ -394,7 +396,7 @@ class LibraryRepositoryJellyfinTest {
             assertEquals(comic.id, vm.consumeJellyfinRead())
             assertNull(vm.consumeJellyfinRead())
             assertEquals("/Items/read-on-demand/Download", server.takeRequest().path)
-            assertEquals(1, server.requestCount)
+            assertEquals(2, server.requestCount)
         } finally { clearModels(store); kotlinx.coroutines.Dispatchers.resetMain() }
     }
 
@@ -636,6 +638,7 @@ class LibraryRepositoryJellyfinTest {
                 .setHeader("Content-Length", cbzBytes.size)
                 .setBody(okio.Buffer().write(cbzBytes))
         )
+        server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
 
         val auth = JellyfinAuth(
             accessToken = "tok-1",
@@ -845,6 +848,7 @@ class LibraryRepositoryJellyfinTest {
         for ((index, names) in cases.withIndex()) {
             val (name, expectedTitle) = names
             server.enqueue(MockResponse().setBody(okio.Buffer().write(bytes)))
+            server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
             val item = JellyfinItem(
                 id = "dotted-title-$index", name = name, isFolder = false, container = "cbz",
             )
@@ -946,6 +950,7 @@ class LibraryRepositoryJellyfinTest {
                 .setHeader("Content-Length", cbzBytes.size)
                 .setBody(okio.Buffer().write(cbzBytes))
         )
+        server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
 
         val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
         credStore.saveAuth(auth)
@@ -980,6 +985,7 @@ class LibraryRepositoryJellyfinTest {
                 .setHeader("Content-Length", cbzBytes.size)
                 .setBody(okio.Buffer().write(cbzBytes))
         )
+        server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
 
         val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
         credStore.saveAuth(auth)
@@ -1028,6 +1034,7 @@ class LibraryRepositoryJellyfinTest {
                 .setHeader("Content-Length", cbzBytes.size)
                 .setBody(okio.Buffer().write(cbzBytes))
         )
+        server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
 
         val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
         credStore.saveAuth(auth)
@@ -1069,6 +1076,7 @@ class LibraryRepositoryJellyfinTest {
                 .setHeader("Content-Length", cbzBytes.size)
                 .setBody(okio.Buffer().write(cbzBytes))
         )
+        server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
 
         val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
         credStore.saveAuth(auth)
@@ -1111,6 +1119,7 @@ class LibraryRepositoryJellyfinTest {
                 .setHeader("Content-Length", cbzBytes.size)
                 .setBody(okio.Buffer().write(cbzBytes))
         )
+        server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
 
         val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
         credStore.saveAuth(auth)
@@ -1144,6 +1153,7 @@ class LibraryRepositoryJellyfinTest {
                 .setHeader("Content-Length", cbzBytes.size)
                 .setBody(okio.Buffer().write(cbzBytes))
         )
+        server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
 
         val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
         credStore.saveAuth(auth)
@@ -1189,6 +1199,7 @@ class LibraryRepositoryJellyfinTest {
                 .setHeader("Content-Length", cbzBytes.size)
                 .setBody(okio.Buffer().write(cbzBytes))
         )
+        server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
 
         val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
         credStore.saveAuth(auth)
@@ -1199,6 +1210,7 @@ class LibraryRepositoryJellyfinTest {
         val item = JellyfinItem(id = "cancel-item-1", name = "CancelTest.cbz", isFolder = false, container = "cbz")
         val comicId = repository.importJellyfinComic(item).getOrThrow()
         server.takeRequest(5, TimeUnit.SECONDS) // consume download
+        server.takeRequest(5, TimeUnit.SECONDS) // consume import-time progress read
 
         // Trigger sync with 600ms debounce
         repository.triggerJellyfinProgressSync(comicId, page = 2, debounceMs = 600L)
@@ -1224,6 +1236,7 @@ class LibraryRepositoryJellyfinTest {
                 .setHeader("Content-Length", cbzBytes.size)
                 .setBody(okio.Buffer().write(cbzBytes))
         )
+        server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
 
         val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
         credStore.saveAuth(auth)
@@ -1265,6 +1278,7 @@ class LibraryRepositoryJellyfinTest {
                 .setHeader("Content-Length", cbzBytes.size)
                 .setBody(okio.Buffer().write(cbzBytes))
         )
+        server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
 
         val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
         credStore.saveAuth(auth)
@@ -1297,6 +1311,7 @@ class LibraryRepositoryJellyfinTest {
                 .setHeader("Content-Length", cbzBytes.size)
                 .setBody(okio.Buffer().write(cbzBytes))
         )
+        server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
 
         val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
         credStore.saveAuth(auth)
@@ -1336,6 +1351,7 @@ class LibraryRepositoryJellyfinTest {
                 .setHeader("Content-Length", cbzBytes.size)
                 .setBody(okio.Buffer().write(cbzBytes))
         )
+        server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
 
         val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
         credStore.saveAuth(auth)
@@ -1346,6 +1362,7 @@ class LibraryRepositoryJellyfinTest {
         val item = JellyfinItem(id = "pending-outbox-item", name = "PendingOutbox.cbz", isFolder = false, container = "cbz")
         val comicId = repository.importJellyfinComic(item).getOrThrow()
         server.takeRequest(5, TimeUnit.SECONDS) // consume download
+        server.takeRequest(5, TimeUnit.SECONDS) // consume import-time progress read
 
         // Set local page to 2
         comicDao.updateProgress(comicId, 2, 0, System.currentTimeMillis())
@@ -1390,6 +1407,7 @@ class LibraryRepositoryJellyfinTest {
                 .setHeader("Content-Length", cbzBytes.size)
                 .setBody(okio.Buffer().write(cbzBytes))
         )
+        server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
 
         val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
         credStore.saveAuth(auth)
@@ -1400,6 +1418,7 @@ class LibraryRepositoryJellyfinTest {
         val item = JellyfinItem(id = "atomic-item-1", name = "AtomicTest.cbz", isFolder = false, container = "cbz")
         val comicId = repository.importJellyfinComic(item).getOrThrow()
         server.takeRequest(5, TimeUnit.SECONDS) // consume download
+        server.takeRequest(5, TimeUnit.SECONDS) // consume import-time progress read
 
         // Call saveProgress with page 4
         repository.saveProgress(comicId, page = 4, slot = 0)
@@ -1423,6 +1442,7 @@ class LibraryRepositoryJellyfinTest {
                 .setHeader("Content-Length", cbzBytes.size)
                 .setBody(okio.Buffer().write(cbzBytes))
         )
+        server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
 
         val auth = JellyfinAuth("tok", "u", "srv", "Bryan")
         credStore.saveAuth(auth)
@@ -1688,6 +1708,7 @@ class LibraryRepositoryJellyfinTest {
             val (pages, ticks, played) = snapshot
             val bytes = createValidCbzBytes(pages)
             server.enqueue(MockResponse().setBody(okio.Buffer().write(bytes)))
+            server.enqueue(MockResponse().setBody("{}")) // Unknown import-time progress
             val item = JellyfinItem("fresh-$index", "Fresh.cbz", false, container = "cbz", playbackPositionTicks = ticks, played = played)
             val id = repository.importJellyfinComic(item).getOrThrow()
             takeRequest()
@@ -1700,6 +1721,142 @@ class LibraryRepositoryJellyfinTest {
         }
     }
 
+    private suspend fun importWithProgress(itemId: String, response: MockResponse): Long {
+        credStore.saveAuth(JellyfinAuth("token-u", "u", "srv", "Reader"))
+        settings.jellyfinServerUrl = baseUrl()
+        settings.jellyfinAllowInsecureHttp = true
+        settings.jellyfinUserId = "u"
+        enqueueArchive()
+        response.getBody()?.clone()?.readUtf8()?.takeIf { it.isNotBlank() }?.let { body ->
+            val json = JSONObject(body)
+            if (!json.has("Id")) response.setBody(json.put("Id", itemId).toString())
+        }
+        server.enqueue(response)
+        return repository.importJellyfinComic(
+            JellyfinItem(itemId, "$itemId.cbz", false, container = "cbz")).getOrThrow()
+    }
+
+    @Test fun firstReadUsesObservedBaselineForImmediateExitAndPageTurn() = runBlocking {
+        for (page in listOf(0, 1)) {
+            server.dispatcher = okhttp3.mockwebserver.QueueDispatcher()
+            val item = "fresh-$page"
+            val id = importWithProgress(item, MockResponse().setBody(
+                """{"UserData":{"PlaybackPositionTicks":0,"Played":false}}"""))
+            val protocol = SyncProtocolDispatcher().also { server.dispatcher = it }
+            saveOffline(id, page)
+            repository.flushJellyfinOutbox()
+            assertTrue(repository.progressConflicts.value.isEmpty())
+            assertNull(outboxDao.getPendingForComic(id))
+            assertEquals(page, comicDao.getById(id)!!.lastPage)
+            assertEquals(page * 10_000L, protocol.position(item).positionTicks)
+            assertEquals(if (page == 0) 0 else 1, protocol.writes.size)
+        }
+    }
+
+    @Test fun firstReadRetainsUnconfirmedSaveAndRetriesWithoutConflict() = runBlocking {
+        val id = importWithProgress("retry-first-read", MockResponse().setBody(
+            """{"UserData":{"PlaybackPositionTicks":0,"Played":false}}"""))
+        val protocol = SyncProtocolDispatcher().also {
+            it.acknowledgeWrites = false
+            server.dispatcher = it
+        }
+        saveOffline(id, 1)
+        repository.flushJellyfinOutbox()
+        assertEquals(1, comicDao.getById(id)!!.lastPage)
+        assertNotNull(outboxDao.getPendingForComic(id))
+        assertTrue(repository.progressConflicts.value.isEmpty())
+        protocol.acknowledgeWrites = true
+        repository.flushJellyfinOutbox()
+        assertNull(outboxDao.getPendingForComic(id))
+        assertEquals(10_000L, protocol.position("retry-first-read").positionTicks)
+    }
+
+    @Test fun savedFirstPageAndRemoteResetStillRequireConflict() = runBlocking {
+        // 5,000 ticks is a real saved position that displays as page 1.
+        for ((initial, remote) in listOf(0L to 5_000L, 20_000L to 0L, 0L to 30_000L)) {
+            server.dispatcher = okhttp3.mockwebserver.QueueDispatcher()
+            val item = "changed-$initial-$remote"
+            val id = importWithProgress(item, MockResponse().setBody(
+                """{"UserData":{"PlaybackPositionTicks":$initial,"Played":false,"LastPlayedDate":"2026-11-24T12:00:00Z"}}"""))
+            val protocol = SyncProtocolDispatcher().also {
+                it.position(item, remote, false)
+                server.dispatcher = it
+            }
+            saveOffline(id, 1)
+            repository.flushJellyfinOutbox()
+            assertNotNull(outboxDao.getPendingForComic(id))
+            assertTrue(repository.progressConflicts.value.any { it.comicId == id })
+            assertTrue(protocol.writes.none { it.path!!.startsWith("/UserItems/$item/") })
+        }
+    }
+
+    @Test fun genuineFirstPageBookmarkIsCapturedExactlyAndCanAdvanceNormally() = runBlocking {
+        val date = "2026-11-23T12:00:00Z"
+        val id = importWithProgress("page-one-bookmark", MockResponse().setBody(
+            """{"UserData":{"PlaybackPositionTicks":5000,"Played":false,"LastPlayedDate":"$date"}}"""))
+        assertEquals(0, comicDao.getById(id)!!.lastPage)
+        val baseline = JSONObject(db.jellyfinMetadataCacheDao().get("srv", "u", baseUrl(),
+            "progress-baseline:page-one-bookmark")!!)
+        assertEquals(5000L, baseline.getLong("ticks"))
+        assertEquals(date, baseline.getString("lastPlayedDate"))
+        val protocol = SyncProtocolDispatcher().also {
+            it.position("page-one-bookmark", 5000, false, date)
+            server.dispatcher = it
+        }
+        saveOffline(id, 0)
+        repository.flushJellyfinOutbox()
+        assertTrue(protocol.writes.isEmpty())
+        assertEquals(5000L, protocol.position("page-one-bookmark").positionTicks)
+        saveOffline(id, 1)
+        repository.flushJellyfinOutbox()
+        assertTrue(repository.progressConflicts.value.isEmpty())
+        assertNull(outboxDao.getPendingForComic(id))
+        assertEquals(10_000L, protocol.position("page-one-bookmark").positionTicks)
+    }
+
+    @Test fun firstPageSaveAfterImportIsNotAnUntouchedDefault() = runBlocking {
+        val id = importWithProgress("saved-first-page", MockResponse().setBody(
+            """{"UserData":{"PlaybackPositionTicks":0,"Played":false}}"""))
+        val protocol = SyncProtocolDispatcher().also {
+            it.position("saved-first-page", 0, false, "2026-11-24T12:00:00Z")
+            server.dispatcher = it
+        }
+        saveOffline(id, 1)
+        repository.flushJellyfinOutbox()
+        assertTrue(repository.progressConflicts.value.any { it.comicId == id })
+        assertNotNull(outboxDao.getPendingForComic(id))
+        assertTrue(protocol.writes.isEmpty())
+    }
+
+    @Test fun incompleteOrFailedImportObservationNeverCreatesUnreadBaseline() = runBlocking {
+        for ((index, response) in listOf(
+            MockResponse().setBody("{}"),
+            MockResponse().setBody("""{"UserData":{"PlaybackPositionTicks":0}}"""),
+            MockResponse().setBody("""{"UserData":{"Played":false}}"""),
+            MockResponse().setBody("""{"Id":"different-item","UserData":{"PlaybackPositionTicks":0,"Played":false}}"""),
+            MockResponse().setResponseCode(503),
+        ).withIndex()) {
+            server.dispatcher = okhttp3.mockwebserver.QueueDispatcher()
+            val item = "unknown-$index"
+            val id = importWithProgress(item, response)
+            assertNull(db.jellyfinMetadataCacheDao().get("srv", "u", baseUrl(), "progress-baseline:$item"))
+            val protocol = SyncProtocolDispatcher().also {
+                it.position(item, null, null)
+                server.dispatcher = it
+            }
+            saveOffline(id, 1)
+            repository.flushJellyfinOutbox()
+            assertEquals(1, comicDao.getById(id)!!.lastPage)
+            assertNotNull(outboxDao.getPendingForComic(id))
+            assertTrue(protocol.writes.isEmpty())
+            // A later complete zero cannot retroactively prove it was untouched at import.
+            protocol.position(item, 0, false)
+            repository.flushJellyfinOutbox()
+            assertTrue(repository.progressConflicts.value.any { it.comicId == id })
+            assertTrue(protocol.writes.isEmpty())
+        }
+    }
+
     private suspend fun importedRetentionFixture(itemId: String): Pair<JellyfinItem, Long> {
         credStore.saveAuth(JellyfinAuth("token-u", "u", "srv", "Reader"))
         settings.jellyfinServerUrl = baseUrl()
@@ -1707,6 +1864,7 @@ class LibraryRepositoryJellyfinTest {
         settings.jellyfinUserId = "u"
         val item = JellyfinItem(itemId, "Retained.cbz", false, container = "cbz")
         enqueueArchive()
+        server.enqueue(MockResponse().setBody("{}"))
         val id = repository.importJellyfinComic(item).getOrThrow()
         assertTrue(takeRequest().path!!.contains("/Download"))
         return item to id
@@ -1725,6 +1883,8 @@ class LibraryRepositoryJellyfinTest {
         fun open() = Room.databaseBuilder(context, AppDatabase::class.java, "sync-durability.db").allowMainThreadQueries().build()
         db = open(); refreshDaos(); repository = newRepository(JellyfinClient("retention"))
         val (item, id) = importedRetentionFixture("retention")
+        seedBaseline(id, 20_000L, false)
+        val baseline = db.jellyfinMetadataCacheDao().get("srv", "u", baseUrl(), "progress-baseline:${item.id}")
         saveOffline(id, 3, true)
         val list = repository.createReadingList("Retained order")
         repository.addComicToReadingList(list, id)
@@ -1755,6 +1915,7 @@ class LibraryRepositoryJellyfinTest {
         assertEquals(true, restored.completionOverride)
         assertEquals(before.lastOpened, restored.lastOpened)
         assertEquals(before.dateAdded, restored.dateAdded)
+        assertEquals(baseline, db.jellyfinMetadataCacheDao().get("srv", "u", baseUrl(), "progress-baseline:${item.id}"))
         assertTrue(File(restored.filePath).isFile)
         assertEquals(pending, outboxDao.getPendingForComic(id))
         assertEquals(members, db.readingListDao().getAllItems())

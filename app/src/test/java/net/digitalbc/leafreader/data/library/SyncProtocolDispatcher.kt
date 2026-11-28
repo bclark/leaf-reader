@@ -21,8 +21,8 @@ internal open class SyncProtocolDispatcher(private val queuedResponses: Boolean 
     @Volatile var onProgressRead: (() -> Unit)? = null
 
     fun position(item: String) = positions[item] ?: JellyfinProgressSnapshot(0, false)
-    fun position(item: String, ticks: Long?, played: Boolean?) {
-        positions[item] = JellyfinProgressSnapshot(ticks, played)
+    fun position(item: String, ticks: Long?, played: Boolean?, lastPlayedDate: String? = null) {
+        positions[item] = JellyfinProgressSnapshot(ticks, played, lastPlayedDate = lastPlayedDate)
     }
 
     override fun dispatch(request: RecordedRequest): MockResponse {
@@ -31,7 +31,8 @@ internal open class SyncProtocolDispatcher(private val queuedResponses: Boolean 
         if (request.method == "GET" && segments.size == 2 && segments[0] == "Items") {
             val snapshot = position(segments[1])
             val body = JSONObject().put("Id", segments[1]).put("UserData", JSONObject()
-                .put("PlaybackPositionTicks", snapshot.positionTicks).put("Played", snapshot.played))
+                .put("PlaybackPositionTicks", snapshot.positionTicks).put("Played", snapshot.played)
+                .put("LastPlayedDate", snapshot.lastPlayedDate))
             val callback = onProgressRead
             onProgressRead = null
             callback?.invoke()

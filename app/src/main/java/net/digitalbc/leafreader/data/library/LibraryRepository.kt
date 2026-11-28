@@ -401,7 +401,8 @@ class LibraryRepository(
             "progress-baseline:$itemId") ?: return null
         return runCatching {
             val json = JSONObject(payload)
-            JellyfinProgressSnapshot(json.getLong("ticks"), json.getBoolean("played"))
+            JellyfinProgressSnapshot(json.getLong("ticks"), json.getBoolean("played"),
+                lastPlayedDate = if (json.isNull("lastPlayedDate")) null else json.getString("lastPlayedDate"))
                 .takeIf { it.isAvailable }
         }.getOrNull()
     }
@@ -412,7 +413,8 @@ class LibraryRepository(
         val database = checkNotNull(db) { "Progress storage is unavailable" }
         database.jellyfinMetadataCacheDao().put(net.digitalbc.leafreader.data.db.JellyfinMetadataCache(
             auth.serverId, auth.userId, url, "progress-baseline:$itemId",
-            JSONObject().put("ticks", snapshot.positionTicks).put("played", snapshot.played).toString()))
+            JSONObject().put("ticks", snapshot.positionTicks).put("played", snapshot.played)
+                .put("lastPlayedDate", snapshot.lastPlayedDate).toString()))
     }
 
     private fun publishProgressConflict(conflict: JellyfinProgressConflict, review: Boolean = false) {
@@ -472,7 +474,8 @@ class LibraryRepository(
             val localPage = pending?.pageIndex ?: comic.lastPage
             val localPlayed = pending?.markPlayed ?: if (pending != null) baseline?.played ?: comic.isCompleted
                 else comic.isCompleted
-            val localTicks = if (pending == null && baseline != null &&
+            // Panel-only saves must preserve an exact server bookmark within the same displayed page.
+            val localTicks = if (baseline != null && (pending == null || pending.markPlayed == null) &&
                 JellyfinProgress.ticksToPage(baseline.positionTicks!!, comic.pageCount) == localPage &&
                 baseline.played == localPlayed) baseline.positionTicks
                 else if (pending == null && baseline == null &&
@@ -492,7 +495,11 @@ class LibraryRepository(
                     baseline?.positionTicks, baseline?.played, pending != null,
                     baseline == null || localTicks != baseline.positionTicks || localPlayed != baseline.played)
             }
-            when (action) {
+            // A new first-page save can leave ticks/Played unchanged while recording server activity.
+            val serverActivityChanged = remote.lastPlayedDate != baseline?.lastPlayedDate
+            val guardedAction = if (choice == null && action == JellyfinSyncAction.UPLOAD && serverActivityChanged)
+                JellyfinSyncAction.CONFLICT else action
+            when (guardedAction) {
                 JellyfinSyncAction.CONFLICT -> publishProgressConflict(conflict, reviewConflict)
                 JellyfinSyncAction.UNAVAILABLE -> Unit
                 JellyfinSyncAction.DOWNLOAD, JellyfinSyncAction.EQUAL -> {
@@ -1348,6 +1355,19 @@ class LibraryRepository(
                     partFile.delete()
                 }
 
+                // A catalogue item's default zero is not evidence of an unread server position.
+                // Observe before publishing a new comic so its first save has a three-way baseline.
+                val initialProgress = if (existingLink == null && db != null) {
+                    try {
+                        jellyfinClient.getProgress(config, auth, item.id).takeIf { it.isAvailable }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        null // Import remains available; unknown progress must not become an unread baseline.
+                    }
+                } else null
+                requireCurrentSession()
+
                 withContext(NonCancellable) {
                     requireCurrentSession()
                     val result = indexCopiedFile(dest, coversDir, token, title, source = "jellyfin")
@@ -1384,9 +1404,19 @@ class LibraryRepository(
                                     it.serverId == auth.serverId && it.userId == auth.userId && it.itemId == item.id
                                 }?.forEach { readingListDao.insertItem(it.copy(comicId = comicId)) }
 
-                                // Seed initial progress from Jellyfin if remote position or played status exists
+                                // Establish local state and baseline atomically, without replacing retained sync history.
+                                if (initialProgress != null && existingLink == null &&
+                                    readProgressBaseline(auth, config.baseUrl, item.id) == null &&
+                                    jellyfinSyncOutboxDao?.getPendingForComic(comicId) == null) {
+                                    val imported = checkNotNull(dao.getById(comicId))
+                                    dao.updateProgress(comicId, JellyfinProgress.ticksToPage(initialProgress.positionTicks!!,
+                                        imported.pageCount), 0, imported.lastOpened)
+                                    dao.updateCompletion(comicId, initialProgress.played)
+                                    writeProgressBaseline(auth, config.baseUrl, item.id, initialProgress)
+                                }
+                                // Preserve the existing catalogue fallback when a complete observation is unavailable.
                                 val importedComic = dao.getById(comicId)
-                                if (comicId == indexedId && importedComic != null && (item.playbackPositionTicks > 0L || item.played)) {
+                                if (initialProgress == null && comicId == indexedId && importedComic != null && (item.playbackPositionTicks > 0L || item.played)) {
                                     val initialPage = JellyfinProgress.ticksToPage(item.playbackPositionTicks, importedComic.pageCount)
                                     dao.updateProgress(comicId, initialPage, 0, System.currentTimeMillis())
                                     if (item.played) dao.updateCompletion(comicId, true)

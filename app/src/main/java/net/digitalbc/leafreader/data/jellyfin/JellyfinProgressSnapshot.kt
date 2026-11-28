@@ -42,7 +42,7 @@ data class JellyfinProgressConflict(
     val deferred: Boolean = false,
 ) {
     val key: String get() = listOf(JellyfinSnapshots.reference(identity.serverId, identity.userId, identity.itemId), serverUrl, pageCount, localPage, localPlayed,
-        localOpenedAt, pendingRevision, remote.positionTicks, remote.played).joinToString("") { value ->
+        localOpenedAt, pendingRevision, remote.positionTicks, remote.played, remote.lastPlayedDate).joinToString("") { value ->
             val text = value.toString()
             "${text.length}:$text"
         }
