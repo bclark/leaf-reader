@@ -17,6 +17,8 @@ import net.digitalbc.leafreader.data.db.JellyfinMetadataCache
 import net.digitalbc.leafreader.data.db.RemoteComicLinkEntity
 import net.digitalbc.leafreader.data.jellyfin.*
 import net.digitalbc.leafreader.data.settings.AppSettings
+import net.digitalbc.leafreader.detection.NoopPanelSource
+import net.digitalbc.leafreader.ui.reader.ReaderViewModel
 import okhttp3.mockwebserver.MockWebServer
 import org.json.JSONObject
 import org.junit.After
@@ -27,6 +29,10 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import javax.crypto.spec.SecretKeySpec
 
 @RunWith(RobolectricTestRunner::class)
@@ -411,6 +417,165 @@ class JellyfinProgressPolicyTest {
         credentials.saveAuth(auth.copy(userId = "other"))
         assertFalse(repository.isCurrentProgressUpdate(observed))
         assertTrue(remote.writes.isEmpty())
+    }
+
+    // DIG-20: an untouched open/close at page 1 is not a sync edit; returning to page 1 is.
+
+    @Test fun untouchedFirstOpenAdoptsTheServerPositionWithoutAWriteOrPrompt() = runBlocking {
+        val id = comic("untouched")
+        remote.position("untouched", 50_000, false)
+        repository.saveProgress(id, 0, 0, isEdit = false)
+        assertNull(db.jellyfinSyncOutboxDao().getPendingForComic(id))
+        assertNotEquals(2L, db.comicDao().getById(id)!!.lastOpened) // still recorded locally as opened
+        repository.flushJellyfinOutbox()
+        assertTrue(repository.checkJellyfinProgress(JellyfinItemIdentity(auth.serverId, auth.userId, "untouched")).isSuccess)
+        assertTrue(repository.progressConflicts.value.isEmpty())
+        assertEquals(5, db.comicDao().getById(id)!!.lastPage)
+        assertFalse(db.comicDao().getById(id)!!.isCompleted)
+        assertTrue(remote.writes.isEmpty())
+    }
+
+    @Test fun neverOpenedComicDownloadsTheServerPositionSilently() = runBlocking {
+        val id = comic("never")
+        remote.position("never", 30_000, true)
+        repository.reconcileItemProgressFromRemote(item("never"))
+        assertTrue(repository.progressConflicts.value.isEmpty())
+        assertEquals(3, db.comicDao().getById(id)!!.lastPage)
+        assertTrue(db.comicDao().getById(id)!!.isCompleted)
+        assertTrue(remote.writes.isEmpty())
+    }
+
+    @Test fun untouchedSaveKeepsAnAlreadyQueuedEdit() = runBlocking {
+        val id = comic("queued")
+        saveOffline(id, 0, false) // e.g. Mark unread while offline
+        val queued = db.jellyfinSyncOutboxDao().getPendingForComic(id)!!
+        settings.jellyfinServerUrl = ""
+        try { repository.saveProgress(id, 0, 0, isEdit = false) } finally { settings.jellyfinServerUrl = url() }
+        assertTrue(db.jellyfinSyncOutboxDao().getPendingForComic(id)!!.revision > queued.revision)
+        remote.position("queued", 50_000, false)
+        repository.flushJellyfinOutbox()
+        assertEquals(0, repository.progressConflicts.value.single().localPage)
+        assertTrue(remote.writes.isEmpty())
+    }
+
+    @Test fun advancingAndReturningToPageOneUploadsOnAnUnchangedBaseline() = runBlocking {
+        val id = comic("returned")
+        baseline("returned", 0, false)
+        repository.saveProgress(id, 0, 0, isEdit = false)
+        saveOffline(id, 3)
+        repository.flushJellyfinOutbox()
+        assertEquals(30_000L, remote.position("returned").positionTicks)
+        saveOffline(id, 0)
+        repository.flushJellyfinOutbox()
+        assertTrue(repository.progressConflicts.value.isEmpty())
+        assertNull(db.jellyfinSyncOutboxDao().getPendingForComic(id))
+        assertEquals(JellyfinProgressSnapshot(0, false), remote.position("returned"))
+        assertEquals(2, remote.writes.size)
+    }
+
+    @Test fun advancingAndReturningToPageOneConflictsWhenTheServerMoved() = runBlocking {
+        for (withBaseline in listOf(true, false)) {
+            val name = "moved-$withBaseline"
+            val id = comic(name)
+            if (withBaseline) baseline(name, 0, false)
+            repository.saveProgress(id, 0, 0, isEdit = false)
+            saveOffline(id, 3)
+            saveOffline(id, 0)
+            remote.position(name, 70_000, false)
+            repository.flushJellyfinOutbox()
+            val conflict = repository.progressConflicts.value.single { it.comicId == id }
+            assertEquals(0, conflict.localPage)
+            assertEquals(0, db.comicDao().getById(id)!!.lastPage)
+            assertNotNull(db.jellyfinSyncOutboxDao().getPendingForComic(id))
+            assertTrue(remote.writes.isEmpty())
+            assertTrue(repository.resolveJellyfinProgress(conflict, JellyfinProgressChoice.DEVICE).isSuccess)
+            assertEquals(JellyfinProgressSnapshot(0, false), remote.position(name))
+            remote.writes.clear()
+        }
+    }
+
+    @Test fun untouchedFirstOpenLeavesLocalProgressWhenTheServerStateIsUnknown() = runBlocking {
+        val id = comic("unknown-first")
+        repository.saveProgress(id, 0, 0, isEdit = false)
+        val opened = db.comicDao().getById(id)!!
+        for (unknown in listOf(JellyfinProgressSnapshot(null, false), JellyfinProgressSnapshot(50_000, null))) {
+            remote.position("unknown-first", unknown.positionTicks, unknown.played)
+            repository.reconcileItemProgressFromRemote(item("unknown-first"))
+            assertTrue(repository.checkJellyfinProgress(
+                JellyfinItemIdentity(auth.serverId, auth.userId, "unknown-first")).isFailure)
+            assertEquals(opened, db.comicDao().getById(id))
+            assertNull(db.jellyfinSyncOutboxDao().getPendingForComic(id))
+            assertTrue(repository.progressConflicts.value.isEmpty())
+            assertTrue(remote.writes.isEmpty())
+        }
+    }
+
+    @Test fun untouchedPageOneWithADifferingBaselineStillConflicts() = runBlocking {
+        // Page 1 without a queued edit but after a synced later page (e.g. reset while signed out).
+        val id = comic("reset")
+        baseline("reset", 60_000, false)
+        remote.position("reset", 80_000, false)
+        repository.reconcileItemProgressFromRemote(item("reset"))
+        assertEquals(0, repository.progressConflicts.value.single().localPage)
+        assertEquals(0, db.comicDao().getById(id)!!.lastPage)
+        assertTrue(remote.writes.isEmpty())
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun readerTreatsOnlyAnUntouchedFirstOpenAsNoSyncEdit() = runBlocking {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        try {
+            suspend fun readerComic(item: String): Long {
+                val file = File.createTempFile(item, ".cbz").apply { deleteOnExit() }
+                ZipOutputStream(file.outputStream()).use { zip -> repeat(8) { i ->
+                    val png = ByteArrayOutputStream().use { out ->
+                        android.graphics.Bitmap.createBitmap(32, 64, android.graphics.Bitmap.Config.ARGB_8888)
+                            .compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+                        out.toByteArray()
+                    }
+                    zip.putNextEntry(ZipEntry("%04d.png".format(i))); zip.write(png); zip.closeEntry()
+                } }
+                val id = db.comicDao().insert(ComicEntity(title = item, filePath = file.path, coverPath = null,
+                    format = "CBZ", pageCount = 8, completionOverride = false, dateAdded = 1, lastOpened = 2))
+                db.remoteComicLinkDao().insert(RemoteComicLinkEntity(comicId = id,
+                    serverId = auth.serverId, userId = auth.userId, itemId = item))
+                return id
+            }
+            suspend fun read(id: Long, pages: List<Int>) {
+                val store = ViewModelStore()
+                val vm = ReaderViewModel(id, repository, NoopPanelSource)
+                store.put("reader", vm)
+                withTimeout(10_000) { vm.state.first { it.page != null && !it.loading && it.error == null } }
+                for (page in pages) {
+                    vm.jumpToPage(page)
+                    withTimeout(10_000) { vm.state.first { it.readingPageIndex == page && !it.loading } }
+                }
+                store.clear()
+            }
+            settings.jellyfinServerUrl = "" // keep the reader's background flush out of these assertions
+            val untouched = readerComic("reader-untouched")
+            read(untouched, emptyList())
+            withTimeout(5_000) { while (db.comicDao().getById(untouched)!!.lastOpened == 2L) delay(10) }
+            delay(200)
+            assertNull(db.jellyfinSyncOutboxDao().getPendingForComic(untouched))
+            val returned = readerComic("reader-returned")
+            read(returned, listOf(3, 0))
+            withTimeout(5_000) {
+                while (db.jellyfinSyncOutboxDao().getPendingForComic(returned)?.pageIndex != 0 ||
+                    db.comicDao().getById(returned)!!.lastPage != 0) delay(10)
+            }
+            settings.jellyfinServerUrl = url()
+            remote.position("reader-untouched", 50_000, false)
+            remote.position("reader-returned", 50_000, false)
+            repository.flushJellyfinOutbox()
+            repository.reconcileItemProgressFromRemote(item("reader-untouched"))
+            assertEquals(5, db.comicDao().getById(untouched)!!.lastPage)
+            assertEquals(returned, repository.progressConflicts.value.single().comicId)
+            assertEquals(0, db.comicDao().getById(returned)!!.lastPage)
+            assertTrue(remote.writes.isEmpty())
+        } finally {
+            Dispatchers.resetMain()
+        }
     }
 
 }

@@ -44,10 +44,12 @@ class ReaderViewModel(
     private val progressScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) : ViewModel() {
 
-    private data class ProgressRecord(val page: Int, val slot: Int)
+    private data class ProgressRecord(val page: Int, val slot: Int, val isEdit: Boolean)
     private val progressMutex = Mutex()
     @Volatile private var latestProgressTarget: ProgressRecord? = null
     @Volatile private var lastSavedProgress: ProgressRecord? = null
+    // DIG-20: true from opening an unread comic until this session leaves page 1 (null until first open).
+    private var untouchedFirstRead: Boolean? = null
 
     private val _state = MutableStateFlow(ReaderUiState())
     val state: StateFlow<ReaderUiState> = _state.asStateFlow()
@@ -114,6 +116,7 @@ class ReaderViewModel(
             repository.updateComicPageCount(comicId, archive.pageCount)
         }
         _state.update { it.copy(title = comic.title, pageCount = archive.pageCount, rightToLeft = rightToLeft) }
+        if (untouchedFirstRead == null) untouchedFirstRead = comic.lastPage == 0 && !comic.isCompleted
         val requestedPage = lastRequestedPage ?: comic.lastPage
         val targetPage = requestedPage.coerceIn(0, archive.pageCount - 1)
         val targetSlot = if (targetPage != comic.lastPage) 0 else comic.lastSlot
@@ -319,7 +322,8 @@ class ReaderViewModel(
         val s = _state.value
         if (s.pageCount <= 0 || s.readingPageIndex !in 0 until s.pageCount) return
         val slotToSave = if (ComicReaderApp.EXPERIMENT_DISABLE_PANEL_READING) 0 else s.slot
-        val target = ProgressRecord(s.readingPageIndex, slotToSave)
+        if (s.readingPageIndex != 0) untouchedFirstRead = false
+        val target = ProgressRecord(s.readingPageIndex, slotToSave, isEdit = untouchedFirstRead != true)
         latestProgressTarget = target
 
         progressScope.launch {
@@ -327,7 +331,7 @@ class ReaderViewModel(
                 val current = latestProgressTarget ?: return@withLock
                 if (current == lastSavedProgress) return@withLock
                 try {
-                    repository.saveProgress(comicId, current.page, current.slot)
+                    repository.saveProgress(comicId, current.page, current.slot, isEdit = current.isEdit)
                     lastSavedProgress = current
                 } catch (t: Throwable) {
                     if (t is CancellationException) throw t
