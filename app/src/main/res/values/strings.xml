@@ -115,4 +115,7 @@
     <string name="library_empty_title">YOUR COMICS, YOUR WAY</string>
     <string name="library_empty_body">Connect your Jellyfin library, or read files stored on this device. You can connect later from Add comics.</string>
     <string name="library_connect_jellyfin">Connect Jellyfin</string>
+    <string name="library_recently_added">Recently Added (local comics)</string>
+    <string name="library_default_order">Show default order</string>
+    <string name="library_no_local_additions">No local comics to sort by date added.</string>
 </resources>

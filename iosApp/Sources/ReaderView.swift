@@ -63,6 +63,8 @@ struct ReaderView: View {
     @State private var state: LoadState = .loading
     @State private var page = 0
     @State private var pageCount = 1
+    // DIG-20: stays true until this session leaves page 1 of a comic with no tracked progress.
+    @State private var untouchedFirstRead = false
 
     // Display spreads: current page/spread and preloaded adjacent spreads for instant transitions
     @State private var currentSpread: DisplaySpread?
@@ -232,6 +234,7 @@ struct ReaderView: View {
         scrubbing = false
         hasReloaded = loadedRevision != nil
         loadedRevision = covers.revisions(for: [comicURL])
+        untouchedFirstRead = ReadingProgress.get(comicURL)?.isUntouchedFirstRead ?? true
         if let link = activeLink {
             state = .loading
             let token = loadToken
@@ -294,7 +297,9 @@ struct ReaderView: View {
         guard isReady, loadedRevision == covers.revisions(for: [comicURL]) else { return }
         // A single-page comic uses page 1 as its completed marker, while displaying page 0.
         let savedPage = pageCount == 1 && ReadingProgress.isCompleted(comicURL) ? 1 : page
-        ReadingProgress.set(comicURL, page: savedPage, step: -1, total: pageCount, rtl: rightToLeft)
+        if page != 0 { untouchedFirstRead = false }
+        ReadingProgress.set(comicURL, page: savedPage, step: -1, total: pageCount, rtl: rightToLeft,
+                            isEdit: !untouchedFirstRead)
     }
 
     private func syncLoadSpread(loader: PageLoader, spread: ReaderSpread?) -> DisplaySpread? {

@@ -1,6 +1,7 @@
 import UIKit
 import SwiftUI
 import ImageIO
+import LeafShared
 import os
 
 /// One decoded thumbnail per file revision, shared by concurrent library/detail consumers.
@@ -145,6 +146,29 @@ private actor CoverDecodeWorker {
             kCGImageSourceThumbnailMaxPixelSize: maxPixel,
         ]
         guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-        return UIImage(cgImage: cg)
+        return UIImage(cgImage: frontCoverImage(cg))
     }
+}
+
+// Thumbnail display only. Reader pages and downloaded files never pass through this helper.
+func frontCoverImage(_ image: CGImage) -> CGImage {
+    let policy = WraparoundCover.shared
+    let width = Int32(image.width), height = Int32(image.height)
+    guard policy.isCandidate(width: width, height: height) else { return image }
+    let columns = Int(policy.columns), rows = Int(policy.rows)
+    guard let grid = CGContext(data: nil, width: columns, height: rows, bitsPerComponent: 8,
+        bytesPerRow: columns * 4, space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return image }
+    grid.interpolationQuality = .none
+    grid.draw(image, in: CGRect(x: 0, y: 0, width: columns, height: rows))
+    guard let pixels = grid.data?.assumingMemoryBound(to: UInt8.self) else { return image }
+    let samples = KotlinIntArray(size: Int32(columns * rows))
+    for i in 0..<(columns * rows) {
+        let p = i * 4
+        let luminance = (21 * Int32(pixels[p]) + 72 * Int32(pixels[p + 1]) + 7 * Int32(pixels[p + 2])) / 100
+        samples.set(index: Int32(i), value: luminance)
+    }
+    let start = Int(policy.frontStart(width: width, height: height, samples: samples))
+    guard start >= 0 else { return image }
+    return image.cropping(to: CGRect(x: start, y: 0, width: image.width - start, height: image.height)) ?? image
 }

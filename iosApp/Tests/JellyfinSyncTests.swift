@@ -164,6 +164,88 @@ struct JellyfinSyncTests {
         #expect(ReadingProgress.get(context.url)?.page == 2)
     }
 
+    // DIG-20: an untouched first read is a local resume point, not a sync edit.
+    @Test func firstOpenWithoutTurningAdoptsServerPosition() async throws {
+        let context = try Context()
+        defer { context.clean() }
+        ReadingProgress.set(context.url, page: 0, step: -1, total: 10, rtl: false, isEdit: false)
+        #expect(ReadingProgress.get(context.url)?.isUntouchedFirstRead == true)
+        ReadingProgress.flushSync()
+        try await context.store.recoverLocalEdits(imports: [context.imported])
+        #expect(try await context.store.pending(for: context.connection).isEmpty)
+        let transport = SyncTransport(remote: .init(positionTicks: 50_000, played: false))
+        #expect(isSynced(try await sync(context, transport)))
+        #expect(ReadingProgress.get(context.url)?.page == 5)
+        #expect(transport.writes == 0)
+        #expect(try await context.store.pending(for: context.connection).isEmpty)
+    }
+
+    @Test func neverOpenedDownloadsSilently() async throws {
+        let context = try Context()
+        defer { context.clean() }
+        let transport = SyncTransport(remote: .init(positionTicks: 50_000, played: false))
+        #expect(isSynced(try await sync(context, transport)))
+        #expect(ReadingProgress.get(context.url)?.page == 5)
+        #expect(transport.writes == 0)
+    }
+
+    @Test func returningToFirstPageAfterAdvancingIsAnEditThatNeverOverwritesSilently() async throws {
+        let context = try Context()
+        defer { context.clean() }
+        ReadingProgress.set(context.url, page: 0, step: -1, total: 10, rtl: false, isEdit: false)
+        ReadingProgress.set(context.url, page: 3, step: -1, total: 10, rtl: false)
+        ReadingProgress.set(context.url, page: 0, step: -1, total: 10, rtl: false)
+        #expect(ReadingProgress.get(context.url)?.isUntouchedFirstRead == false)
+        ReadingProgress.flushSync()
+        try await context.store.recoverLocalEdits(imports: [context.imported])
+        #expect(try await context.store.pending(for: context.connection).count == 1)
+        let transport = SyncTransport(remote: .init(positionTicks: 50_000, played: false))
+        guard case .conflict = try await sync(context, transport) else { Issue.record("Expected conflict"); return }
+        #expect(ReadingProgress.get(context.url)?.page == 0)
+        #expect(transport.writes == 0)
+    }
+
+    @Test(arguments: [false, true])
+    func realFirstPageSaveWithKnownBaselineUploadsOrConflicts(serverMoved: Bool) async throws {
+        let context = try Context()
+        defer { context.clean() }
+        _ = try await seed(context, pending: false)
+        let transport = SyncTransport(remote: .init(positionTicks: 20_000, played: false))
+        #expect(isSynced(try await sync(context, transport)))
+        ReadingProgress.set(context.url, page: 0, step: -1, total: 10, rtl: false)
+        ReadingProgress.flushSync()
+        try await context.store.recoverLocalEdits(imports: [context.imported])
+        if serverMoved { transport.remote = .init(positionTicks: 60_000, played: false) }
+        let outcome = try await sync(context, transport)
+        if serverMoved {
+            guard case .conflict = outcome else { Issue.record("Expected conflict"); return }
+            #expect(transport.writes == 0)
+            #expect(ReadingProgress.get(context.url)?.page == 0)
+        } else {
+            #expect(isSynced(outcome))
+            #expect(transport.writes == 1)
+            #expect(transport.remote == .init(positionTicks: 0, played: false))
+        }
+    }
+
+    @Test func unknownServerStateLeavesFirstReadUntouched() async throws {
+        let context = try Context()
+        defer { context.clean() }
+        ReadingProgress.set(context.url, page: 0, step: -1, total: 10, rtl: false, isEdit: false)
+        let untouched = ReadingProgress.get(context.url)
+        let transport = SyncTransport(remote: .init(positionTicks: nil, played: nil))
+        for remote in [JellyfinProgressStore.Remote(positionTicks: nil, played: nil),
+                       .init(positionTicks: 50_000, played: nil), .init(positionTicks: nil, played: false)] {
+            transport.remote = remote
+            guard case .unavailable = try await sync(context, transport) else { Issue.record("Expected unavailable"); return }
+            #expect(ReadingProgress.get(context.url) == untouched)
+        }
+        #expect(transport.writes == 0)
+        transport.remote = .init(positionTicks: 50_000, played: false)
+        #expect(isSynced(try await sync(context, transport)))
+        #expect(ReadingProgress.get(context.url)?.page == 5)
+    }
+
     @Test func serverMismatchKeepsPendingUntilItCanBeConfirmed() async throws {
         let context = try Context()
         defer { context.clean() }

@@ -40,7 +40,7 @@ final class LibraryStore: ObservableObject {
     }
 
     func refresh(backfill: Bool = true) {
-        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.creationDateKey])) ?? []
         let comicFiles = files
             .filter { ["cbz", "zip", "pdf"].contains($0.pathExtension.lowercased()) }
             // Most-recently-opened first (Android's `ORDER BY lastOpened DESC`), then natural filename.
@@ -249,7 +249,7 @@ final class LibraryStore: ObservableObject {
 
     func libraryItems(filter: LibraryFilter, searchQuery: String, excluding: Set<URL> = [],
                       unreadOnly: Bool = false, available: Set<URL>? = nil,
-                      linked: [LinkedComic] = []) -> [LibraryItem] {
+                      linked: [LinkedComic] = [], recentlyAdded: Bool = false) -> [LibraryItem] {
         let linked = available == nil ? linked : []
         let metadata = shelfMetadata(linked: linked)
         let linkedTitles = Dictionary(uniqueKeysWithValues: linked.map { ($0.progressURL, $0.title) })
@@ -269,6 +269,18 @@ final class LibraryStore: ObservableObject {
                 return filename.contains(q) || title.contains(q) || series.contains(q)
             }
         }()
+
+        if recentlyAdded {
+            // A Jellyfin copy's creation date is its download date, not its addition date,
+            // and a comic linked from Files has no recorded addition date.
+            let remoteCopies = ReadingListStore.remoteCopyFilenames()
+            let local = filteredComics.filter { $0.isFileURL && !remoteCopies.contains($0.lastPathComponent) }
+            return Self.newestFirst(local) { url in
+                (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate
+            }.map { url in
+                LibraryItem.singleComic(url: url, metadata: metadata[url.lastPathComponent])
+            }
+        }
 
         let listItems: [LibraryItem] = {
             let filteredLists = q.isEmpty ? readingLists : readingLists.filter { $0.name.lowercased().contains(q) }
@@ -372,6 +384,17 @@ final class LibraryStore: ObservableObject {
                 LibraryItem.singleComic(url: url, metadata: metadata[url.lastPathComponent])
             }
         }
+    }
+
+    static func newestFirst(_ urls: [URL], addedDate: (URL) -> Date?) -> [URL] {
+        urls.map { ($0, addedDate($0)) }.sorted { a, b in
+            if a.1 != b.1 {
+                guard let left = a.1 else { return false }
+                guard let right = b.1 else { return true }
+                return left > right
+            }
+            return a.0.lastPathComponent < b.0.lastPathComponent
+        }.map { $0.0 }
     }
 
     private func sortIssues(_ urls: [URL], metadata: [String: ComicMetadataRecord]) -> [URL] {

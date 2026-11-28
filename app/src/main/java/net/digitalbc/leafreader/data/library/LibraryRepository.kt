@@ -103,7 +103,8 @@ class LibraryRepository(
     private val metadataMutex = Mutex()
     private val fileAvailability = ComicFileAvailability()
     private val jellyfinCoverCache = CoverBitmapCache(jellyfinSyncScope,
-        thumbnails = CoverThumbnailStore(File(context.cacheDir, "jellyfin-thumbnails")))
+        thumbnails = CoverThumbnailStore(File(context.cacheDir, "jellyfin-thumbnails")),
+        prepareForDisplay = CoverImageDecoder::frontCoverOrOriginal)
     private val _progressConflicts = MutableStateFlow<List<JellyfinProgressConflict>>(emptyList())
     val progressConflicts = _progressConflicts.asStateFlow()
     private val _progressUpdates = kotlinx.coroutines.flow.MutableSharedFlow<JellyfinProgressUpdate>()

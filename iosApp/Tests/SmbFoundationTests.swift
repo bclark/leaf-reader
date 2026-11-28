@@ -320,8 +320,12 @@ struct SmbFoundationTests {
         ComicMetadataStore.set(first, metadata: ComicMetadataRecord(series: "Custom", userModified: true))
         let list = store.createReadingList(name: UUID().uuidString, urls: [first])
         defer { store.deleteReadingList(id: list.id); store.comics.forEach(store.delete) }
+        let oldAddDate = Date(timeIntervalSince1970: 946_684_800)
+        try FileManager.default.setAttributes([.creationDate: oldAddDate], ofItemAtPath: first.path)
         let replaced = try await store.importComicAwaitingCompletion(from: source, collision: .replace)
         #expect(replaced == first)
+        let replacementDate = try FileManager.default.attributesOfItem(atPath: replaced.path)[.creationDate] as? Date
+        #expect(replacementDate == oldAddDate)
         #expect(ReadingProgress.get(first)?.page == 0)
         #expect(ReadingProgress.get(first)?.total == 1)
         #expect(ReadingProgress.get(first)?.rtl == true)

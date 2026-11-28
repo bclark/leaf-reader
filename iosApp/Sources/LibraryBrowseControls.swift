@@ -33,12 +33,25 @@ struct LibraryBrowseState {
 
     var view: ViewMode = .series
     var unreadOnly = false
+    private var viewBeforeRecentlyAdded: ViewMode?
+    var recentlyAdded: Bool { viewBeforeRecentlyAdded != nil }
     private(set) var hasChosenView = false
     private var handledLaunchFailure = false
 
     mutating func select(_ view: ViewMode) {
         self.view = view
+        viewBeforeRecentlyAdded = nil
         hasChosenView = true
+    }
+
+    mutating func toggleRecentlyAdded() {
+        if let previous = viewBeforeRecentlyAdded {
+            select(previous)
+        } else {
+            let previous = view
+            select(.all)
+            viewBeforeRecentlyAdded = previous
+        }
     }
 
     mutating func handleUnreachableLaunch() {
