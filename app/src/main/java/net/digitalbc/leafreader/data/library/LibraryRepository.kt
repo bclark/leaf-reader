@@ -279,19 +279,26 @@ class LibraryRepository(
         dao.getById(id)?.takeIf { fileAvailability.isReadable(it, force = true) }
     }
 
-    suspend fun saveProgress(id: Long, page: Int, slot: Int, explicitPlayed: Boolean? = null): Int =
+    /**
+     * `isEdit = false` saves an untouched first read as a local resume point only (DIG-20): it queues
+     * no Jellyfin write, so sync can adopt the server position. An already queued edit stays an edit.
+     */
+    suspend fun saveProgress(id: Long, page: Int, slot: Int, explicitPlayed: Boolean? = null,
+        isEdit: Boolean = true): Int =
         withContext(NonCancellable + Dispatchers.IO) {
+            var queued = true
             suspend fun update(): Int {
                 val comic = dao.getById(id) ?: return 0
                 val count = dao.updateProgress(id, page, slot, System.currentTimeMillis())
                 val completed = explicitPlayed ?: if (comic.pageCount > 0 && page >= comic.pageCount - 1)
                     true else comic.completionOverride
                 dao.updateCompletion(id, completed)
-                recordJellyfinOutboxInTransaction(id, page, explicitPlayed)
+                queued = isEdit || jellyfinSyncOutboxDao?.getPendingForComic(id) != null
+                if (queued) recordJellyfinOutboxInTransaction(id, page, explicitPlayed)
                 return count
             }
             val updated = if (db != null) db.withTransaction { update() } else update()
-            triggerJellyfinProgressSync(id, page, explicitPlayed = explicitPlayed)
+            if (queued) triggerJellyfinProgressSync(id, page, explicitPlayed = explicitPlayed)
             updated
         }
 
@@ -485,12 +492,16 @@ class LibraryRepository(
                 publishProgressConflict(conflict, review = true)
                 error("The reading positions changed. Review the updated choices.")
             }
+            // DIG-20: unread page-1 progress with no queued edit and no baseline is nothing to push,
+            // so the server position is adopted instead of asking. A differing baseline still conflicts.
+            val untouchedFirstRead = pending == null && comic.lastPage == 0 && !comic.isCompleted
+            val untrackedLocal = if (baseline == null) !untouchedFirstRead
+                else localTicks != baseline.positionTicks || localPlayed != baseline.played
             val action = when (choice) {
                 JellyfinProgressChoice.DEVICE -> JellyfinSyncAction.UPLOAD
                 JellyfinProgressChoice.SERVER -> JellyfinSyncAction.DOWNLOAD
                 null -> JellyfinSyncPolicy.decide(localTicks!!, localPlayed, remote.positionTicks, remote.played,
-                    baseline?.positionTicks, baseline?.played, pending != null,
-                    baseline == null || localTicks != baseline.positionTicks || localPlayed != baseline.played)
+                    baseline?.positionTicks, baseline?.played, pending != null, untrackedLocal)
             }
             when (action) {
                 JellyfinSyncAction.CONFLICT -> publishProgressConflict(conflict, reviewConflict)
