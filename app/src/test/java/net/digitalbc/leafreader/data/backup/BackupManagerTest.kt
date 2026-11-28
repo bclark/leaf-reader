@@ -527,7 +527,8 @@ class BackupManagerTest {
 
     @Test
     fun failedRestoreRollsBackProgressListsAndPreferencesAndCanBeRetriedAfterReopen() = runBlocking {
-        val databaseName = "backup-recovery-${java.util.UUID.randomUUID()}"
+        // Robolectric includes this long test name in the Windows path; leave room for -journal/-wal.
+        val databaseName = "backup-recovery-${java.util.UUID.randomUUID().toString().take(8)}"
         db.close()
         fun openDatabase() {
             db = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
@@ -618,7 +619,8 @@ class BackupManagerTest {
 
     @Test
     fun cancellingCallerDuringRestoreStillFinishesTheTransactionAndPreferences() = runBlocking {
-        val databaseName = "backup-cancellation-${java.util.UUID.randomUUID()}"
+        // Keep native SQLite journal paths below Windows' path-length limit.
+        val databaseName = "backup-cancellation-${java.util.UUID.randomUUID().toString().take(8)}"
         val reachedUpdate = java.util.concurrent.CountDownLatch(1)
         val releaseUpdate = java.util.concurrent.CountDownLatch(1)
         val holdOnce = java.util.concurrent.atomic.AtomicBoolean(true)
